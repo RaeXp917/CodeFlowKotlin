@@ -1,0 +1,253 @@
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+import { promisify } from 'node:util';
+import vm from 'node:vm';
+
+const execFileAsync = promisify(execFile);
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
+const repoRoot = join(__dirname, '..');
+const htmlSource = await readFile(join(repoRoot, 'index.html'), 'utf8');
+const startMarker = '// ===== CODEFLOW_ANALYZER_START =====';
+const endMarker = '// ===== CODEFLOW_ANALYZER_END =====';
+const parserStart = htmlSource.indexOf(startMarker);
+const parserEnd = htmlSource.indexOf(endMarker, parserStart);
+
+if (parserStart < 0 || parserEnd < 0) {
+  throw new Error('Could not locate analyzer source in index.html');
+}
+
+const context = {
+  console,
+  TreeSitter: undefined,
+  Babel: undefined,
+  acorn: undefined,
+  getSecurityScanContent(file) {
+    return file && file.content ? file.content : '';
+  },
+  isSanitizedPreviewRenderer() {
+    return false;
+  },
+};
+
+vm.createContext(context);
+vm.runInContext(
+  `${htmlSource.slice(parserStart, parserEnd)}\nthis.Parser = Parser; this.buildAnalysisData = buildAnalysisData;`,
+  context
+);
+
+const { Parser, buildAnalysisData } = context;
+
+async function analyzeSyntheticFiles(fileDescs) {
+  const analyzed = [];
+  const allFns = [];
+
+  for (const file of fileDescs) {
+    const path = file.path;
+    const name = basename(path);
+    const folder = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : 'root';
+    const content = file.content;
+    const layer = Parser.detectLayer(path);
+    const actualIsCode = Parser.isCode(name) !== false && (!Parser.isScriptContainer(path) || Parser.hasEmbeddedCode(content, path));
+    const functions = actualIsCode ? Parser.extract(content, path) : [];
+    analyzed.push({
+      path,
+      name,
+      folder,
+      content,
+      functions,
+      lines: content ? content.split('\n').length : 0,
+      layer,
+      churn: 0,
+      isCode: actualIsCode,
+    });
+    if (actualIsCode) {
+      functions.forEach((fn) => allFns.push(Object.assign({}, fn, { folder, layer })));
+    }
+  }
+
+  return buildAnalysisData({
+    analyzed,
+    allFns,
+    excludePatterns: [],
+    progress() {},
+    yieldFn: async () => {},
+  });
+}
+
+async function applyPatch(files, patch) {
+  const dir = await mkdtemp(join(tmpdir(), 'codeflow-patch-'));
+  try {
+    await execFileAsync('git', ['init'], { cwd: dir });
+    for (const file of files) {
+      const full = join(dir, file.path);
+      await mkdir(dirname(full), { recursive: true });
+      await writeFile(full, file.content);
+    }
+    await writeFile(join(dir, 'change.patch'), patch);
+    await execFileAsync('git', ['apply', '--check', 'change.patch'], { cwd: dir });
+    await execFileAsync('git', ['apply', 'change.patch'], { cwd: dir });
+    const applied = {};
+    for (const file of files) {
+      applied[file.path] = await readFile(join(dir, file.path), 'utf8');
+    }
+    return applied;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+const simpleSource = [
+  'function main() {',
+  '  const x = 1;',
+  '  console.log(x);',
+  '  debugger;',
+  '  return x;',
+  '}',
+  '',
+].join('\n');
+
+test('simple debug statements download as a repo-relative patch that git apply accepts', async () => {
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/app.js', content: simpleSource },
+  ]);
+  const patch = suggestions.filePatches['src/app.js'];
+  assert.equal(suggestions.combinedPatch, patch);
+  assert.match(patch, /^diff --git a\/src\/app\.js b\/src\/app\.js\n/);
+  assert.match(patch, /^--- a\/src\/app\.js\n/m);
+  assert.match(patch, /^\+\+\+ b\/src\/app\.js\n/m);
+  assert.match(patch, /^@@ -1,6 \+1,4 @@\n/m);
+  assert.equal(suggestions.sites.filter((site) => site.status === 'appliable').length, 2);
+  suggestions.sites.forEach((site) => {
+    assert.equal(site.transformId, 'remove-debug-statement');
+    assert.equal(site.filePath, 'src/app.js');
+    assert.match(site.patch, /^diff --git a\/src\/app\.js /);
+  });
+
+  const applied = await applyPatch([{ path: 'src/app.js', content: simpleSource }], patch);
+  assert.equal(applied['src/app.js'], 'function main() {\n  const x = 1;\n  return x;\n}\n');
+
+  const again = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/app.js', content: simpleSource },
+  ]);
+  assert.equal(again.combinedPatch, patch);
+});
+
+test('risky debug statements stay report-only and are left out of the patch', async () => {
+  const source = [
+    'function f(cond) {',
+    '  if (cond) console.log(cond);',
+    '  console.log("safe");',
+    '  const g = () => console.log(1);',
+    '  debugger;',
+    '  return console.log(cond);',
+    '}',
+    '',
+  ].join('\n');
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/risky.js', content: source },
+  ]);
+  const byLine = Object.fromEntries(suggestions.sites.map((site) => [site.line, site]));
+
+  assert.equal(byLine[2].status, 'report-only');
+  assert.equal(byLine[2].reason, 'inside a one-line if without braces');
+  assert.equal(byLine[2].patch, undefined);
+  assert.equal(byLine[4].status, 'report-only');
+  assert.equal(byLine[4].reason, 'inside a one-line arrow without braces');
+  assert.equal(byLine[6].status, 'report-only');
+  assert.equal(byLine[6].reason, 'part of an expression');
+  assert.equal(byLine[3].status, 'appliable');
+  assert.equal(byLine[5].status, 'appliable');
+
+  const removed = suggestions.combinedPatch.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---'));
+  assert.deepEqual(removed, ['-  console.log("safe");', '-  debugger;']);
+
+  const applied = await applyPatch([{ path: 'src/risky.js', content: source }], suggestions.combinedPatch);
+  assert.match(applied['src/risky.js'], /if \(cond\) console\.log\(cond\);/);
+  assert.match(applied['src/risky.js'], /const g = \(\) => console\.log\(1\);/);
+  assert.match(applied['src/risky.js'], /return console\.log\(cond\);/);
+  assert.doesNotMatch(applied['src/risky.js'], /console\.log\("safe"\)/);
+  assert.doesNotMatch(applied['src/risky.js'], /^\s*debugger;/m);
+});
+
+test('a combined patch applies every safe statement and skips other languages', async () => {
+  const files = [
+    { path: 'src/a.js', content: 'console.log(1);\nkeep();\n' },
+    { path: 'src/b.ts', content: 'debugger;\nkeep();\n' },
+    { path: 'notes.py', content: 'console.log(1)\nconsole.log(2)\nconsole.log(3)\nconsole.log(4)\n' },
+  ];
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions(files);
+  const python = suggestions.sites.find((site) => site.filePath === 'notes.py');
+  assert.equal(python.status, 'report-only');
+  assert.equal(python.reason, 'unsupported language');
+  assert.equal(suggestions.filePatches['notes.py'], undefined);
+  assert.match(suggestions.combinedPatch, /a\/src\/a\.js/);
+  assert.match(suggestions.combinedPatch, /a\/src\/b\.ts/);
+  assert.doesNotMatch(suggestions.combinedPatch, /notes\.py/);
+
+  const applied = await applyPatch(files.slice(0, 2), suggestions.combinedPatch);
+  assert.equal(applied['src/a.js'], 'keep();\n');
+  assert.equal(applied['src/b.ts'], 'keep();\n');
+});
+
+test('existing debug-statement analysis and export fields stay unchanged', async () => {
+  const data = await analyzeSyntheticFiles([
+    { path: 'server/telemetry.ts', content: 'console.log(1);\nconsole.log(2);\nconsole.log(3);\nconsole.log(4);\n' },
+    { path: 'app/widget.ts', content: 'var f=new Function("return 1;");\n' },
+    { path: 'lib/db-query.ts', content: 'function findUser(id){ return db.query(`SELECT * FROM users WHERE id = ${id}`); }\n' },
+  ]);
+  const debugIssue = data.securityIssues.find((issue) => issue.title === 'Debug Statements');
+  assert.equal(debugIssue.severity, 'info');
+  assert.equal(debugIssue.path, 'server/telemetry.ts');
+  assert.equal(debugIssue.desc, '4 console statements found. Remove before production.');
+  assert.equal(debugIssue.code, '');
+  assert.equal(debugIssue.line, undefined);
+  assert.deepEqual(Object.keys(debugIssue).sort(), ['code', 'desc', 'file', 'path', 'severity', 'title']);
+  assert.deepEqual(Array.from(data.securityIssues, (issue) => issue.severity), ['high', 'medium', 'info']);
+
+  const exportedDebug = Parser.formatSecurityIssueExport(debugIssue, data.refactorSuggestions);
+  assert.equal(exportedDebug.severity, debugIssue.severity);
+  assert.equal(exportedDebug.title, debugIssue.title);
+  assert.equal(exportedDebug.description, debugIssue.desc);
+  assert.equal(exportedDebug.file, debugIssue.file);
+  assert.equal(exportedDebug.path, debugIssue.path);
+  assert.equal(exportedDebug.line, debugIssue.line);
+  assert.equal(exportedDebug.code, debugIssue.code);
+  assert.equal(exportedDebug.patch, data.refactorSuggestions.filePatches['server/telemetry.ts']);
+
+  const other = data.securityIssues.find((issue) => issue.title !== 'Debug Statements');
+  const exportedOther = Parser.formatSecurityIssueExport(other, data.refactorSuggestions);
+  assert.equal(Object.prototype.hasOwnProperty.call(exportedOther, 'patch'), false);
+  assert.deepEqual(Object.keys(exportedOther).sort(), ['code', 'description', 'file', 'line', 'path', 'severity', 'title']);
+
+  const applied = await applyPatch(
+    [{ path: 'server/telemetry.ts', content: 'console.log(1);\nconsole.log(2);\nconsole.log(3);\nconsole.log(4);\n' }],
+    exportedDebug.patch
+  );
+  assert.equal(applied['server/telemetry.ts'], '');
+});
+
+test('shared-line debug statements are report-only and do not change the finding', async () => {
+  const content = 'console.log(1);console.log(2);console.log(3);console.log(4);\n';
+  const data = await analyzeSyntheticFiles([{ path: 'app/widget.ts', content }]);
+  const issue = data.securityIssues.find((entry) => entry.title === 'Debug Statements');
+  assert.equal(issue.severity, 'low');
+  assert.equal(issue.desc, '4 console statements found. Remove before production.');
+  assert.equal(data.refactorSuggestions.filePatches['app/widget.ts'], undefined);
+  assert.equal(data.refactorSuggestions.combinedPatch, '');
+  assert.ok(data.refactorSuggestions.sites.every((site) => site.status === 'report-only'));
+  assert.ok(data.refactorSuggestions.sites.every((site) => site.reason === 'sharing a line with other code'));
+  const exported = Parser.formatSecurityIssueExport(issue, data.refactorSuggestions);
+  assert.equal(Object.prototype.hasOwnProperty.call(exported, 'patch'), false);
+});
+
+test('index.html does not gain a write path for debug patches', () => {
+  assert.equal(htmlSource.includes('createWritable'), false);
+  assert.equal(htmlSource.includes('showSaveFilePicker'), false);
+  assert.equal(htmlSource.includes('Enable Write Access'), false);
+  assert.equal(htmlSource.includes('FileSystemWritableFileStream'), false);
+});

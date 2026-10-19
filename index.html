@@ -198,6 +198,13 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .security-path{font-size:9px;color:var(--t3);font-family:monospace}
 .security-line{font-size:9px;color:var(--acc);margin-top:4px}
 .security-code{font-size:9px;background:var(--bg3);padding:6px 8px;border-radius:4px;margin-top:6px;font-family:monospace;color:var(--orange);overflow-x:auto;white-space:pre}
+.debug-patch-panel{margin:0 0 14px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)}
+.debug-patch-card{background:var(--bg0);border:1px solid var(--border2);border-radius:8px;padding:10px;margin-bottom:8px}
+.debug-patch-reason{font-size:10px;color:var(--orange);margin-top:4px;line-height:1.4}
+.patch-preview{margin-top:8px;background:var(--bg3);border-radius:6px;padding:8px;font-family:monospace;font-size:10px;line-height:1.45;overflow:auto;max-height:200px;white-space:pre}
+.patch-line-meta{color:var(--t3)}
+.patch-line-del{color:var(--red)}
+.patch-line-ctx{color:var(--t2)}
 .fn-item{background:var(--bg0);border-radius:6px;margin-bottom:6px;overflow:hidden}
 .fn-header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;cursor:pointer}
 .fn-header:hover{background:var(--hover)}
@@ -5158,6 +5165,581 @@ function buildArchitectureDiagram(files){
     return diagram;
 }
 
+
+// Patch-only remove-debug-statement suggestions. Produces a unified diff the
+// user downloads and applies with git apply. This code never writes source files.
+(function(){
+
+function collectRemoveDebugStatementSuggestions(files) {
+  var sites = [];
+  var filePatches = Object.create(null);
+  var combinedParts = [];
+  (files || []).forEach(function(file) {
+    if (!file || file.content == null) return;
+    var path = String(file.path || file.name || '');
+    if (!isJsOrTsPath(path)) {
+      if (nonJsDebugFinding(file.content)) {
+        sites.push({
+          findingId: 'remove-debug-statement:' + path + ':unsupported',
+          transformId: 'remove-debug-statement',
+          filePath: path,
+          line: null,
+          endLine: null,
+          status: 'report-only',
+          reason: 'unsupported language',
+          summary: 'Debug statements in ' + path + ' are report-only because the file is an unsupported language.',
+          snippet: ''
+        });
+      }
+      return;
+    }
+    var found;
+    try {
+      found = findDebugSites(file.content, path);
+    } catch (err) {
+      sites.push({
+        findingId: 'remove-debug-statement:' + path + ':unchecked',
+        transformId: 'remove-debug-statement',
+        filePath: path,
+        line: null,
+        endLine: null,
+        status: 'report-only',
+        reason: 'could not be checked safely',
+        summary: 'Debug statements in ' + path + ' are report-only because the file could not be checked safely.',
+        snippet: ''
+      });
+      return;
+    }
+    var ranges = [];
+    found.forEach(function(site) {
+      sites.push(site);
+      if (site.status === 'appliable') ranges.push({ start: site.line, end: site.endLine });
+    });
+    if (ranges.length) {
+      var patch = buildUnifiedDiff(path, file.content, ranges);
+      filePatches[path] = patch;
+      combinedParts.push(patch);
+      found.forEach(function(site) {
+        if (site.status !== 'appliable') return;
+        site.patch = buildUnifiedDiff(path, file.content, [{ start: site.line, end: site.endLine }]);
+      });
+    }
+  });
+  return {
+    transformId: 'remove-debug-statement',
+    sites: sites,
+    filePatches: filePatches,
+    combinedPatch: combinedParts.join('')
+  };
+}
+
+function isJsOrTsPath(path) {
+  return /\.(?:[cm]js|[cm]ts|jsx?|tsx?)$/i.test(path || '');
+}
+
+function nonJsDebugFinding(content) {
+  var matches = String(content).match(/console\.(log|debug|info)\(/g);
+  return !!(matches && matches.length > 3);
+}
+
+function findDebugSites(content, filePath) {
+  var normalized = String(content).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  var tokens = tokenizeJs(normalized);
+  var sites = [];
+  for (var ti = 0; ti < tokens.length; ti++) {
+    var tok = tokens[ti];
+    if (tok.t === 'kw' && tok.v === 'debugger') {
+      sites.push(classifySite(normalized, tokens, ti, ti, 'debugger', filePath));
+      continue;
+    }
+    if (tok.t === 'id' && tok.v === 'console' && isConsoleCall(tokens, ti)) {
+      var closeIdx = matchParen(tokens, ti + 3);
+      var kind = 'console.' + tokens[ti + 2].v;
+      if (closeIdx < 0) {
+        sites.push(makeSite(filePath, kind, tok, tok.line, tok.line, 'report-only', 'not isolated from surrounding code', snippetAt(normalized, tok.i, Math.min(normalized.length, tok.i + 80))));
+        continue;
+      }
+      sites.push(classifySite(normalized, tokens, ti, closeIdx, kind, filePath));
+    }
+  }
+  return sites;
+}
+
+function isConsoleCall(tokens, ti) {
+  var dot = tokens[ti + 1];
+  var method = tokens[ti + 2];
+  var open = tokens[ti + 3];
+  if (!dot || !method || !open) return false;
+  if (dot.v !== '.' || open.v !== '(') return false;
+  return method.v === 'log' || method.v === 'debug' || method.v === 'info';
+}
+
+function matchParen(tokens, openIdx) {
+  var depth = 0;
+  for (var k = openIdx; k < tokens.length; k++) {
+    var v = tokens[k].v;
+    if (v === '(') depth++;
+    else if (v === ')') {
+      depth--;
+      if (depth === 0) return k;
+    }
+  }
+  return -1;
+}
+
+function classifySite(content, tokens, startIdx, endIdx, kind, filePath) {
+  var startTok = tokens[startIdx];
+  var endTok = tokens[endIdx];
+  var endOffset = consumeStatementEnd(content, endTok.end);
+  var line = lineNumberAt(content, startTok.i);
+  var endLine = lineNumberAt(content, Math.max(startTok.i, endOffset - 1));
+  var snippet = snippetAt(content, startTok.i, endOffset);
+  var boundary = boundaryReason(content, tokens, startIdx);
+  if (boundary) return makeSite(filePath, kind, startTok, line, endLine, 'report-only', boundary, snippet);
+  if (!linesOnlyContainStatement(content, startTok.i, endOffset)) {
+    return makeSite(filePath, kind, startTok, line, endLine, 'report-only', 'sharing a line with other code', snippet);
+  }
+  var consumedSemi = content.slice(endTok.end, endOffset).indexOf(';') >= 0;
+  if (!consumedSemi) {
+    var next = tokens[endIdx + 1];
+    if (next && continuesExpression(next)) {
+      return makeSite(filePath, kind, startTok, line, endLine, 'report-only', 'part of an expression', snippet);
+    }
+  }
+  return makeSite(filePath, kind, startTok, line, endLine, 'appliable', '', snippet);
+}
+
+function makeSite(filePath, kind, startTok, line, endLine, status, reason, snippet) {
+  var id = 'remove-debug-statement:' + filePath + ':' + line + ':' + (startTok ? startTok.col : 1);
+  var summary = status === 'appliable'
+    ? 'Remove the standalone ' + kind + ' statement at line ' + line + ' in ' + filePath + '. This patch removes code.'
+    : 'The ' + kind + ' at line ' + line + ' in ' + filePath + ' is report-only because it is ' + reason + '.';
+  var site = {
+    findingId: id,
+    transformId: 'remove-debug-statement',
+    filePath: filePath,
+    line: line,
+    endLine: endLine,
+    column: startTok ? startTok.col : 1,
+    kind: kind,
+    status: status,
+    reason: reason,
+    summary: summary,
+    snippet: snippet
+  };
+  return site;
+}
+
+function snippetAt(content, start, end) {
+  var text = content.slice(start, end).replace(/\s+/g, ' ').trim();
+  if (text.length > 80) text = text.slice(0, 77) + '...';
+  return text;
+}
+
+function consumeStatementEnd(content, offset) {
+  var i = offset;
+  while (i < content.length && (content[i] === ' ' || content[i] === '\t')) i++;
+  if (content[i] === ';') i++;
+  return i;
+}
+
+function lineNumberAt(content, index) {
+  var line = 1;
+  var limit = Math.min(index, content.length);
+  for (var i = 0; i < limit; i++) if (content[i] === '\n') line++;
+  return line;
+}
+
+function linesOnlyContainStatement(content, start, end) {
+  var lineStart = content.lastIndexOf('\n', start - 1) + 1;
+  var lineEnd = content.indexOf('\n', end);
+  if (lineEnd < 0) lineEnd = content.length;
+  var before = content.slice(lineStart, start);
+  if (!/^\s*$/.test(before)) return false;
+  var after = content.slice(end, lineEnd);
+  return /^\s*(?:\/\/.*)?$/.test(after);
+}
+
+function boundaryReason(content, tokens, startIdx) {
+  var prev = startIdx > 0 ? tokens[startIdx - 1] : null;
+  if (!prev) return null;
+  var context = expressionContext(tokens, startIdx);
+  if (context === 'confused') return 'could not be checked safely';
+  if (context === 'expr') return 'part of an expression';
+  if (prev.v === '=>') return 'inside a one-line arrow without braces';
+  if (prev.t === 'kw' && prev.v === 'else') return 'inside a one-line else without braces';
+  if (prev.t === 'kw' && prev.v === 'do') return 'inside a one-line do without braces';
+  if (prev.v === ')') {
+    var kw = keywordIntroducingParen(tokens, startIdx - 1);
+    if (kw === 'if') return 'inside a one-line if without braces';
+    if (kw === 'for' || kw === 'while') return 'inside a one-line loop without braces';
+    if (kw === 'with') return 'inside a one-line with without braces';
+  }
+  if (prev.v === ';' || prev.v === '}') return null;
+  if (prev.v === '{') return isBlockBrace(tokens, startIdx - 1) ? null : 'part of an expression';
+  if (prev.v === '${') return 'part of an expression';
+  if (prev.v === ':') return 'following a label';
+  if (hasNewlineBetween(content, prev, tokens[startIdx]) && canEndStatement(prev)) return null;
+  return 'part of an expression';
+}
+
+function canEndStatement(tok) {
+  if (!tok) return false;
+  if (tok.t === 'id' || tok.t === 'num' || tok.t === 'str' || tok.t === 're') return true;
+  if (tok.t === 'kw') {
+    return tok.v === 'this' || tok.v === 'null' || tok.v === 'true' || tok.v === 'false' ||
+      tok.v === 'return' || tok.v === 'throw' || tok.v === 'break' || tok.v === 'continue' ||
+      tok.v === 'debugger' || tok.v === 'yield';
+  }
+  return tok.v === ')' || tok.v === ']' || tok.v === '}' || tok.v === '++' || tok.v === '--';
+}
+
+function expressionContext(tokens, startIdx) {
+  var stack = [];
+  var confused = false;
+  for (var k = 0; k < startIdx; k++) {
+    var v = tokens[k].v;
+    if (v === '(' || v === '[') { stack.push(v); continue; }
+    if (v === '${') { stack.push('expr'); continue; }
+    if (v === '{') { stack.push(isBlockBrace(tokens, k) ? 'block' : 'expr'); continue; }
+    if (v !== ')' && v !== ']' && v !== '}') continue;
+    if (!stack.length) { confused = true; continue; }
+    var top = stack[stack.length - 1];
+    if (v === '}' && (top === 'block' || top === 'expr')) { stack.pop(); continue; }
+    if ((v === ')' && top === '(') || (v === ']' && top === '[')) { stack.pop(); continue; }
+    confused = true;
+    stack.pop();
+  }
+  if (confused) return 'confused';
+  var inner = stack.length ? stack[stack.length - 1] : null;
+  if (inner === '(' || inner === '[' || inner === 'expr') return 'expr';
+  return null;
+}
+
+function isBlockBrace(tokens, braceIdx) {
+  var prev = braceIdx > 0 ? tokens[braceIdx - 1] : null;
+  if (!prev) return true;
+  if (prev.v === ';' || prev.v === '}') return true;
+  if (prev.v === '{') return isBlockBrace(tokens, braceIdx - 1);
+  if (prev.v === '=>') return true;
+  if (prev.v === ')') return true;
+  if (prev.t === 'kw' && (prev.v === 'else' || prev.v === 'try' || prev.v === 'finally' || prev.v === 'do' || prev.v === 'static')) return true;
+  return false;
+}
+
+function keywordIntroducingParen(tokens, closeIdx) {
+  var depth = 0;
+  for (var k = closeIdx; k >= 0; k--) {
+    if (tokens[k].v === ')') depth++;
+    else if (tokens[k].v === '(') {
+      depth--;
+      if (depth === 0) {
+        var before = tokens[k - 1];
+        if (before && before.t === 'kw') return before.v;
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+function hasNewlineBetween(content, prevTok, tok) {
+  return content.slice(prevTok.end, tok.i).indexOf('\n') >= 0;
+}
+
+function continuesExpression(tok) {
+  if (!tok) return false;
+  if (tok.t === 'kw' && (tok.v === 'in' || tok.v === 'instanceof')) return true;
+  if (tok.t !== 'p') return false;
+  return Object.prototype.hasOwnProperty.call(CONTINUE_OPS, tok.v);
+}
+
+var CONTINUE_OPS = {
+  '.': 1, '?.': 1, '(': 1, '[': 1, ',': 1,
+  '+': 1, '-': 1, '*': 1, '/': 1, '%': 1, '**': 1,
+  '++': 1, '--': 1,
+  '&&': 1, '||': 1, '??': 1, '?': 1, ':': 1,
+  '<': 1, '>': 1, '<=': 1, '>=': 1, '==': 1, '===': 1, '!=': 1, '!==': 1,
+  '&': 1, '|': 1, '^': 1, '<<': 1, '>>': 1, '>>>': 1,
+  '=': 1, '+=': 1, '-=': 1, '*=': 1, '/=': 1, '%=': 1,
+  '&=': 1, '|=': 1, '^=': 1, '<<=': 1, '>>=': 1, '>>>=': 1, '**=': 1, '&&=': 1, '||=': 1, '??=': 1
+};
+
+function buildUnifiedDiff(filePath, content, ranges) {
+  var normalized = String(content).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  var endsWithNewline = normalized.length > 0 && normalized.charAt(normalized.length - 1) === '\n';
+  var lines = normalized.split('\n');
+  if (endsWithNewline) lines.pop();
+  if (normalized === '') lines = [];
+  var CONTEXT = 3;
+  var dels = ranges.map(function(r) {
+    return { start: r.start - 1, end: r.end };
+  }).filter(function(r) {
+    return r.start >= 0 && r.end > r.start;
+  }).map(function(r) {
+    return { start: r.start, end: Math.min(lines.length, r.end) };
+  }).filter(function(r) {
+    return r.end > r.start;
+  }).sort(function(a, b) { return a.start - b.start || a.end - b.end; });
+  var merged = [];
+  dels.forEach(function(r) {
+    if (!merged.length || r.start > merged[merged.length - 1].end) merged.push({ start: r.start, end: r.end });
+    else merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, r.end);
+  });
+  if (!merged.length) return '';
+  var hunks = [];
+  merged.forEach(function(r) {
+    var h = {
+      from: Math.max(0, r.start - CONTEXT),
+      to: Math.min(lines.length, r.end + CONTEXT),
+      dels: [r]
+    };
+    if (!hunks.length || h.from > hunks[hunks.length - 1].to) hunks.push(h);
+    else {
+      var prev = hunks[hunks.length - 1];
+      prev.to = Math.max(prev.to, h.to);
+      prev.dels.push(r);
+    }
+  });
+  var paths = diffPaths(filePath);
+  var out = [];
+  out.push('diff --git ' + paths.gitA + ' ' + paths.gitB);
+  out.push('--- ' + paths.oldP);
+  out.push('+++ ' + paths.newP);
+  var deletedBefore = 0;
+  hunks.forEach(function(h) {
+    var oldStart = h.from + 1;
+    var oldCount = h.to - h.from;
+    var removed = 0;
+    h.dels.forEach(function(d) { removed += d.end - d.start; });
+    var newCount = oldCount - removed;
+    var newStart = newCount === 0 ? 0 : (oldStart - deletedBefore);
+    out.push('@@ -' + oldStart + ',' + oldCount + ' +' + newStart + ',' + newCount + ' @@');
+    var delAt = 0;
+    for (var li = h.from; li < h.to; li++) {
+      while (delAt < h.dels.length && h.dels[delAt].end <= li) delAt++;
+      var inDel = delAt < h.dels.length && li >= h.dels[delAt].start && li < h.dels[delAt].end;
+      out.push((inDel ? '-' : ' ') + lines[li]);
+      if (li === lines.length - 1 && !endsWithNewline) out.push('\\ No newline at end of file');
+    }
+    deletedBefore += removed;
+  });
+  return out.join('\n') + '\n';
+}
+
+function diffPaths(filePath) {
+  var path = String(filePath || 'file').replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!path) path = 'file';
+  var a = 'a/' + path;
+  var b = 'b/' + path;
+  if (/["\\\s]/.test(path)) {
+    var q = function(s) { return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'; };
+    return { gitA: q(a), gitB: q(b), oldP: q(a), newP: q(b) };
+  }
+  return { gitA: a, gitB: b, oldP: a, newP: b };
+}
+
+var JS_KEYWORDS = {
+  break:1, case:1, catch:1, class:1, const:1, continue:1, debugger:1, default:1,
+  delete:1, do:1, else:1, export:1, extends:1, finally:1, for:1, function:1,
+  if:1, import:1, in:1, instanceof:1, new:1, return:1, static:1, super:1,
+  switch:1, this:1, throw:1, try:1, typeof:1, var:1, void:1, while:1, with:1,
+  yield:1, await:1, of:1, async:1, let:1, enum:1, null:1, true:1, false:1
+};
+
+var REGEX_AFTER_KEYWORD = {
+  return:1, throw:1, case:1, delete:1, void:1, typeof:1, instanceof:1, in:1, of:1,
+  new:1, yield:1, await:1, else:1, do:1
+};
+
+var MULTI_OPS = ['>>>=','>>=','<<=','&&=','||=','??=','===','!==','>>>','**=','=>','==','!=','<=','>=','&&','||','??','++','--','+=','-=','*=','/=','%=','&=','|=','^=','**','<<','>>','?.','...'];
+
+function tokenizeJs(content) {
+  var tokens = [];
+  var i = 0;
+  var n = content.length;
+  var line = 1;
+  var col = 1;
+  var canRegex = true;
+  var modes = ['code'];
+  var substExit = [];
+  var braceDepth = 0;
+
+  function bump(ch) {
+    if (ch === '\n') { line++; col = 1; }
+    else col++;
+  }
+  function push(tok) {
+    tokens.push(tok);
+    canRegex = regexAllowedAfter(tok);
+  }
+  function regexAllowedAfter(tok) {
+    if (!tok) return true;
+    if (tok.t === 'id' || tok.t === 'num' || tok.t === 'str' || tok.t === 're') return false;
+    if (tok.t === 'kw') return !!REGEX_AFTER_KEYWORD[tok.v];
+    if (tok.v === ')' || tok.v === ']' || tok.v === '++' || tok.v === '--') return false;
+    return true;
+  }
+
+  while (i < n) {
+    var mode = modes[modes.length - 1];
+    var ch = content[i];
+    if (mode === 'tmpl') {
+      if (ch === '\\') {
+        bump(ch); i++;
+        if (i < n) { bump(content[i]); i++; }
+        continue;
+      }
+      if (ch === '`') { bump(ch); i++; modes.pop(); push({ t:'str', v:'', i:i, end:i, line:line, col:col }); continue; }
+      if (ch === '$' && content[i + 1] === '{') {
+        var startLine = line, startCol = col, startI = i;
+        bump('$'); bump('{'); i += 2;
+        modes.pop();
+        braceDepth++;
+        substExit.push(braceDepth);
+        push({ t:'p', v:'${', i:startI, end:i, line:startLine, col:startCol });
+        continue;
+      }
+      bump(ch); i++;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n' || ch === '\f' || ch === '\v') { bump(ch); i++; continue; }
+    if (ch === '#' && i === 0 && content[1] === '!') {
+      while (i < n && content[i] !== '\n') { bump(content[i]); i++; }
+      continue;
+    }
+    if (ch === '/' && content[i + 1] === '/') {
+      while (i < n && content[i] !== '\n') { bump(content[i]); i++; }
+      continue;
+    }
+    if (ch === '/' && content[i + 1] === '*') {
+      bump(ch); bump('*'); i += 2;
+      while (i < n && !(content[i] === '*' && content[i + 1] === '/')) { bump(content[i]); i++; }
+      if (i < n) { bump('*'); bump('/'); i += 2; }
+      continue;
+    }
+    if (ch === '/' && canRegex) {
+      var savedI = i, savedLine = line, savedCol = col;
+      if (readRegex()) continue;
+      i = savedI; line = savedLine; col = savedCol;
+    }
+    if (ch === '\'' || ch === '"') {
+      var q = ch, startI = i, startLine = line, startCol = col;
+      bump(ch); i++;
+      while (i < n) {
+        var c = content[i];
+        if (c === '\\') { bump(c); i++; if (i < n) { bump(content[i]); i++; } continue; }
+        bump(c); i++;
+        if (c === q || c === '\n') break;
+      }
+      push({ t:'str', v:'', i:startI, end:i, line:startLine, col:startCol });
+      continue;
+    }
+    if (ch === '`') {
+      bump(ch); i++;
+      modes.push('tmpl');
+      continue;
+    }
+    if (isDigit(ch) || (ch === '.' && isDigit(content[i + 1]))) {
+      var nStart = i, nLine = line, nCol = col;
+      consumeNumber();
+      push({ t:'num', v:content.slice(nStart, i), i:nStart, end:i, line:nLine, col:nCol });
+      continue;
+    }
+    if (isIdentStart(ch)) {
+      var wStart = i, wLine = line, wCol = col;
+      bump(ch); i++;
+      while (i < n && isIdentCont(content[i])) { bump(content[i]); i++; }
+      var word = content.slice(wStart, i);
+      push({ t: JS_KEYWORDS[word] ? 'kw' : 'id', v:word, i:wStart, end:i, line:wLine, col:wCol });
+      continue;
+    }
+    var opStart = i, opLine = line, opCol = col;
+    var op = readOperator();
+    for (var oi = 0; oi < op.length; oi++) bump(op.charAt(oi));
+    i += op.length;
+    if (op === '{') braceDepth++;
+    if (op === '}') {
+      braceDepth--;
+      if (substExit.length && braceDepth === substExit[substExit.length - 1] - 1) {
+        substExit.pop();
+        modes.push('tmpl');
+      }
+    }
+    push({ t:'p', v:op, i:opStart, end:i, line:opLine, col:opCol });
+  }
+  return tokens;
+
+  function readRegex() {
+    bump('/'); i++;
+    var inClass = false;
+    while (i < n) {
+      var c = content[i];
+      if (c === '\n') return false;
+      if (c === '\\') {
+        bump(c); i++;
+        if (i < n) { bump(content[i]); i++; }
+        continue;
+      }
+      if (inClass) {
+        if (c === ']') inClass = false;
+        bump(c); i++;
+        continue;
+      }
+      if (c === '[') { inClass = true; bump(c); i++; continue; }
+      if (c === '/') {
+        bump(c); i++;
+        while (i < n && /[a-zA-Z]/.test(content[i])) { bump(content[i]); i++; }
+        push({ t:'re', v:content.slice(savedI, i), i:savedI, end:i, line:savedLine, col:savedCol });
+        return true;
+      }
+      bump(c); i++;
+    }
+    return false;
+  }
+  function consumeNumber() {
+    if (content[i] === '0' && /[xXoObB]/.test(content[i + 1] || '')) {
+      bump(content[i]); bump(content[i + 1]); i += 2;
+      while (i < n && /[0-9a-fA-F_]/.test(content[i])) { bump(content[i]); i++; }
+    } else {
+      while (i < n && /[0-9_]/.test(content[i])) { bump(content[i]); i++; }
+      if (content[i] === '.' && isDigit(content[i + 1])) {
+        bump('.'); i++;
+        while (i < n && /[0-9_]/.test(content[i])) { bump(content[i]); i++; }
+      }
+      if ((content[i] === 'e' || content[i] === 'E') && /[0-9]/.test(content[i + 1] === '+' || content[i + 1] === '-' ? content[i + 2] : content[i + 1])) {
+        bump(content[i]); i++;
+        if (content[i] === '+' || content[i] === '-') { bump(content[i]); i++; }
+        while (i < n && /[0-9_]/.test(content[i])) { bump(content[i]); i++; }
+      }
+    }
+    if (content[i] === 'n') { bump('n'); i++; }
+  }
+  function readOperator() {
+    var rest = content.substr(i, 4);
+    for (var k = 0; k < MULTI_OPS.length; k++) {
+      if (rest.indexOf(MULTI_OPS[k]) === 0) return MULTI_OPS[k];
+    }
+    return content.charAt(i);
+  }
+}
+
+function isDigit(ch) { return ch >= '0' && ch <= '9'; }
+function isIdentStart(ch) { return /[A-Za-z_$]/.test(ch || '') || (ch && ch.charCodeAt(0) > 127); }
+function isIdentCont(ch) { return /[A-Za-z0-9_$]/.test(ch || '') || (ch && ch.charCodeAt(0) > 127); }
+
+
+function formatSecurityIssueExport(issue, suggestions){
+    var row={severity:issue.severity,title:issue.title,description:issue.desc,file:issue.file,path:issue.path,line:issue.line,code:issue.code};
+    var patch=suggestions&&suggestions.filePatches&&issue?suggestions.filePatches[issue.path]:'';
+    if(issue&&issue.title==='Debug Statements'&&patch)row.patch=patch;
+    return row;
+}
+
+Parser.collectRemoveDebugStatementSuggestions=collectRemoveDebugStatementSuggestions;
+Parser.formatSecurityIssueExport=formatSecurityIssueExport;
+})();
+
 async function buildAnalysisData(options){
     var analyzed=options.analyzed||[];
     var allFns=options.allFns||[];
@@ -5424,6 +6006,7 @@ async function buildAnalysisData(options){
 
     progress('Finalizing (6/6)...');
     await yieldFn();
+    var refactorSuggestions=Parser.collectRemoveDebugStatementSuggestions(analyzed);
     analyzed.forEach(function(f){f.content=null;});
 
     var folders=[...new Set(analyzed.map(function(f){return f.folder;}))].sort();
@@ -5463,6 +6046,7 @@ async function buildAnalysisData(options){
         issues:issues,
         patterns:patterns,
         securityIssues:securityIssues,
+        refactorSuggestions:refactorSuggestions,
         duplicates:duplicates,
         layerViolations:layerViolations,
         architectureDiagram:architectureDiagram,
@@ -13544,7 +14128,11 @@ function App(){
             });
         });
     }
-    function exportJSON(){if(!data)return;var blob=new Blob([JSON.stringify({stats:data.stats,files:data.files.map(function(f){return{path:f.path,fns:f.functions.length,layer:f.layer,lines:f.lines,dependencies:f.dependencies||[]};}),connections:data.connections,issues:data.issues,patterns:data.patterns,security:data.securityIssues,architectureDiagram:data.architectureDiagram},null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='codeflow-analysis.json';a.click();URL.revokeObjectURL(url);}
+    function downloadTextFile(filename,text,mime){if(!text)return;var blob=new Blob([text],{type:mime||'text/plain'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);}
+    function patchDownloadName(filePath){var base=String(filePath||'analysis').replace(/[^A-Za-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'');if(!base)base='analysis';return 'codeflow-remove-debug-'+base+'.patch';}
+    function renderPatchPreview(patch){if(!patch)return null;var lines=patch.split('\n');if(lines.length&&lines[lines.length-1]==='')lines.pop();return React.createElement('pre',{className:'patch-preview'},lines.map(function(line,idx){var cls='patch-line-ctx';if(line.indexOf('diff --git ')===0||line.indexOf('--- ')===0||line.indexOf('+++ ')===0||line.indexOf('@@')===0||line.charAt(0)==='\\')cls='patch-line-meta';else if(line.charAt(0)==='-')cls='patch-line-del';return React.createElement('div',{key:idx,className:cls},line.length?line:' ');}));}
+    function renderDebugPatchSites(filePath){var pack=data&&data.refactorSuggestions;if(!pack||!pack.sites||!pack.sites.length)return null;var sites=pack.sites.filter(function(site){return !filePath||site.filePath===filePath;});if(!sites.length)return null;var fileKeys=[];var grouped={};sites.forEach(function(site){if(!grouped[site.filePath]){grouped[site.filePath]=[];fileKeys.push(site.filePath);}grouped[site.filePath].push(site);});var appliable=sites.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{className:'debug-patch-panel'},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:12,fontWeight:600}},'Debug statement patches'),!filePath&&pack.combinedPatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile('codeflow-remove-debug-statement.patch',pack.combinedPatch,'text/x-diff');}},'Download all .patch'):null),React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginBottom:8,lineHeight:1.4}},appliable+' safe removal'+(appliable===1?'':'s')+' · '+(sites.length-appliable)+' report-only. Codeflow does not modify your files. Apply a downloaded patch from the repo root with git apply. A single-statement patch targets the original file; the combined patch removes every safe statement together.'),fileKeys.map(function(path){var group=grouped[path];var filePatch=pack.filePatches&&pack.filePatches[path];var safeCount=group.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{key:path,style:{marginBottom:12}},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:10,fontFamily:'monospace',color:'var(--t1)',wordBreak:'break-all'}},path),filePatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(path),filePatch,'text/x-diff');}},'Download file .patch'):null),safeCount>1?React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:6}},'Remove '+safeCount+' standalone debug statements in '+path+'. This patch removes code.'):null,group.map(function(site){return React.createElement('div',{key:site.findingId,className:'debug-patch-card'},React.createElement('div',{style:{fontSize:10,color:'var(--t1)',marginBottom:4,lineHeight:1.4}},site.summary),site.status==='report-only'?React.createElement('div',{className:'debug-patch-reason'},'Report only: '+site.reason):null,site.snippet?React.createElement('div',{className:'security-code'},site.snippet):null,site.status==='appliable'?renderPatchPreview(site.patch):null,site.status==='appliable'?React.createElement('button',{className:'view-file-btn',style:{marginTop:8},onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(site.filePath+'-L'+site.line),site.patch,'text/x-diff');}},'Download .patch'):null);}));}));}
+    function exportJSON(){if(!data)return;var blob=new Blob([JSON.stringify({stats:data.stats,files:data.files.map(function(f){return{path:f.path,fns:f.functions.length,layer:f.layer,lines:f.lines,dependencies:f.dependencies||[]};}),connections:data.connections,issues:data.issues,patterns:data.patterns,security:data.securityIssues,architectureDiagram:data.architectureDiagram,refactorSuggestions:data.refactorSuggestions||null},null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='codeflow-analysis.json';a.click();URL.revokeObjectURL(url);}
     function getAnalysisSourceLabel(){
         if(localSourceKind==='folder')return(repoInfo&&repoInfo.name)||'Local Folder';
         if(localSourceKind==='zip')return repoInfo&&repoInfo.name?repoInfo.name:'ZIP Archive';
@@ -13612,7 +14200,8 @@ function App(){
             }),
             architectureIssues:data.issues.map(function(i){return{type:i.type,title:i.title,description:i.desc,affectedFiles:i.items?i.items.map(function(x){return x.file||x.name;}):[],affectedItems:i.items||[]};}),
             patterns:data.patterns.map(function(p){return{name:p.name,description:p.desc,isAntiPattern:p.isAnti||false,severity:p.severity||'info',icon:p.icon||'',files:p.files.map(function(f){return f.path||f.name;}),fileDetails:p.files||[],metrics:p.metrics||{}};}),
-            securityIssues:data.securityIssues.map(function(s){return{severity:s.severity,title:s.title,description:s.desc,file:s.file,path:s.path,line:s.line,code:s.code};}),
+            securityIssues:data.securityIssues.map(function(s){return Parser.formatSecurityIssueExport(s,data.refactorSuggestions);}),
+            refactorSuggestions:(data.refactorSuggestions&&data.refactorSuggestions.sites)||[],
             duplicates:data.duplicates||[],
             layerViolations:data.layerViolations||[],
             suggestions:data.suggestions||[],
@@ -14903,6 +15492,7 @@ function App(){
                         ),
                         rightTab==='security'&&React.createElement(React.Fragment,null,
                             React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},React.createElement(Icon,{name:'security',size:'m'}),' Security Analysis'),
+                            renderDebugPatchSites(null),
                             data.securityIssues.length===0?React.createElement('div',{style:{textAlign:'center',padding:20}},React.createElement(Icon,{name:'security',size:'xxl',className:'empty-icon'}),React.createElement('div',{style:{color:'var(--green)',fontWeight:600}},'No security issues found!'),React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:8}},'Your code passed all security checks')):
                             React.createElement(React.Fragment,null,
                                 React.createElement('div',{style:{display:'flex',gap:8,marginBottom:12}},
@@ -14917,6 +15507,7 @@ function App(){
                                         React.createElement('span',{className:'security-title'},issue.title)
                                     ),
                                     React.createElement('div',{className:'security-desc'},issue.desc),
+                                    issue.title==='Debug Statements'&&data.refactorSuggestions&&data.refactorSuggestions.filePatches&&data.refactorSuggestions.filePatches[issue.path]&&React.createElement('div',{style:{fontSize:9,color:'var(--green)',marginTop:4}},'Patch available'),
                                     React.createElement('div',{style:{fontSize:9,color:'var(--acc)',marginTop:6}},'Click for details →'),
                                     issue.code&&React.createElement('div',{className:'security-code'},issue.code)
                                 );})
@@ -15266,8 +15857,10 @@ function App(){
                             drillDown.data.title==='SQL Injection Risk'?'Use parameterized queries or prepared statements. Never concatenate user input directly into SQL strings.':
                             drillDown.data.title==='XSS Vulnerability'?'Sanitize user input before rendering. Use textContent instead of innerHTML, or use a sanitization library like DOMPurify.':
                             drillDown.data.title==='Dynamic Code Execution'?'Avoid eval() entirely. Use JSON.parse() for JSON, or Function constructor only with trusted input.':
+                            drillDown.data.title==='Debug Statements'?'Download a .patch and apply it yourself from the repo root with git apply. Codeflow never modifies your files. Only a standalone console.log, console.debug, console.info, or debugger statement is included.':
                             'Review the flagged code and apply security best practices.'
-                        )
+                        ),
+                        drillDown.data.title==='Debug Statements'&&renderDebugPatchSites(drillDown.data.path)
                     ),
                     // Duplicate drill-down
                     drillDown.type==='duplicate'&&React.createElement(React.Fragment,null,

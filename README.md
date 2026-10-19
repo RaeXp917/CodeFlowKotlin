@@ -50,6 +50,8 @@ Automatic detection of:
 - Dangerous `eval()` usage
 - Debug statements in production code
 
+For JavaScript and TypeScript, a standalone `console.log`, `console.debug`, `console.info`, or `debugger` statement can be downloaded as a unified diff (`.patch`) and applied from the repo root with `git apply`. The JSON report adds a `patch` field on that debug-statement finding when a safe removal exists. Statements inside an expression, or in a one-line `if` or arrow without braces, stay report-only. Codeflow never writes to your files.
+
 Test files, fixtures, `docs/`, and common tooling directories (`.github/`, `.claude/`, `scripts/`) are excluded from the XSS/shell-execution checks, since findings there don't reflect the shipped product's attack surface. The hardcoded-secret check exempts only tests, fixtures, and docs: CI workflows, hooks, and deploy scripts are executable code, so a real credential there is still a real leak.
 
 ### Pattern Detection
