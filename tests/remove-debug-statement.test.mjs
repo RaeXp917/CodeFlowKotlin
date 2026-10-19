@@ -245,6 +245,168 @@ test('shared-line debug statements are report-only and do not change the finding
   assert.equal(Object.prototype.hasOwnProperty.call(exported, 'patch'), false);
 });
 
+test('for await sole body stays report-only and is left out of the patch', async () => {
+  const source = [
+    'async function run(xs) {',
+    '  console.log("safe");',
+    '  for await (const item of xs)',
+    '    console.log(item);',
+    '  for await (const item of xs) console.debug(item);',
+    '  for await (const item of xs)',
+    '    debugger;',
+    '  for await (const item of xs) {',
+    '    console.info(item);',
+    '  }',
+    '  return xs;',
+    '}',
+    '',
+  ].join('\n');
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/async.js', content: source },
+  ]);
+  const byLine = Object.fromEntries(suggestions.sites.map((site) => [site.line, site]));
+
+  assert.equal(byLine[2].status, 'appliable');
+  assert.equal(byLine[4].status, 'report-only');
+  assert.equal(byLine[4].reason, 'inside a one-line loop without braces');
+  assert.equal(byLine[4].patch, undefined);
+  assert.equal(byLine[5].status, 'report-only');
+  assert.equal(byLine[5].reason, 'inside a one-line loop without braces');
+  assert.equal(byLine[7].status, 'report-only');
+  assert.equal(byLine[7].reason, 'inside a one-line loop without braces');
+  assert.equal(byLine[9].status, 'appliable');
+
+  const removed = suggestions.combinedPatch.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---'));
+  assert.deepEqual(removed, ['-  console.log("safe");', '-    console.info(item);']);
+
+  const applied = await applyPatch([{ path: 'src/async.js', content: source }], suggestions.combinedPatch);
+  assert.match(applied['src/async.js'], /for await \(const item of xs\)\n    console\.log\(item\);/);
+  assert.match(applied['src/async.js'], /for await \(const item of xs\) console\.debug\(item\);/);
+  assert.match(applied['src/async.js'], /for await \(const item of xs\)\n    debugger;/);
+  assert.doesNotMatch(applied['src/async.js'], /console\.log\("safe"\)/);
+  assert.doesNotMatch(applied['src/async.js'], /console\.info\(item\)/);
+});
+
+test('shadowed console bindings stay report-only while the global console can be removed', async () => {
+  const source = [
+    'import consoleLogger, { write as consoleWrite, type Ignored } from "./logger";',
+    'import * as audit from "./audit";',
+    'function save(console) {',
+    '  console.log(record);',
+    '}',
+    'function auditRecord(record) {',
+    '  const console = audit;',
+    '  console.info(record);',
+    '  console.log(record);',
+    '}',
+    'const wrapped = (console) => {',
+    '  console.debug(console);',
+    '};',
+    'function take(record) {',
+    '  console.log(record);',
+    '  try {',
+    '    risky();',
+    '  } catch (console) {',
+    '    console.log(console);',
+    '  }',
+    '  for (const console of rows) {',
+    '    console.log(console);',
+    '  }',
+    '  logger.console.log(record);',
+    '  return record;',
+    '}',
+    '',
+  ].join('\n');
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/shadow.js', content: source },
+  ]);
+  const byLine = Object.fromEntries(suggestions.sites.map((site) => [site.line, site]));
+
+  assert.equal(byLine[4].status, 'report-only');
+  assert.equal(byLine[4].reason, 'shadowed by a local console binding');
+  assert.equal(byLine[4].patch, undefined);
+  assert.equal(byLine[8].status, 'report-only');
+  assert.equal(byLine[8].reason, 'shadowed by a local console binding');
+  assert.equal(byLine[9].status, 'report-only');
+  assert.equal(byLine[12].status, 'report-only');
+  assert.equal(byLine[12].reason, 'shadowed by a local console binding');
+  assert.equal(byLine[15].status, 'appliable');
+  assert.equal(byLine[19].status, 'report-only');
+  assert.equal(byLine[19].reason, 'shadowed by a local console binding');
+  assert.equal(byLine[22].status, 'report-only');
+  assert.equal(byLine[22].reason, 'shadowed by a local console binding');
+  assert.equal(byLine[24].status, 'report-only');
+  assert.equal(byLine[24].reason, 'not the global console');
+
+  const removed = suggestions.combinedPatch.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---'));
+  assert.deepEqual(removed, ['-  console.log(record);']);
+
+  const applied = await applyPatch([{ path: 'src/shadow.js', content: source }], suggestions.combinedPatch);
+  assert.match(applied['src/shadow.js'], /function save\(console\) \{\n  console\.log\(record\);/);
+  assert.match(applied['src/shadow.js'], /console\.info\(record\);/);
+  assert.match(applied['src/shadow.js'], /logger\.console\.log\(record\);/);
+  assert.doesNotMatch(applied['src/shadow.js'], /function take\(record\) \{\n  console\.log\(record\);/);
+});
+
+test('a console parameter on a class method is report-only and a sibling call stays appliable', async () => {
+  const source = [
+    'class Foo extends Bar {',
+    '  run() {',
+    '    console.log(1);',
+    '  }',
+    '  save(console) {',
+    '    console.log(record);',
+    '  }',
+    '}',
+    'console.log(2);',
+    'export default class console {',
+    '  run() {',
+    '    console.log(3);',
+    '  }',
+    '}',
+    '',
+  ].join('\n');
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/types.ts', content: source },
+  ]);
+  const byLine = Object.fromEntries(suggestions.sites.map((site) => [site.line, site]));
+  assert.equal(byLine[3].status, 'appliable');
+  assert.equal(byLine[6].status, 'report-only');
+  assert.equal(byLine[6].reason, 'shadowed by a local console binding');
+  assert.equal(byLine[6].patch, undefined);
+  assert.equal(byLine[9].status, 'appliable');
+  assert.equal(byLine[12].status, 'report-only');
+  assert.equal(byLine[12].reason, 'shadowed by a local console binding');
+
+  const applied = await applyPatch([{ path: 'src/types.ts', content: source }], suggestions.combinedPatch);
+  assert.match(applied['src/types.ts'], /save\(console\) \{\n    console\.log\(record\);/);
+  assert.match(applied['src/types.ts'], /class console \{\n  run\(\) \{\n    console\.log\(3\);/);
+  assert.doesNotMatch(applied['src/types.ts'], /console\.log\(1\)/);
+  assert.doesNotMatch(applied['src/types.ts'], /console\.log\(2\)/);
+});
+
+test('imported and declared console bindings are not removed', () => {
+  const cases = [
+    ['import console from "./logger";\nconsole.log(record);\n', 'shadowed by a local console binding'],
+    ['import { console } from "./logger";\nconsole.log(record);\n', 'shadowed by a local console binding'],
+    ['import { log as console } from "./logger";\nconsole.log(record);\n', 'shadowed by a local console binding'],
+    ['import * as console from "./logger";\nconsole.log(record);\n', 'shadowed by a local console binding'],
+    ['const console = logger;\nconsole.log(record);\n', 'shadowed by a local console binding'],
+    ['let console = logger;\nconsole.debug(record);\n', 'shadowed by a local console binding'],
+    ['var console = logger;\nconsole.info(record);\n', 'shadowed by a local console binding'],
+    ['function console() { return 1; }\nconsole.log(record);\n', 'shadowed by a local console binding'],
+    ['class console { run() { console.log(record); } }\n', 'shadowed by a local console binding'],
+  ];
+  for (const [content, reason] of cases) {
+    const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+      { path: 'src/local.js', content },
+    ]);
+    assert.equal(suggestions.combinedPatch, '', content);
+    assert.ok(suggestions.sites.length >= 1, content);
+    assert.ok(suggestions.sites.every((site) => site.status === 'report-only' && site.reason === reason), content);
+  }
+});
+
 test('index.html does not gain a write path for debug patches', () => {
   assert.equal(htmlSource.includes('createWritable'), false);
   assert.equal(htmlSource.includes('showSaveFilePicker'), false);

@@ -5245,6 +5245,7 @@ function nonJsDebugFinding(content) {
 function findDebugSites(content, filePath) {
   var normalized = String(content).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   var tokens = tokenizeJs(normalized);
+  var consoleShadowed = consoleShadowPredicate(tokens);
   var sites = [];
   for (var ti = 0; ti < tokens.length; ti++) {
     var tok = tokens[ti];
@@ -5259,10 +5260,653 @@ function findDebugSites(content, filePath) {
         sites.push(makeSite(filePath, kind, tok, tok.line, tok.line, 'report-only', 'not isolated from surrounding code', snippetAt(normalized, tok.i, Math.min(normalized.length, tok.i + 80))));
         continue;
       }
-      sites.push(classifySite(normalized, tokens, ti, closeIdx, kind, filePath));
+      var site = classifySite(normalized, tokens, ti, closeIdx, kind, filePath);
+      var globalReason = consoleReferenceReason(tokens, ti, consoleShadowed);
+      if (globalReason) {
+        site.status = 'report-only';
+        site.reason = globalReason;
+        site.summary = 'The ' + kind + ' at line ' + site.line + ' in ' + filePath + ' is report-only because it is ' + globalReason + '.';
+        delete site.patch;
+      }
+      sites.push(site);
     }
   }
   return sites;
+}
+
+function consoleReferenceReason(tokens, ti, consoleShadowed) {
+  var prev = ti > 0 ? tokens[ti - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return 'not the global console';
+  try {
+    if (consoleShadowed(ti)) return 'shadowed by a local console binding';
+  } catch (err) {
+    return 'shadowed by a local console binding';
+  }
+  return '';
+}
+
+function consoleShadowPredicate(tokens) {
+  try {
+    return consoleShadowAt(tokens);
+  } catch (err) {
+    return function() { return true; };
+  }
+}
+
+// True when a local `console` binding (parameter, import, declaration, catch,
+// or class name) is in scope. Member calls are rejected separately. A failure
+// to resolve the binding is treated as shadowed so the patch stays report-only.
+function consoleShadowAt(tokens) {
+  var n = tokens.length;
+  var scopes = [];
+  var stack = [];
+
+  function peek(i) { return i >= 0 && i < n ? tokens[i] : null; }
+  function pushScope(functionLike, start, kind) {
+    scopes.push({
+      parent: stack.length ? stack[stack.length - 1] : -1,
+      binds: false,
+      functionLike: !!functionLike,
+      start: start,
+      end: n,
+      kind: kind || ''
+    });
+    stack.push(scopes.length - 1);
+  }
+  function popScope(end) {
+    if (stack.length <= 1) return;
+    scopes[stack.pop()].end = end;
+  }
+  function markLet() {
+    if (!stack.length) return;
+    scopes[stack[stack.length - 1]].binds = true;
+  }
+  function markVar() {
+    for (var s = stack.length - 1; s >= 0; s--) {
+      if (scopes[stack[s]].functionLike) {
+        scopes[stack[s]].binds = true;
+        return;
+      }
+    }
+    if (scopes.length) scopes[0].binds = true;
+  }
+
+  pushScope(true, 0, 'script');
+
+  function skipType(i) {
+    if (!peek(i) || peek(i).v !== ':') return i;
+    i++;
+    var depth = 0;
+    while (i < n) {
+      var v = peek(i).v;
+      if (v === '(' || v === '[' || v === '{' || v === '<') { depth++; i++; continue; }
+      if (v === ')' || v === ']' || v === '}' || v === '>') {
+        if (depth === 0) break;
+        depth--;
+        i++;
+        continue;
+      }
+      if (depth === 0 && (v === ',' || v === '=' || v === ';')) break;
+      i++;
+    }
+    return i;
+  }
+
+  function maybeSkipTypeArgs(i) {
+    if (!peek(i) || peek(i).v !== '<') return i;
+    var j = i;
+    var depth = 0;
+    while (j < n) {
+      var v = peek(j).v;
+      if (v === '<') depth++;
+      else if (v === '>') {
+        depth--;
+        j++;
+        if (depth === 0) {
+          if (peek(j) && (peek(j).v === '(' || peek(j).v === '{' || peek(j).v === 'extends' || peek(j).v === 'implements')) return j;
+          return i;
+        }
+        continue;
+      } else if (v === ';' || v === '=>' || v === '{') return i;
+      j++;
+    }
+    return i;
+  }
+
+  function skipGroup(start) {
+    var open = peek(start) ? peek(start).v : '';
+    var close = open === '(' ? ')' : open === '[' ? ']' : open === '{' ? '}' : '';
+    if (!close) return start + 1;
+    var depth = 0;
+    var i = start;
+    while (i < n) {
+      var v = peek(i).v;
+      if (v === open) depth++;
+      else if (v === close) {
+        depth--;
+        if (depth === 0) return i + 1;
+      }
+      i++;
+    }
+    return i;
+  }
+
+  function bindingName(i, isVar) {
+    if (!peek(i)) return i;
+    var start = i;
+    if (peek(i).v === '{') return objectPattern(i, isVar);
+    if (peek(i).v === '[') return arrayPattern(i, isVar);
+    if (peek(i).v === '...') return bindingName(i + 1, isVar);
+    if (peek(i).t === 'id') {
+      if (peek(i).v === 'console') {
+        if (isVar) markVar(); else markLet();
+      }
+      i++;
+      if (peek(i) && peek(i).v === '?') i++;
+      if (peek(i) && peek(i).v === ':') i = skipType(i);
+      if (peek(i) && peek(i).v === '=') i = expression(i + 1, { stopComma: true, stopInOf: true });
+      return i > start ? i : start + 1;
+    }
+    return start + 1;
+  }
+
+  function objectPattern(start, isVar) {
+    var i = start + 1;
+    while (i < n && peek(i).v !== '}') {
+      var before = i;
+      if (peek(i).v === ',') { i++; continue; }
+      if (peek(i).v === '...') { i = bindingName(i + 1, isVar); if (i <= before) i = before + 1; continue; }
+      if (peek(i).v === '[') {
+        i = skipGroup(i);
+        if (peek(i) && peek(i).v === ':') i = bindingName(i + 1, isVar);
+        if (i <= before) i = before + 1;
+        continue;
+      }
+      if (peek(i).t === 'id' || peek(i).t === 'str' || peek(i).t === 'num' || peek(i).t === 'kw') {
+        var key = peek(i).v;
+        var keyIsIdent = peek(i).t === 'id';
+        i++;
+        if (peek(i) && peek(i).v === ':') i = bindingName(i + 1, isVar);
+        else if (keyIsIdent) {
+          if (key === 'console') { if (isVar) markVar(); else markLet(); }
+          if (peek(i) && peek(i).v === '=') i = expression(i + 1, { stopComma: true, stopInOf: true });
+        }
+        if (i <= before) i = before + 1;
+        continue;
+      }
+      i++;
+    }
+    if (i < n && peek(i).v === '}') i++;
+    return i;
+  }
+
+  function arrayPattern(start, isVar) {
+    var i = start + 1;
+    while (i < n && peek(i).v !== ']') {
+      var before = i;
+      if (peek(i).v === ',') { i++; continue; }
+      i = bindingName(i, isVar);
+      if (i <= before) i = before + 1;
+    }
+    if (i < n && peek(i).v === ']') i++;
+    return i;
+  }
+
+  function isHardStmtBoundary(tok) {
+    if (!tok || tok.t !== 'kw') return false;
+    switch (tok.v) {
+      case 'var': case 'let': case 'const': case 'import': case 'export':
+      case 'if': case 'for': case 'while': case 'do': case 'switch':
+      case 'try': case 'return': case 'throw': case 'break': case 'continue':
+      case 'debugger': case 'with': case 'else': case 'catch': case 'finally':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function expression(i, flags) {
+    flags = flags || {};
+    var consumed = false;
+    while (i < n) {
+      var tok = peek(i);
+      var v = tok.v;
+      if (consumed && isHardStmtBoundary(tok)) return i;
+      if (consumed && tok.t === 'kw' && v === 'async' && peek(i + 1) && peek(i + 1).v === 'function') return i;
+      if (v === ';' || v === ')' || v === ']' || v === '}') return i;
+      if (flags.stopComma && v === ',') return i;
+      if (flags.stopInOf && tok.t === 'kw' && (v === 'of' || v === 'in')) return i;
+      if (flags.stopColon && v === ':') return i;
+      if (flags.stopBrace && v === '{') return i;
+      if (tok.t === 'kw' && v === 'function') { i = functionDecl(i, false); consumed = true; continue; }
+      if (tok.t === 'kw' && v === 'class') { i = classDecl(i); consumed = true; continue; }
+      if (v === '(') {
+        var afterParen = skipGroup(i);
+        if (peek(afterParen) && peek(afterParen).v === '=>') { i = arrowFromParen(i); consumed = true; continue; }
+        i = expression(i + 1, {});
+        if (peek(i) && peek(i).v === ')') i++;
+        consumed = true;
+        continue;
+      }
+      if ((tok.t === 'id' || (tok.t === 'kw' && v === 'async')) && peek(i + 1) && peek(i + 1).v === '=>') {
+        i = arrowFromIdent(tok.t === 'kw' ? i + 1 : i);
+        consumed = true;
+        continue;
+      }
+      if (tok.t === 'kw' && v === 'async' && peek(i + 1) && peek(i + 1).v === '(') {
+        var afterAsync = skipGroup(i + 1);
+        if (peek(afterAsync) && peek(afterAsync).v === '=>') { i = arrowFromParen(i + 1); consumed = true; continue; }
+      }
+      if (v === '{') {
+        if (isBlockBrace(tokens, i)) i = block(i);
+        else i = skipGroup(i);
+        consumed = true;
+        continue;
+      }
+      if (v === '[') { i = skipGroup(i); consumed = true; continue; }
+      i++;
+      consumed = true;
+    }
+    return i;
+  }
+
+  function arrowFromIdent(i) {
+    var name = peek(i) ? peek(i).v : '';
+    pushScope(true, i, 'arrow');
+    if (name === 'console') markLet();
+    i += 2;
+    i = arrowBody(i);
+    popScope(i);
+    return i;
+  }
+
+  function arrowFromParen(parenIdx) {
+    pushScope(true, parenIdx, 'arrow');
+    var i = params(parenIdx);
+    if (peek(i) && peek(i).v === ':') i = skipType(i);
+    if (peek(i) && peek(i).v === '=>') i++;
+    i = arrowBody(i);
+    popScope(i);
+    return i;
+  }
+
+  function arrowBody(i) {
+    if (peek(i) && peek(i).v === '{') return block(i);
+    return expression(i, { stopComma: true });
+  }
+
+  function params(parenIdx) {
+    var i = parenIdx + 1;
+    while (i < n && peek(i).v !== ')') {
+      var before = i;
+      if (peek(i).v === ',') { i++; continue; }
+      if (peek(i).t === 'id' && peek(i).v === 'this') {
+        i++;
+        if (peek(i) && peek(i).v === ':') i = skipType(i);
+        continue;
+      }
+      i = bindingName(i, false);
+      if (i <= before) i = before + 1;
+    }
+    if (i < n && peek(i).v === ')') i++;
+    return i;
+  }
+
+  function block(start) {
+    pushScope(false, start, 'block');
+    var i = start + 1;
+    while (i < n && peek(i).v !== '}') {
+      var next = statement(i);
+      i = next > i ? next : i + 1;
+    }
+    if (i < n && peek(i).v === '}') i++;
+    popScope(i);
+    return i;
+  }
+
+  function functionDecl(start, isStatement) {
+    var i = start + 1;
+    if (peek(i) && peek(i).v === '*') i++;
+    var fname = '';
+    if (peek(i) && peek(i).t === 'id') {
+      fname = peek(i).v;
+      if (isStatement && fname === 'console') markVar();
+      i++;
+    }
+    i = maybeSkipTypeArgs(i);
+    if (peek(i) && peek(i).v === '(') {
+      pushScope(true, i, 'function');
+      if (fname === 'console') markLet();
+      i = params(i);
+      if (peek(i) && peek(i).v === ':') i = skipType(i);
+      if (peek(i) && peek(i).v === '{') i = block(i);
+      else if (peek(i) && peek(i).v === ';') i++;
+      popScope(i);
+      return i;
+    }
+    return i > start ? i : start + 1;
+  }
+
+  function classDecl(start, bindNameOutside) {
+    var i = start + 1;
+    var name = '';
+    if (peek(i) && peek(i).t === 'id') {
+      name = peek(i).v;
+      if (name === 'console' && bindNameOutside !== false) markLet();
+      i++;
+    }
+    i = maybeSkipTypeArgs(i);
+    if (peek(i) && (peek(i).v === 'extends' || peek(i).v === 'implements')) {
+      i++;
+      while (i < n && peek(i) && peek(i).v !== '{' && peek(i).v !== ';') {
+        var beforeClause = i;
+        if (peek(i).v === ',') { i++; continue; }
+        i = expression(i, { stopBrace: true });
+        if (i <= beforeClause) { i = beforeClause + 1; break; }
+      }
+    }
+    if (peek(i) && peek(i).v === '{') {
+      pushScope(false, i, 'class');
+      if (name === 'console') markLet();
+      i = classBody(i);
+      popScope(i);
+    }
+    return i > start ? i : start + 1;
+  }
+
+  function classBody(start) {
+    var i = start + 1;
+    while (i < n && peek(i).v !== '}') {
+      var next = classElement(i);
+      i = next > i ? next : i + 1;
+    }
+    if (i < n && peek(i).v === '}') i++;
+    return i;
+  }
+
+  function classElement(i) {
+    var start = i;
+    if (peek(i) && peek(i).v === ';') return i + 1;
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'static' && peek(i + 1) && peek(i + 1).v === '{') return block(i + 1);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'static') i++;
+    if (peek(i) && peek(i).v === 'declare') i++;
+    if (peek(i) && (peek(i).v === 'public' || peek(i).v === 'private' || peek(i).v === 'protected' || peek(i).v === 'readonly' || peek(i).v === 'override' || peek(i).v === 'abstract')) i++;
+    if (peek(i) && peek(i).v === '*') i++;
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'async') i++;
+    if (peek(i) && peek(i).t === 'id' && (peek(i).v === 'get' || peek(i).v === 'set') && peek(i + 1) && peek(i + 1).v !== '(' && peek(i + 1).v !== '=' && peek(i + 1).v !== ';') i++;
+    if (peek(i) && peek(i).v === '[') i = skipGroup(i);
+    else if (peek(i) && peek(i).v !== '(' && peek(i).v !== '=' && peek(i).v !== ';') i++;
+    if (peek(i) && peek(i).v === '?') i++;
+    if (peek(i) && peek(i).v === '(') {
+      pushScope(true, i, 'method');
+      i = params(i);
+      if (peek(i) && peek(i).v === ':') i = skipType(i);
+      if (peek(i) && peek(i).v === '{') i = block(i);
+      else if (peek(i) && peek(i).v === ';') i++;
+      popScope(i);
+      return i;
+    }
+    if (peek(i) && peek(i).v === '=') {
+      i = expression(i + 1, { stopComma: true });
+      if (peek(i) && peek(i).v === ';') i++;
+      return i > start ? i : start + 1;
+    }
+    if (peek(i) && peek(i).v === ':') i = skipType(i);
+    if (peek(i) && peek(i).v === ';') i++;
+    return i > start ? i : start + 1;
+  }
+
+  function varDecls(start) {
+    var isVar = peek(start) && peek(start).v === 'var';
+    var i = start + 1;
+    while (i < n) {
+      var before = i;
+      i = bindingName(i, isVar);
+      if (i <= before) i = before + 1;
+      if (peek(i) && peek(i).v === '=') i = expression(i + 1, { stopComma: true, stopInOf: true });
+      if (peek(i) && peek(i).v === ',') { i++; continue; }
+      break;
+    }
+    if (peek(i) && peek(i).v === ';') i++;
+    return i;
+  }
+
+  function usingDecl(start) {
+    var i = start;
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'await') i++;
+    if (!(peek(i) && peek(i).t === 'id' && peek(i).v === 'using')) return start + 1;
+    var next = peek(i + 1);
+    if (!next || !(next.t === 'id' || next.v === '{' || next.v === '[')) return start + 1;
+    i++;
+    while (i < n) {
+      var before = i;
+      i = bindingName(i, false);
+      if (i <= before) i = before + 1;
+      if (peek(i) && peek(i).v === '=') i = expression(i + 1, { stopComma: true, stopInOf: true });
+      if (peek(i) && peek(i).v === ',') { i++; continue; }
+      break;
+    }
+    if (peek(i) && peek(i).v === ';') i++;
+    return i;
+  }
+
+  function importDecl(start) {
+    var i = start + 1;
+    if (peek(i) && peek(i).v === '(') return expression(start, {});
+    if (peek(i) && peek(i).v === 'type') i++;
+    if (peek(i) && peek(i).t === 'id') {
+      if (peek(i).v === 'console') markVar();
+      i++;
+      if (peek(i) && peek(i).v === ',') i++;
+    }
+    if (peek(i) && peek(i).v === '*') {
+      i++;
+      if (peek(i) && peek(i).v === 'as') i++;
+      if (peek(i) && peek(i).t === 'id') {
+        if (peek(i).v === 'console') markVar();
+        i++;
+      }
+    }
+    if (peek(i) && peek(i).v === '{') {
+      i++;
+      while (i < n && peek(i).v !== '}') {
+        if (peek(i).v === ',') { i++; continue; }
+        if (peek(i).v === 'type') i++;
+        if (peek(i) && peek(i).t === 'id') {
+          var local = peek(i).v;
+          i++;
+          if (peek(i) && peek(i).v === 'as') {
+            i++;
+            if (peek(i) && peek(i).t === 'id') { local = peek(i).v; i++; }
+          }
+          if (local === 'console') markVar();
+          continue;
+        }
+        i++;
+      }
+      if (i < n && peek(i).v === '}') i++;
+    }
+    while (i < n && peek(i).v !== ';' && peek(i).v !== '}') i++;
+    if (i < n && peek(i).v === ';') i++;
+    return i > start ? i : start + 1;
+  }
+
+  function exportDecl(i) {
+    i++;
+    if (peek(i) && peek(i).v === 'default') {
+      i++;
+      if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'function') return functionDecl(i, false);
+      if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'class') return classDecl(i, false);
+      if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'async') return asyncStmt(i);
+      i = expression(i, {});
+      if (peek(i) && peek(i).v === ';') i++;
+      return i;
+    }
+    if (peek(i) && peek(i).v === 'type') i++;
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'function') return functionDecl(i, true);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'class') return classDecl(i);
+    if (peek(i) && peek(i).t === 'kw' && (peek(i).v === 'var' || peek(i).v === 'let' || peek(i).v === 'const')) return varDecls(i);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'async') return asyncStmt(i);
+    if (peek(i) && (peek(i).v === '{' || peek(i).v === '*')) {
+      while (i < n && peek(i).v !== ';') i++;
+      if (i < n && peek(i).v === ';') i++;
+      return i;
+    }
+    return statement(i);
+  }
+
+  function forStmt(start) {
+    var i = start + 1;
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'await') i++;
+    if (!peek(i) || peek(i).v !== '(') return i;
+    pushScope(false, start, 'for');
+    i++;
+    if (peek(i) && peek(i).t === 'kw' && (peek(i).v === 'var' || peek(i).v === 'let' || peek(i).v === 'const')) i = varDecls(i);
+    else if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'await' && peek(i + 1) && peek(i + 1).t === 'id' && peek(i + 1).v === 'using') i = usingDecl(i);
+    else if (peek(i) && peek(i).t === 'id' && peek(i).v === 'using') i = usingDecl(i);
+    var depth = 1;
+    while (i < n && depth > 0) {
+      var v = peek(i).v;
+      if (v === '(') { depth++; i++; continue; }
+      if (v === ')') {
+        depth--;
+        i++;
+        if (depth === 0) break;
+        continue;
+      }
+      i++;
+    }
+    i = statement(i);
+    popScope(i);
+    return i;
+  }
+
+  function headerStmt(i) {
+    var kw = peek(i).v;
+    i++;
+    if (peek(i) && peek(i).v === '(') {
+      i = expression(i + 1, {});
+      if (peek(i) && peek(i).v === ')') i++;
+    }
+    i = statement(i);
+    if (kw === 'if' && peek(i) && peek(i).t === 'kw' && peek(i).v === 'else') {
+      i++;
+      i = statement(i);
+    }
+    return i;
+  }
+
+  function doStmt(i) {
+    i++;
+    i = statement(i);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'while') {
+      i++;
+      if (peek(i) && peek(i).v === '(') {
+        i = expression(i + 1, {});
+        if (peek(i) && peek(i).v === ')') i++;
+      }
+      if (peek(i) && peek(i).v === ';') i++;
+    }
+    return i;
+  }
+
+  function switchStmt(i) {
+    i++;
+    if (peek(i) && peek(i).v === '(') {
+      i = expression(i + 1, {});
+      if (peek(i) && peek(i).v === ')') i++;
+    }
+    if (peek(i) && peek(i).v === '{') return block(i);
+    return i;
+  }
+
+  function tryStmt(i) {
+    i++;
+    if (peek(i) && peek(i).v === '{') i = block(i);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'catch') i = catchClause(i);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'finally') {
+      i++;
+      if (peek(i) && peek(i).v === '{') i = block(i);
+    }
+    return i;
+  }
+
+  function catchClause(i) {
+    i++;
+    pushScope(false, i, 'catch');
+    if (peek(i) && peek(i).v === '(') {
+      i++;
+      if (peek(i) && peek(i).v !== ')') i = bindingName(i, false);
+      if (peek(i) && peek(i).v === ')') i++;
+    }
+    if (peek(i) && peek(i).v === '{') i = block(i);
+    popScope(i);
+    return i;
+  }
+
+  function asyncStmt(i) {
+    var next = peek(i + 1);
+    if (next && next.t === 'kw' && next.v === 'function') return functionDecl(i + 1, true);
+    if (next && next.v === '(') {
+      var after = skipGroup(i + 1);
+      if (peek(after) && peek(after).v === '=>') return arrowFromParen(i + 1);
+    }
+    if (next && next.t === 'id' && peek(i + 2) && peek(i + 2).v === '=>') return arrowFromIdent(i + 1);
+    return expression(i, {});
+  }
+
+  function statement(i) {
+    if (i >= n || !peek(i)) return n;
+    var tok = peek(i);
+    if (tok.v === ';') return i + 1;
+    if (tok.v === '}') return i;
+    if (tok.t === 'kw' && tok.v === 'case') {
+      i = expression(i + 1, { stopColon: true });
+      if (peek(i) && peek(i).v === ':') i++;
+      return i;
+    }
+    if (tok.t === 'kw' && tok.v === 'default' && peek(i + 1) && peek(i + 1).v === ':') return i + 2;
+    if (tok.t === 'kw' && tok.v === 'function') return functionDecl(i, true);
+    if (tok.t === 'kw' && tok.v === 'class') return classDecl(i);
+    if (tok.t === 'kw' && (tok.v === 'var' || tok.v === 'let' || tok.v === 'const')) return varDecls(i);
+    if (tok.t === 'kw' && tok.v === 'import') return importDecl(i);
+    if (tok.t === 'kw' && tok.v === 'export') return exportDecl(i);
+    if (tok.t === 'kw' && tok.v === 'for') return forStmt(i);
+    if (tok.t === 'kw' && (tok.v === 'while' || tok.v === 'if' || tok.v === 'with')) return headerStmt(i);
+    if (tok.t === 'kw' && tok.v === 'do') return doStmt(i);
+    if (tok.t === 'kw' && tok.v === 'switch') return switchStmt(i);
+    if (tok.t === 'kw' && tok.v === 'try') return tryStmt(i);
+    if (tok.t === 'kw' && tok.v === 'catch') return catchClause(i);
+    if (tok.t === 'kw' && tok.v === 'finally') {
+      i++;
+      if (peek(i) && peek(i).v === '{') return block(i);
+      return i;
+    }
+    if (tok.t === 'kw' && tok.v === 'async') return asyncStmt(i);
+    if (tok.t === 'kw' && tok.v === 'await' && peek(i + 1) && peek(i + 1).t === 'id' && peek(i + 1).v === 'using') return usingDecl(i);
+    if (tok.t === 'id' && tok.v === 'using') return usingDecl(i);
+    if (tok.v === '{') {
+      if (isBlockBrace(tokens, i)) return block(i);
+    }
+    if (tok.t === 'id' && peek(i + 1) && peek(i + 1).v === ':') return statement(i + 2);
+    i = expression(i, {});
+    if (peek(i) && peek(i).v === ';') i++;
+    return i;
+  }
+
+  var index = 0;
+  while (index < n) {
+    var next = statement(index);
+    index = next > index ? next : index + 1;
+  }
+
+  return function(tokenIndex) {
+    for (var s = 0; s < scopes.length; s++) {
+      var scope = scopes[s];
+      if (scope.binds && tokenIndex >= scope.start && tokenIndex < scope.end) return true;
+    }
+    return false;
+  };
 }
 
 function isConsoleCall(tokens, ti) {
@@ -5435,6 +6079,12 @@ function keywordIntroducingParen(tokens, closeIdx) {
       depth--;
       if (depth === 0) {
         var before = tokens[k - 1];
+        // `for await (...)` puts await immediately before the paren. The
+        // statement is still the body of the for, not a free statement.
+        if (before && before.t === 'kw' && before.v === 'await') {
+          var lead = tokens[k - 2];
+          if (lead && lead.t === 'kw' && lead.v === 'for') return 'for';
+        }
         if (before && before.t === 'kw') return before.v;
         return null;
       }
@@ -9739,7 +10389,27 @@ function compactAnalysisForCache(data){
         });
         copy.fnStats=stats;
     }
+    if(copy.refactorSuggestions&&typeof copy.refactorSuggestions==='object'){
+        copy.refactorSuggestions=stripSourceBearingRefactorSuggestions(copy.refactorSuggestions);
+    }
     return copy;
+}
+
+function stripSourceBearingRefactorSuggestions(pack){
+    if(!pack||typeof pack!=='object'||Array.isArray(pack))return pack;
+    var next=Object.assign({},pack);
+    delete next.combinedPatch;
+    delete next.filePatches;
+    if(Array.isArray(next.sites)){
+        next.sites=next.sites.map(function(site){
+            if(!site||typeof site!=='object')return site;
+            var copy=Object.assign({},site);
+            delete copy.snippet;
+            delete copy.patch;
+            return copy;
+        });
+    }
+    return next;
 }
 
 function openAnalysisCacheDb(){
@@ -14131,7 +14801,7 @@ function App(){
     function downloadTextFile(filename,text,mime){if(!text)return;var blob=new Blob([text],{type:mime||'text/plain'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);}
     function patchDownloadName(filePath){var base=String(filePath||'analysis').replace(/[^A-Za-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'');if(!base)base='analysis';return 'codeflow-remove-debug-'+base+'.patch';}
     function renderPatchPreview(patch){if(!patch)return null;var lines=patch.split('\n');if(lines.length&&lines[lines.length-1]==='')lines.pop();return React.createElement('pre',{className:'patch-preview'},lines.map(function(line,idx){var cls='patch-line-ctx';if(line.indexOf('diff --git ')===0||line.indexOf('--- ')===0||line.indexOf('+++ ')===0||line.indexOf('@@')===0||line.charAt(0)==='\\')cls='patch-line-meta';else if(line.charAt(0)==='-')cls='patch-line-del';return React.createElement('div',{key:idx,className:cls},line.length?line:' ');}));}
-    function renderDebugPatchSites(filePath){var pack=data&&data.refactorSuggestions;if(!pack||!pack.sites||!pack.sites.length)return null;var sites=pack.sites.filter(function(site){return !filePath||site.filePath===filePath;});if(!sites.length)return null;var fileKeys=[];var grouped={};sites.forEach(function(site){if(!grouped[site.filePath]){grouped[site.filePath]=[];fileKeys.push(site.filePath);}grouped[site.filePath].push(site);});var appliable=sites.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{className:'debug-patch-panel'},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:12,fontWeight:600}},'Debug statement patches'),!filePath&&pack.combinedPatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile('codeflow-remove-debug-statement.patch',pack.combinedPatch,'text/x-diff');}},'Download all .patch'):null),React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginBottom:8,lineHeight:1.4}},appliable+' safe removal'+(appliable===1?'':'s')+' · '+(sites.length-appliable)+' report-only. Codeflow does not modify your files. Apply a downloaded patch from the repo root with git apply. A single-statement patch targets the original file; the combined patch removes every safe statement together.'),fileKeys.map(function(path){var group=grouped[path];var filePatch=pack.filePatches&&pack.filePatches[path];var safeCount=group.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{key:path,style:{marginBottom:12}},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:10,fontFamily:'monospace',color:'var(--t1)',wordBreak:'break-all'}},path),filePatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(path),filePatch,'text/x-diff');}},'Download file .patch'):null),safeCount>1?React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:6}},'Remove '+safeCount+' standalone debug statements in '+path+'. This patch removes code.'):null,group.map(function(site){return React.createElement('div',{key:site.findingId,className:'debug-patch-card'},React.createElement('div',{style:{fontSize:10,color:'var(--t1)',marginBottom:4,lineHeight:1.4}},site.summary),site.status==='report-only'?React.createElement('div',{className:'debug-patch-reason'},'Report only: '+site.reason):null,site.snippet?React.createElement('div',{className:'security-code'},site.snippet):null,site.status==='appliable'?renderPatchPreview(site.patch):null,site.status==='appliable'?React.createElement('button',{className:'view-file-btn',style:{marginTop:8},onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(site.filePath+'-L'+site.line),site.patch,'text/x-diff');}},'Download .patch'):null);}));}));}
+    function renderDebugPatchSites(filePath){var pack=data&&data.refactorSuggestions;if(!pack||!pack.sites||!pack.sites.length)return null;var sites=pack.sites.filter(function(site){return !filePath||site.filePath===filePath;});if(!sites.length)return null;var fileKeys=[];var grouped={};sites.forEach(function(site){if(!grouped[site.filePath]){grouped[site.filePath]=[];fileKeys.push(site.filePath);}grouped[site.filePath].push(site);});var appliable=sites.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{className:'debug-patch-panel'},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:12,fontWeight:600}},'Debug statement patches'),!filePath&&pack.combinedPatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile('codeflow-remove-debug-statement.patch',pack.combinedPatch,'text/x-diff');}},'Download all .patch'):null),React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginBottom:8,lineHeight:1.4}},appliable+' safe removal'+(appliable===1?'':'s')+' · '+(sites.length-appliable)+' report-only. Codeflow does not modify your files. Apply a downloaded patch from the repo root with git apply. A single-statement patch targets the original file; the combined patch removes every safe statement together.'),fileKeys.map(function(path){var group=grouped[path];var filePatch=pack.filePatches&&pack.filePatches[path];var safeCount=group.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{key:path,style:{marginBottom:12}},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:10,fontFamily:'monospace',color:'var(--t1)',wordBreak:'break-all'}},path),filePatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(path),filePatch,'text/x-diff');}},'Download file .patch'):null),safeCount>1?React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:6}},'Remove '+safeCount+' standalone debug statements in '+path+'. This patch removes code.'):null,group.map(function(site){return React.createElement('div',{key:site.findingId,className:'debug-patch-card'},React.createElement('div',{style:{fontSize:10,color:'var(--t1)',marginBottom:4,lineHeight:1.4}},site.summary),site.status==='report-only'?React.createElement('div',{className:'debug-patch-reason'},'Report only: '+site.reason):null,site.snippet?React.createElement('div',{className:'security-code'},site.snippet):null,site.status==='appliable'?renderPatchPreview(site.patch):null,site.status==='appliable'&&site.patch?React.createElement('button',{className:'view-file-btn',style:{marginTop:8},onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(site.filePath+'-L'+site.line),site.patch,'text/x-diff');}},'Download .patch'):null);}));}));}
     function exportJSON(){if(!data)return;var blob=new Blob([JSON.stringify({stats:data.stats,files:data.files.map(function(f){return{path:f.path,fns:f.functions.length,layer:f.layer,lines:f.lines,dependencies:f.dependencies||[]};}),connections:data.connections,issues:data.issues,patterns:data.patterns,security:data.securityIssues,architectureDiagram:data.architectureDiagram,refactorSuggestions:data.refactorSuggestions||null},null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='codeflow-analysis.json';a.click();URL.revokeObjectURL(url);}
     function getAnalysisSourceLabel(){
         if(localSourceKind==='folder')return(repoInfo&&repoInfo.name)||'Local Folder';
