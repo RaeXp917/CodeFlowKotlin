@@ -360,11 +360,6 @@ test('a console parameter on a class method is report-only and a sibling call st
     '  }',
     '}',
     'console.log(2);',
-    'export default class console {',
-    '  run() {',
-    '    console.log(3);',
-    '  }',
-    '}',
     '',
   ].join('\n');
   const suggestions = Parser.collectRemoveDebugStatementSuggestions([
@@ -376,12 +371,28 @@ test('a console parameter on a class method is report-only and a sibling call st
   assert.equal(byLine[6].reason, 'shadowed by a local console binding');
   assert.equal(byLine[6].patch, undefined);
   assert.equal(byLine[9].status, 'appliable');
-  assert.equal(byLine[12].status, 'report-only');
-  assert.equal(byLine[12].reason, 'shadowed by a local console binding');
+
+  const exported = [
+    'export default class console {',
+    '  run() {',
+    '    console.log(3);',
+    '  }',
+    '}',
+    'console.log(4);',
+    '',
+  ].join('\n');
+  const exportedSuggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/default.ts', content: exported },
+  ]);
+  const exportedByLine = Object.fromEntries(exportedSuggestions.sites.map((site) => [site.line, site]));
+  assert.equal(exportedSuggestions.combinedPatch, '');
+  assert.equal(exportedByLine[3].status, 'report-only');
+  assert.equal(exportedByLine[3].reason, 'shadowed by a local console binding');
+  assert.equal(exportedByLine[6].status, 'report-only');
+  assert.equal(exportedByLine[6].reason, 'shadowed by a local console binding');
 
   const applied = await applyPatch([{ path: 'src/types.ts', content: source }], suggestions.combinedPatch);
   assert.match(applied['src/types.ts'], /save\(console\) \{\n    console\.log\(record\);/);
-  assert.match(applied['src/types.ts'], /class console \{\n  run\(\) \{\n    console\.log\(3\);/);
   assert.doesNotMatch(applied['src/types.ts'], /console\.log\(1\)/);
   assert.doesNotMatch(applied['src/types.ts'], /console\.log\(2\)/);
 });
@@ -539,6 +550,229 @@ test('TypeScript namespace, module, and enum named console stay report-only', as
   assert.doesNotMatch(applied['src/ns.ts'], /console\.log\(2\)/);
   assert.doesNotMatch(applied['src/ns.ts'], /console\.info\(Color\.red\)/);
   assert.doesNotMatch(applied['src/ns.ts'], /console\.log\(3\)/);
+});
+
+test('tagged templates and other expression continuations stay report-only', async () => {
+  const source = [
+    'function tag(strings) { return strings.raw.join(""); }',
+    'console.log("safe");',
+    'console.log("x")',
+    '`tag`',
+    'console.log(',
+    '  "multi"',
+    ')',
+    '`also ${name}`',
+    'console.log("y") // still a tag',
+    '`after-comment`',
+    'console.log("z");',
+    '`separate`',
+    'console.debug("kept")',
+    'keep();',
+    'debugger',
+    '`not-a-tag`',
+    'console.info("typed")',
+    'as string',
+    'console.info("checked")',
+    'satisfies Logger',
+    '',
+  ].join('\n');
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/continue.ts', content: source },
+  ]);
+  const byLine = Object.fromEntries(suggestions.sites.map((site) => [site.line, site]));
+
+  assert.equal(byLine[2].status, 'appliable');
+  assert.equal(byLine[3].status, 'report-only');
+  assert.equal(byLine[3].reason, 'part of an expression');
+  assert.equal(byLine[3].patch, undefined);
+  assert.equal(byLine[5].status, 'report-only');
+  assert.equal(byLine[5].reason, 'part of an expression');
+  assert.equal(byLine[9].status, 'report-only');
+  assert.equal(byLine[9].reason, 'part of an expression');
+  assert.equal(byLine[11].status, 'appliable');
+  assert.equal(byLine[13].status, 'appliable');
+  assert.equal(byLine[15].status, 'appliable');
+  assert.equal(byLine[15].kind, 'debugger');
+  assert.equal(byLine[17].status, 'report-only');
+  assert.equal(byLine[17].reason, 'part of an expression');
+  assert.equal(byLine[19].status, 'report-only');
+  assert.equal(byLine[19].reason, 'part of an expression');
+
+  const removed = suggestions.combinedPatch.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---'));
+  assert.deepEqual(removed, [
+    '-console.log("safe");',
+    '-console.log("z");',
+    '-console.debug("kept")',
+    '-debugger',
+  ]);
+
+  const applied = await applyPatch([{ path: 'src/continue.ts', content: source }], suggestions.combinedPatch);
+  assert.match(applied['src/continue.ts'], /console\.log\("x"\)\n`tag`/);
+  assert.match(applied['src/continue.ts'], /console\.log\(\n  "multi"\n\)\n`also \$\{name\}`/);
+  assert.match(applied['src/continue.ts'], /console\.log\("y"\) \/\/ still a tag\n`after-comment`/);
+  assert.match(applied['src/continue.ts'], /console\.info\("typed"\)\nas string/);
+  assert.match(applied['src/continue.ts'], /console\.info\("checked"\)\nsatisfies Logger/);
+  assert.doesNotMatch(applied['src/continue.ts'], /console\.log\("safe"\)/);
+  assert.doesNotMatch(applied['src/continue.ts'], /console\.log\("z"\)/);
+  assert.doesNotMatch(applied['src/continue.ts'], /console\.debug\("kept"\)/);
+  assert.doesNotMatch(applied['src/continue.ts'], /^debugger$/m);
+  assert.match(applied['src/continue.ts'], /^`not-a-tag`$/m);
+});
+
+test('escaped console bindings stay report-only', async () => {
+  const shadowed = [
+    'const \\u0063onsole = audit;\nconsole.log(record);\n',
+    'const \\u{63}onsole = audit;\nconsole.log(record);\n',
+    'const conso\\u006ce = audit;\nconsole.log(record);\n',
+    'import \\u0063onsole from "./logger";\nconsole.log(record);\n',
+    'function \\u0063onsole() { return 1; }\nconsole.log(record);\n',
+    'class \\u0063onsole { static log(x) { return x; } }\nconsole.log(record);\n',
+    'try {\n  risky();\n} catch (\\u0063onsole) {\n  console.log(record);\n}\n',
+    'const { \\u0063onsole } = audit;\nconsole.log(record);\n',
+    'const { log: \\u0063onsole } = audit;\nconsole.log(record);\n',
+    'const [\\u0063onsole] = rows;\nconsole.log(record);\n',
+    'function save(\\u0063onsole) {\n  console.log(record);\n}\n',
+    'const \\u0063onsole = audit;\n\\u0063onsole.log(record);\n',
+    'console.\\u006cog(record);\nconst \\u0063onsole = audit;\n',
+  ];
+  for (const content of shadowed) {
+    const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+      { path: 'src/escape.js', content },
+    ]);
+    assert.equal(suggestions.combinedPatch, '', content);
+    assert.ok(suggestions.sites.length >= 1, content);
+    assert.ok(
+      suggestions.sites.every((site) => site.status === 'report-only' && site.reason === 'shadowed by a local console binding'),
+      content + '\n' + JSON.stringify(suggestions.sites.map((site) => [site.line, site.status, site.reason]))
+    );
+  }
+
+  const unsafe = [
+    '\\u0063onst x = 1;\nconsole.log(record);\n',
+    'const \\u002b = 1;\nconsole.log(record);\n',
+    'const good\\ = 1;\nconsole.log(record);\n',
+  ];
+  for (const content of unsafe) {
+    const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+      { path: 'src/escape.js', content },
+    ]);
+    assert.equal(suggestions.combinedPatch, '', content);
+    assert.ok(suggestions.sites.length >= 1, content);
+    assert.ok(
+      suggestions.sites.every((site) => site.status === 'report-only' && site.reason === 'in a file with an escaped identifier'),
+      content + '\n' + JSON.stringify(suggestions.sites.map((site) => [site.line, site.status, site.reason]))
+    );
+  }
+
+  const stillGlobal = [
+    'const label = "\\u0063onsole";\nconsole.log(label);\n',
+    'const label = `\\u0063onsole`;\nconsole.log(label);\n',
+    '// const \\u0063onsole = audit\nconsole.log(record);\n',
+    'const re = /\\u0063onsole/;\nconsole.log(re);\n',
+    'const caf\\u00e9 = 1;\nconsole.log(caf\\u00e9);\n',
+    '\\u0063onsole.log(record);\nkeep();\n',
+  ];
+  for (const content of stillGlobal) {
+    const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+      { path: 'src/escape.js', content },
+    ]);
+    assert.ok(suggestions.sites.some((site) => site.status === 'appliable'), content);
+    assert.equal(
+      suggestions.sites.filter((site) => site.kind === 'console.log').every((site) => site.status === 'appliable'),
+      true,
+      content
+    );
+  }
+
+  const scoped = [
+    '{',
+    '  const \\u0063onsole = audit;',
+    '  console.log(record);',
+    '}',
+    'console.log(1);',
+    'function save(\\u0063onsole) {',
+    '  console.debug(record);',
+    '}',
+    'console.info(2);',
+    '',
+  ].join('\n');
+  const scopedSuggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/escape.js', content: scoped },
+  ]);
+  const byLine = Object.fromEntries(scopedSuggestions.sites.map((site) => [site.line, site]));
+  assert.equal(byLine[3].status, 'report-only');
+  assert.equal(byLine[3].reason, 'shadowed by a local console binding');
+  assert.equal(byLine[3].patch, undefined);
+  assert.equal(byLine[5].status, 'appliable');
+  assert.equal(byLine[7].status, 'report-only');
+  assert.equal(byLine[7].reason, 'shadowed by a local console binding');
+  assert.equal(byLine[9].status, 'appliable');
+
+  const withSource = [
+    'with ({ console: audit }) {',
+    '  console.log(record);',
+    '  function inner() {',
+    '    console.debug(record);',
+    '  }',
+    '}',
+    'console.info(1);',
+    '',
+  ].join('\n');
+  const withSuggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/with.js', content: withSource },
+  ]);
+  const withByLine = Object.fromEntries(withSuggestions.sites.map((site) => [site.line, site]));
+  assert.equal(withByLine[2].status, 'report-only');
+  assert.equal(withByLine[2].reason, 'shadowed by a local console binding');
+  assert.equal(withByLine[2].patch, undefined);
+  assert.equal(withByLine[4].status, 'report-only');
+  assert.equal(withByLine[4].reason, 'shadowed by a local console binding');
+  assert.equal(withByLine[7].status, 'appliable');
+
+  const moduleBindings = [
+    ['export default function console(x) { return x; }\nconsole.log(record);\n', 'src/fn.js'],
+    ['export default class console {\n  static log(x) { return x; }\n}\nconsole.log(record);\n', 'src/cls.ts'],
+    ['export default function* console() { yield 1; }\nconsole.log(record);\n', 'src/gen.js'],
+  ];
+  for (const [content, path] of moduleBindings) {
+    const suggestions = Parser.collectRemoveDebugStatementSuggestions([{ path, content }]);
+    assert.equal(suggestions.combinedPatch, '', content);
+    assert.ok(
+      suggestions.sites.every((site) => site.status === 'report-only' && site.reason === 'shadowed by a local console binding'),
+      content + '\n' + JSON.stringify(suggestions.sites.map((site) => [site.line, site.status, site.reason]))
+    );
+  }
+
+  const notConsole = [
+    'export default function notConsole() { return 1; }\nconsole.log(5);\n',
+    'export default class NotConsole {}\nconsole.log(6);\n',
+  ];
+  for (const content of notConsole) {
+    const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+      { path: 'src/other.ts', content },
+    ]);
+    assert.equal(suggestions.sites.length, 1, content);
+    assert.equal(suggestions.sites[0].status, 'appliable', content);
+  }
+
+  const applied = await applyPatch(
+    [
+      { path: 'src/escape.js', content: scoped },
+      { path: 'src/with.js', content: withSource },
+      { path: 'src/other.ts', content: notConsole[0] },
+    ],
+    scopedSuggestions.combinedPatch + withSuggestions.combinedPatch + Parser.collectRemoveDebugStatementSuggestions([
+      { path: 'src/other.ts', content: notConsole[0] },
+    ]).combinedPatch
+  );
+  assert.match(applied['src/escape.js'], /const \\u0063onsole = audit;\n  console\.log\(record\);/);
+  assert.doesNotMatch(applied['src/escape.js'], /console\.log\(1\)/);
+  assert.match(applied['src/escape.js'], /console\.debug\(record\);/);
+  assert.doesNotMatch(applied['src/escape.js'], /console\.info\(2\)/);
+  assert.match(applied['src/with.js'], /with \(\{ console: audit \}\) \{\n  console\.log\(record\);/);
+  assert.match(applied['src/with.js'], /console\.debug\(record\);/);
+  assert.doesNotMatch(applied['src/with.js'], /console\.info\(1\)/);
+  assert.doesNotMatch(applied['src/other.ts'], /console\.log\(5\)/);
 });
 
 test('index.html does not gain a write path for debug patches', () => {

@@ -5279,6 +5279,11 @@ function findDebugSites(content, filePath) {
       }
       var site = classifySite(normalized, tokens, ti, closeIdx, kind, filePath);
       var globalReason = consoleReferenceReason(tokens, ti, consoleShadowed);
+      // A broken identifier escape (illegal keyword escape, bad \u, a
+      // non-identifier code point) can hide a binding the walker never sees.
+      // Valid escapes are decoded before binding resolution; only the failures
+      // force the whole file report-only.
+      if (!globalReason && tokens.unsafeIdentEscape) globalReason = 'in a file with an escaped identifier';
       if (globalReason) {
         site.status = 'report-only';
         site.reason = globalReason;
@@ -5311,9 +5316,10 @@ function consoleShadowPredicate(tokens) {
 }
 
 // True when a local `console` binding (parameter, import, declaration, catch,
-// class name, namespace, module, or enum) is in scope. Member calls are
-// rejected separately. A failure to resolve the binding is treated as shadowed
-// so the patch stays report-only.
+// class name, namespace, module, enum, export-default name, or `with` object)
+// is in scope. Identifier escapes are decoded before this runs. Member calls
+// are rejected separately. A failure to resolve the binding is treated as
+// shadowed so the patch stays report-only.
 function consoleShadowAt(tokens) {
   var n = tokens.length;
   var scopes = [];
@@ -5753,8 +5759,11 @@ function consoleShadowAt(tokens) {
     i++;
     if (peek(i) && peek(i).v === 'default') {
       i++;
-      if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'function') return functionDecl(i, false);
-      if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'class') return classDecl(i, false);
+      // `export default function console` / `export default class console`
+      // bind that name in the enclosing scope, same as a declaration.
+      // Anonymous `export default function () {}` binds nothing.
+      if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'function') return functionDecl(i, true);
+      if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'class') return classDecl(i);
       if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'async') return asyncStmt(i);
       i = expression(i, {});
       if (peek(i) && peek(i).v === ';') i++;
@@ -5796,6 +5805,22 @@ function consoleShadowAt(tokens) {
       }
       i++;
     }
+    i = statement(i);
+    popScope(i);
+    return i;
+  }
+
+  // `with (obj)` puts obj on the scope chain, so `console` inside the body
+  // (including functions declared there) may be obj.console rather than the
+  // global. The head expression is still resolved in the outer scope.
+  function withStmt(start) {
+    var i = start + 1;
+    if (peek(i) && peek(i).v === '(') {
+      i = expression(i + 1, {});
+      if (peek(i) && peek(i).v === ')') i++;
+    }
+    pushScope(false, i, 'with');
+    markLet();
     i = statement(i);
     popScope(i);
     return i;
@@ -5964,7 +5989,8 @@ function consoleShadowAt(tokens) {
     if (tok.t === 'kw' && tok.v === 'import') return importDecl(i);
     if (tok.t === 'kw' && tok.v === 'export') return exportDecl(i);
     if (tok.t === 'kw' && tok.v === 'for') return forStmt(i);
-    if (tok.t === 'kw' && (tok.v === 'while' || tok.v === 'if' || tok.v === 'with')) return headerStmt(i);
+    if (tok.t === 'kw' && tok.v === 'with') return withStmt(i);
+    if (tok.t === 'kw' && (tok.v === 'while' || tok.v === 'if')) return headerStmt(i);
     if (tok.t === 'kw' && tok.v === 'do') return doStmt(i);
     if (tok.t === 'kw' && tok.v === 'switch') return switchStmt(i);
     if (tok.t === 'kw' && tok.v === 'try') return tryStmt(i);
@@ -6038,7 +6064,7 @@ function classifySite(content, tokens, startIdx, endIdx, kind, filePath) {
   var consumedSemi = content.slice(endTok.end, endOffset).indexOf(';') >= 0;
   if (!consumedSemi) {
     var next = tokens[endIdx + 1];
-    if (next && continuesExpression(next)) {
+    if (next && continuesExpression(next, endTok)) {
       return makeSite(filePath, kind, startTok, line, endLine, 'report-only', 'part of an expression', snippet);
     }
   }
@@ -6189,9 +6215,20 @@ function hasNewlineBetween(content, prevTok, tok) {
   return content.slice(prevTok.end, tok.i).indexOf('\n') >= 0;
 }
 
-function continuesExpression(tok) {
+function continuesExpression(tok, endTok) {
   if (!tok) return false;
+  // `foo()\n`bar`` is one tagged-template expression. The opening backtick is
+  // its own token so a template on the next line is not mistaken for a new
+  // statement. `debugger` is not a tag expression, so a following template is
+  // a separate statement.
+  if (tok.t === 'tmpl') {
+    if (endTok && endTok.t === 'kw' && endTok.v === 'debugger') return false;
+    return true;
+  }
   if (tok.t === 'kw' && (tok.v === 'in' || tok.v === 'instanceof')) return true;
+  // TypeScript `expr \n as T` and `expr \n satisfies T` are one expression.
+  // In plain JS those words are identifiers, so report-only is conservative.
+  if (tok.v === 'as' || tok.v === 'satisfies') return true;
   if (tok.t !== 'p') return false;
   return Object.prototype.hasOwnProperty.call(CONTINUE_OPS, tok.v);
 }
@@ -6410,8 +6447,10 @@ function tokenizeJs(content) {
       continue;
     }
     if (ch === '`') {
+      var tmplStart = i, tmplLine = line, tmplCol = col;
       bump(ch); i++;
       modes.push('tmpl');
+      push({ t:'tmpl', v:'`', i:tmplStart, end:i, line:tmplLine, col:tmplCol });
       continue;
     }
     if (isDigit(ch) || (ch === '.' && isDigit(content[i + 1]))) {
@@ -6420,14 +6459,23 @@ function tokenizeJs(content) {
       push({ t:'num', v:content.slice(nStart, i), i:nStart, end:i, line:nLine, col:nCol });
       continue;
     }
-    if (isIdentStart(ch)) {
+    if (isIdentStart(ch) || (ch === '\\' && content[i + 1] === 'u')) {
       var wStart = i, wLine = line, wCol = col;
-      bump(ch); i++;
-      while (i < n && isIdentCont(content[i])) { bump(content[i]); i++; }
-      var word = content.slice(wStart, i);
-      push({ t: JS_KEYWORDS[word] ? 'kw' : 'id', v:word, i:wStart, end:i, line:wLine, col:wCol });
-      continue;
+      var decoded = readIdentifier();
+      if (i === wStart) {
+        // Malformed lead-in. The raw backslash path below flags the file.
+      } else {
+        var escapedKeyword = decoded.sawEscape && Object.prototype.hasOwnProperty.call(JS_KEYWORDS, decoded.word);
+        if (decoded.bad || escapedKeyword) tokens.unsafeIdentEscape = true;
+        // Unescaped names keep the historical keyword test, including inherited
+        // properties such as constructor. Escaped names use own properties only,
+        // and an escaped keyword is a syntax error handled via the flag above.
+        var asKeyword = escapedKeyword || (!decoded.sawEscape && !!JS_KEYWORDS[decoded.word]);
+        push({ t: asKeyword ? 'kw' : 'id', v: decoded.word, i: wStart, end: i, line: wLine, col: wCol });
+        continue;
+      }
     }
+    if (ch === '\\') tokens.unsafeIdentEscape = true;
     var opStart = i, opLine = line, opCol = col;
     var op = readOperator();
     for (var oi = 0; oi < op.length; oi++) bump(op.charAt(oi));
@@ -6444,6 +6492,61 @@ function tokenizeJs(content) {
   }
   return tokens;
 
+  // Decode \uXXXX and \u{...} so `const \u0063onsole` is the binding `console`.
+  // A bad escape or an escaped reserved word is a syntax error; the caller flags
+  // the file and leaves every console call report-only.
+  function readIdentifier() {
+    var word = '';
+    var sawEscape = false;
+    var bad = false;
+    var first = true;
+    while (i < n) {
+      if (content[i] === '\\') {
+        var esc = readIdentEscapeAt(i);
+        if (!esc) { bad = true; break; }
+        var ech = identCharFromCodePoint(esc.cp);
+        var escOk = !!ech && (first ? isIdentStart(ech) : isIdentCont(ech));
+        var escEnd = esc.end;
+        while (i < escEnd) { bump(content[i]); i++; }
+        if (!escOk) { bad = true; break; }
+        word += ech;
+        sawEscape = true;
+        first = false;
+        continue;
+      }
+      var idCh = content[i];
+      if (!(first ? isIdentStart(idCh) : isIdentCont(idCh))) break;
+      word += idCh;
+      bump(idCh);
+      i++;
+      first = false;
+    }
+    return { word: word, sawEscape: sawEscape, bad: bad };
+  }
+  function readIdentEscapeAt(pos) {
+    if (content[pos] !== '\\' || content[pos + 1] !== 'u') return null;
+    if (content[pos + 2] === '{') {
+      var j = pos + 3;
+      var hex = '';
+      while (j < n && hex.length < 6 && /[0-9a-fA-F]/.test(content[j])) {
+        hex += content[j];
+        j++;
+      }
+      if (!hex || (hex.length === 6 && /[0-9a-fA-F]/.test(content[j] || '')) || content[j] !== '}') return null;
+      var cp = parseInt(hex, 16);
+      if (cp > 0x10FFFF) return null;
+      return { cp: cp, end: j + 1 };
+    }
+    var hex4 = content.substr(pos + 2, 4);
+    if (!/^[0-9a-fA-F]{4}$/.test(hex4)) return null;
+    return { cp: parseInt(hex4, 16), end: pos + 6 };
+  }
+  function identCharFromCodePoint(cp) {
+    if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return '';
+    if (cp <= 0xFFFF) return String.fromCharCode(cp);
+    var cu = cp - 0x10000;
+    return String.fromCharCode(0xD800 + (cu >> 10), 0xDC00 + (cu & 0x3FF));
+  }
   function readRegex() {
     bump('/'); i++;
     var inClass = false;
