@@ -121,6 +121,7 @@ test('simple debug statements download as a repo-relative patch that git apply a
   assert.match(patch, /^--- a\/src\/app\.js\n/m);
   assert.match(patch, /^\+\+\+ b\/src\/app\.js\n/m);
   assert.match(patch, /^@@ -1,6 \+1,4 @@\n/m);
+  assert.equal(patch.includes('\r'), false);
   assert.equal(suggestions.sites.filter((site) => site.status === 'appliable').length, 2);
   suggestions.sites.forEach((site) => {
     assert.equal(site.transformId, 'remove-debug-statement');
@@ -405,6 +406,139 @@ test('imported and declared console bindings are not removed', () => {
     assert.ok(suggestions.sites.length >= 1, content);
     assert.ok(suggestions.sites.every((site) => site.status === 'report-only' && site.reason === reason), content);
   }
+});
+
+test('CRLF and mixed line endings survive in a patch git apply accepts', async () => {
+  const crlf = 'function main() {\r\n  const x = 1;\r\n  console.log(x);\r\n  debugger;\r\n  return x;\r\n}\r\n';
+  const mixed = 'keepA();\r\nconsole.log(1);\nkeepB();\r\n';
+  const noFinalNewline = 'console.log(1);\r\nkeep();';
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/crlf.js', content: crlf },
+    { path: 'src/mixed.js', content: mixed },
+    { path: 'src/nonew.js', content: noFinalNewline },
+  ]);
+
+  const crlfPatch = suggestions.filePatches['src/crlf.js'];
+  const crlfBody = crlfPatch.split('\n').filter((line) => line.startsWith(' ') || (line.startsWith('-') && !line.startsWith('---')));
+  assert.deepEqual(
+    crlfBody.filter((line) => line.startsWith('-')),
+    ['-  console.log(x);\r', '-  debugger;\r']
+  );
+  assert.ok(crlfBody.every((line) => line.endsWith('\r')));
+
+  const mixedBody = suggestions.filePatches['src/mixed.js'].split('\n');
+  assert.deepEqual(
+    mixedBody.filter((line) => line.startsWith('-') && !line.startsWith('---')),
+    ['-console.log(1);']
+  );
+  assert.ok(mixedBody.includes(' keepA();\r'));
+  assert.ok(mixedBody.includes(' keepB();\r'));
+
+  const applied = await applyPatch(
+    [
+      { path: 'src/crlf.js', content: crlf },
+      { path: 'src/mixed.js', content: mixed },
+      { path: 'src/nonew.js', content: noFinalNewline },
+    ],
+    suggestions.combinedPatch
+  );
+  assert.equal(applied['src/crlf.js'], 'function main() {\r\n  const x = 1;\r\n  return x;\r\n}\r\n');
+  assert.equal(applied['src/mixed.js'], 'keepA();\r\nkeepB();\r\n');
+  assert.equal(applied['src/nonew.js'], 'keep();');
+
+  const oneSite = suggestions.sites.find((site) => site.filePath === 'src/crlf.js' && site.kind === 'console.log');
+  const appliedSite = await applyPatch([{ path: 'src/crlf.js', content: crlf }], oneSite.patch);
+  assert.equal(appliedSite['src/crlf.js'], 'function main() {\r\n  const x = 1;\r\n  debugger;\r\n  return x;\r\n}\r\n');
+});
+
+test('a bare CR line ending stays report-only because git apply cannot match it', () => {
+  const source = 'console.log(1);\rkeep();\r';
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/cr.js', content: source },
+  ]);
+  assert.equal(suggestions.combinedPatch, '');
+  assert.equal(suggestions.filePatches['src/cr.js'], undefined);
+  assert.equal(suggestions.sites.length, 1);
+  assert.equal(suggestions.sites[0].status, 'report-only');
+  assert.equal(suggestions.sites[0].reason, 'using line endings git apply cannot match');
+  assert.equal(suggestions.sites[0].patch, undefined);
+});
+
+test('TypeScript namespace, module, and enum named console stay report-only', async () => {
+  const cases = [
+    'namespace console {\n  export function log(x) { return x; }\n}\nconsole.log(record);\n',
+    'export namespace console {\n  export function log(x) { return x; }\n}\nconsole.log(record);\n',
+    'declare namespace console {\n  export function log(x): void;\n}\nconsole.log(record);\n',
+    'module console {\n  export function log(x) { return x; }\n}\nconsole.log(record);\n',
+    'export module console {\n  export function log(x) { return x; }\n}\nconsole.log(record);\n',
+    'enum console {\n  log = 1\n}\nconsole.log(record);\n',
+    'export enum console {\n  log = 1\n}\nconsole.log(record);\n',
+    'const enum console {\n  log = 1\n}\nconsole.log(record);\n',
+    'export const enum console {\n  log = 1\n}\nconsole.debug(record);\n',
+    'declare enum console {\n  log = 1\n}\nconsole.info(record);\n',
+    'declare const enum console {\n  log = 1\n}\nconsole.log(record);\n',
+    'namespace console.Inner {\n  export const ready = true;\n}\nconsole.log(record);\n',
+    'namespace console {\n  export function log(x) { return x; }\n  console.log(record);\n}\n',
+  ];
+  for (const content of cases) {
+    const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+      { path: 'src/ns.ts', content },
+    ]);
+    assert.equal(suggestions.combinedPatch, '', content);
+    assert.ok(suggestions.sites.length >= 1, content);
+    assert.ok(
+      suggestions.sites.every((site) => site.status === 'report-only' && site.reason === 'shadowed by a local console binding'),
+      content + '\n' + JSON.stringify(suggestions.sites.map((site) => [site.line, site.status, site.reason]))
+    );
+  }
+
+  const source = [
+    'namespace Other {',
+    '  export function run() {',
+    '    console.log(1);',
+    '  }',
+    '}',
+    'namespace App {',
+    '  export namespace console {',
+    '    export function log(x) { return x; }',
+    '  }',
+    '  console.log(record);',
+    '}',
+    'console.log(2);',
+    'namespace Foo.console {',
+    '  export function log(x) { return x; }',
+    '  console.debug(x);',
+    '}',
+    'enum Color { red = 1 }',
+    'console.info(Color.red);',
+    'declare namespace Lib {',
+    '  export function ready(): void;',
+    '}',
+    'console.log(3);',
+    'module.exports = App;',
+    '',
+  ].join('\n');
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/ns.ts', content: source },
+  ]);
+  const byLine = Object.fromEntries(suggestions.sites.map((site) => [site.line, site]));
+  assert.equal(byLine[3].status, 'appliable');
+  assert.equal(byLine[10].status, 'report-only');
+  assert.equal(byLine[10].reason, 'shadowed by a local console binding');
+  assert.equal(byLine[10].patch, undefined);
+  assert.equal(byLine[12].status, 'appliable');
+  assert.equal(byLine[15].status, 'report-only');
+  assert.equal(byLine[15].reason, 'shadowed by a local console binding');
+  assert.equal(byLine[18].status, 'appliable');
+  assert.equal(byLine[22].status, 'appliable');
+
+  const applied = await applyPatch([{ path: 'src/ns.ts', content: source }], suggestions.combinedPatch);
+  assert.match(applied['src/ns.ts'], /export namespace console \{\n    export function log\(x\) \{ return x; \}\n  \}\n  console\.log\(record\);/);
+  assert.match(applied['src/ns.ts'], /console\.debug\(x\);/);
+  assert.doesNotMatch(applied['src/ns.ts'], /console\.log\(1\)/);
+  assert.doesNotMatch(applied['src/ns.ts'], /console\.log\(2\)/);
+  assert.doesNotMatch(applied['src/ns.ts'], /console\.info\(Color\.red\)/);
+  assert.doesNotMatch(applied['src/ns.ts'], /console\.log\(3\)/);
 });
 
 test('index.html does not gain a write path for debug patches', () => {

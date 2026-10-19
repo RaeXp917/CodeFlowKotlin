@@ -5211,7 +5211,16 @@ function collectRemoveDebugStatementSuggestions(files) {
       return;
     }
     var ranges = [];
+    var bareCr = hasBareCarriageReturn(file.content);
     found.forEach(function(site) {
+      // A bare CR is a logical line break for the scanner, but git apply splits
+      // the working tree on LF only, so no line patch can match those bytes.
+      if (bareCr && site.status === 'appliable') {
+        site.status = 'report-only';
+        site.reason = 'using line endings git apply cannot match';
+        site.summary = 'The ' + site.kind + ' at line ' + site.line + ' in ' + path + ' is report-only because it is ' + site.reason + '.';
+        delete site.patch;
+      }
       sites.push(site);
       if (site.status === 'appliable') ranges.push({ start: site.line, end: site.endLine });
     });
@@ -5240,6 +5249,14 @@ function isJsOrTsPath(path) {
 function nonJsDebugFinding(content) {
   var matches = String(content).match(/console\.(log|debug|info)\(/g);
   return !!(matches && matches.length > 3);
+}
+
+function hasBareCarriageReturn(content) {
+  var text = String(content);
+  for (var i = 0; i < text.length; i++) {
+    if (text.charAt(i) === '\r' && text.charAt(i + 1) !== '\n') return true;
+  }
+  return false;
 }
 
 function findDebugSites(content, filePath) {
@@ -5294,8 +5311,9 @@ function consoleShadowPredicate(tokens) {
 }
 
 // True when a local `console` binding (parameter, import, declaration, catch,
-// or class name) is in scope. Member calls are rejected separately. A failure
-// to resolve the binding is treated as shadowed so the patch stays report-only.
+// class name, namespace, module, or enum) is in scope. Member calls are
+// rejected separately. A failure to resolve the binding is treated as shadowed
+// so the patch stays report-only.
 function consoleShadowAt(tokens) {
   var n = tokens.length;
   var scopes = [];
@@ -5743,6 +5761,8 @@ function consoleShadowAt(tokens) {
       return i;
     }
     if (peek(i) && peek(i).v === 'type') i++;
+    var exportedBinding = tryTsRuntimeBindingDecl(i);
+    if (exportedBinding >= 0) return exportedBinding;
     if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'function') return functionDecl(i, true);
     if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'class') return classDecl(i);
     if (peek(i) && peek(i).t === 'kw' && (peek(i).v === 'var' || peek(i).v === 'let' || peek(i).v === 'const')) return varDecls(i);
@@ -5855,6 +5875,76 @@ function consoleShadowAt(tokens) {
     return expression(i, {});
   }
 
+  // `namespace` / `module` / `enum` named console introduce a runtime binding
+  // (TS emits them as `var`). Qualified names only bind the first identifier
+  // in the enclosing scope; later identifiers are in scope inside the body.
+  function tsBindingKeyword(i) {
+    var guard = 0;
+    while (i < n && guard++ < 4) {
+      var t = peek(i);
+      if (!t) return -1;
+      if (t.t === 'id' && t.v === 'declare') { i++; continue; }
+      if (t.t === 'kw' && t.v === 'const') {
+        var next = peek(i + 1);
+        if (next && next.t === 'kw' && next.v === 'enum') return i + 1;
+        return -1;
+      }
+      if (t.t === 'id' && (t.v === 'namespace' || t.v === 'module')) return i;
+      if (t.t === 'kw' && t.v === 'enum') return i;
+      return -1;
+    }
+    return -1;
+  }
+
+  function tryTsRuntimeBindingDecl(i) {
+    var start = tsBindingKeyword(i);
+    if (start < 0) return -1;
+    var kind = peek(start).v;
+    i = start + 1;
+    if (kind === 'module' && peek(i) && peek(i).t === 'str') {
+      i++;
+      if (!(peek(i) && peek(i).v === '{')) return i;
+      pushScope(false, i, 'module');
+      i++;
+      while (i < n && peek(i) && peek(i).v !== '}') {
+        var skipped = statement(i);
+        i = skipped > i ? skipped : i + 1;
+      }
+      if (i < n && peek(i) && peek(i).v === '}') i++;
+      popScope(i);
+      return i;
+    }
+    if (!(peek(i) && peek(i).t === 'id')) return -1;
+    var parts = [peek(i).v];
+    i++;
+    if (kind !== 'enum') {
+      while (peek(i) && peek(i).v === '.' && peek(i + 1) && peek(i + 1).t === 'id') {
+        parts.push(peek(i + 1).v);
+        i += 2;
+      }
+    }
+    if (!(peek(i) && peek(i).v === '{')) return -1;
+    if (parts[0] === 'console') markLet();
+    pushScope(false, i, kind);
+    var partIndex;
+    for (partIndex = 0; partIndex < parts.length; partIndex++) {
+      if (parts[partIndex] === 'console') { markLet(); break; }
+    }
+    if (kind === 'enum') {
+      i = skipGroup(i);
+      popScope(i);
+      return i;
+    }
+    i++;
+    while (i < n && peek(i) && peek(i).v !== '}') {
+      var nextStmt = statement(i);
+      i = nextStmt > i ? nextStmt : i + 1;
+    }
+    if (i < n && peek(i) && peek(i).v === '}') i++;
+    popScope(i);
+    return i;
+  }
+
   function statement(i) {
     if (i >= n || !peek(i)) return n;
     var tok = peek(i);
@@ -5868,6 +5958,8 @@ function consoleShadowAt(tokens) {
     if (tok.t === 'kw' && tok.v === 'default' && peek(i + 1) && peek(i + 1).v === ':') return i + 2;
     if (tok.t === 'kw' && tok.v === 'function') return functionDecl(i, true);
     if (tok.t === 'kw' && tok.v === 'class') return classDecl(i);
+    var runtimeBinding = tryTsRuntimeBindingDecl(i);
+    if (runtimeBinding >= 0) return runtimeBinding;
     if (tok.t === 'kw' && (tok.v === 'var' || tok.v === 'let' || tok.v === 'const')) return varDecls(i);
     if (tok.t === 'kw' && tok.v === 'import') return importDecl(i);
     if (tok.t === 'kw' && tok.v === 'export') return exportDecl(i);
@@ -6115,12 +6207,44 @@ var CONTINUE_OPS = {
   '&=': 1, '|=': 1, '^=': 1, '<<=': 1, '>>=': 1, '>>>=': 1, '**=': 1, '&&=': 1, '||=': 1, '??=': 1
 };
 
+// Logical lines match the scanner (\r\n, bare \r, \n), but each diff line keeps
+// the bytes git apply sees when it splits the working tree on LF. A CRLF line
+// therefore ends with CR inside the patch; the patch record itself stays LF.
+function sourceLinesForDiff(content) {
+  var text = String(content);
+  var lines = [];
+  var start = 0;
+  var i = 0;
+  var endsWithNewline = false;
+  while (i < text.length) {
+    var ch = text.charAt(i);
+    if (ch === '\r' && text.charAt(i + 1) === '\n') {
+      lines.push(text.slice(start, i) + '\r');
+      i += 2;
+      start = i;
+      endsWithNewline = true;
+      continue;
+    }
+    if (ch === '\n' || ch === '\r') {
+      lines.push(text.slice(start, i));
+      i += 1;
+      start = i;
+      endsWithNewline = true;
+      continue;
+    }
+    i++;
+  }
+  if (start < text.length) {
+    lines.push(text.slice(start));
+    endsWithNewline = false;
+  }
+  return { lines: lines, endsWithNewline: endsWithNewline };
+}
+
 function buildUnifiedDiff(filePath, content, ranges) {
-  var normalized = String(content).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  var endsWithNewline = normalized.length > 0 && normalized.charAt(normalized.length - 1) === '\n';
-  var lines = normalized.split('\n');
-  if (endsWithNewline) lines.pop();
-  if (normalized === '') lines = [];
+  var split = sourceLinesForDiff(content);
+  var lines = split.lines;
+  var endsWithNewline = split.endsWithNewline;
   var CONTEXT = 3;
   var dels = ranges.map(function(r) {
     return { start: r.start - 1, end: r.end };
