@@ -5225,13 +5225,18 @@ function collectRemoveDebugStatementSuggestions(files) {
       if (site.status === 'appliable') ranges.push({ start: site.line, end: site.endLine });
     });
     if (ranges.length) {
-      var patch = buildUnifiedDiff(path, file.content, ranges);
+      // Split the file once. Per-site patches used to rescan the whole source,
+      // which is quadratic when every line is a debug statement.
+      var split = sourceLinesForDiff(file.content);
+      var patch = buildUnifiedDiff(path, file.content, ranges, split);
       filePatches[path] = patch;
       combinedParts.push(patch);
-      found.forEach(function(site) {
-        if (site.status !== 'appliable') return;
-        site.patch = buildUnifiedDiff(path, file.content, [{ start: site.line, end: site.endLine }]);
-      });
+      var si;
+      for (si = 0; si < found.length; si++) {
+        var one = found[si];
+        if (one.status !== 'appliable') continue;
+        one.patch = buildUnifiedDiff(path, file.content, [{ start: one.line, end: one.endLine }], split);
+      }
     }
   });
   return {
@@ -5280,14 +5285,15 @@ function hasBareCarriageReturn(content) {
 function findDebugSites(content, filePath) {
   var normalized = String(content).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   var tokens = tokenizeJs(normalized);
+  var scan = prepareStatementScan(tokens);
   var consoleShadowed = consoleShadowPredicate(tokens, filePath, normalized);
-  var consoleMutated = consoleMutationReason(tokens, normalized);
+  var consoleMutated = consoleMutationReason(tokens, normalized, consoleShadowed);
   var sites = [];
   var metas = [];
   for (var ti = 0; ti < tokens.length; ti++) {
     var tok = tokens[ti];
     if (tok.t === 'kw' && tok.v === 'debugger') {
-      var debuggerSite = classifySite(normalized, tokens, ti, ti, 'debugger', filePath);
+      var debuggerSite = classifySite(normalized, tokens, ti, ti, 'debugger', filePath, scan);
       sites.push(debuggerSite);
       metas.push({ site: debuggerSite, startIdx: ti, endIdx: ti });
       continue;
@@ -5301,16 +5307,19 @@ function findDebugSites(content, filePath) {
         metas.push({ site: openSite, startIdx: ti, endIdx: ti });
         continue;
       }
-      var site = classifySite(normalized, tokens, ti, closeIdx, kind, filePath);
+      var site = classifySite(normalized, tokens, ti, closeIdx, kind, filePath, scan);
       var globalReason = consoleReferenceReason(tokens, ti, consoleShadowed);
       // A broken identifier escape (illegal keyword escape, bad \u, a
       // non-identifier code point) can hide a binding the walker never sees.
       // Valid escapes are decoded before binding resolution; only the failures
       // force the whole file report-only.
       if (!globalReason && tokens.unsafeIdentEscape) globalReason = 'in a file with an escaped identifier';
-      // Assignment, delete, destructuring, Object.assign / defineProperty, and
-      // aliases (`const c = console; c.log = audit`) can replace the builtin.
-      // File-level: one write makes every console call in the file report-only.
+      // A declared binding named console is a scope shadow (handled above).
+      // Anything that can alias or replace the global object is file-level:
+      // assignment, destructuring (`const { console: c } = globalThis`),
+      // `const c = console`, a property taken off console, or any
+      // globalThis/window/self/global/this access to console. One hit makes
+      // every console call in the file report-only.
       if (!globalReason && consoleMutated) globalReason = consoleMutated;
       if (globalReason) downgradeSite(site, globalReason);
       sites.push(site);
@@ -5320,7 +5329,7 @@ function findDebugSites(content, filePath) {
   // Deleting a semicolon-terminated statement can join the lines on either
   // side (`foo()\nconsole.log(1);\n(bar)()`). Decide with every appliable
   // removal applied together, so a run of debug lines cannot hide the join.
-  markAsiJoinHazards(normalized, tokens, metas);
+  markAsiJoinHazards(normalized, tokens, metas, scan);
   return sites;
 }
 
@@ -6264,13 +6273,316 @@ var CONSOLE_ASSIGN_OPS = {
   '&&=': 1, '||=': 1, '??=': 1
 };
 
-function consoleMutationReason(tokens, content) {
+function consoleMutationReason(tokens, content, consoleShadowed) {
   try {
-    if (fileWritesConsole(tokens, content)) return 'in a file that reassigns console';
+    if (fileWritesConsole(tokens, content) || fileExposesConsole(tokens, content, consoleShadowed)) {
+      return 'in a file that reassigns console';
+    }
   } catch (err) {
     return 'in a file that reassigns console';
   }
   return '';
+}
+
+// File-level gate for aliasing. A later write through the alias is not
+// required: capturing the object (`const c = console`, `const { console: c } =
+// globalThis`, `({ log } = console)`) or reading it off a host is enough.
+// Declared names (`function save(console)`, `const { console }`) are skipped
+// so a sibling call outside that binding can still be patched. Comparisons
+// and direct calls are not captures. Uncertainty poisons the file.
+var CONSOLE_COMPARE_OPS = { '==': 1, '===': 1, '!=': 1, '!==': 1, '<': 1, '>': 1, '<=': 1, '>=': 1 };
+
+function fileExposesConsole(tokens, content, consoleShadowed) {
+  var i;
+  for (i = 0; i < tokens.length; i++) {
+    if (hostAccessesConsole(tokens, i, content)) return true;
+    if (bareConsoleCaptures(tokens, i, consoleShadowed)) return true;
+    if (patternNamesConsole(tokens, i, content)) return true;
+    if (reflectiveConsoleRead(tokens, i, content)) return true;
+  }
+  return false;
+}
+
+function hostAccessesConsole(tokens, i, content) {
+  if (!isConsoleHost(tokens[i])) return false;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return false;
+  // `(globalThis).console`, `((window))['console']`, and `(0, self).console`
+  // still read the host. Skipping the closing parens is conservative: a call
+  // that merely receives the host can be marked too, which only forces
+  // report-only.
+  var end = i + 1;
+  var guard = 0;
+  while (end < tokens.length && tokens[end].v === ')' && guard++ < 32) end++;
+  var mid = tokens[end];
+  if (!mid) return false;
+  if ((mid.v === '.' || mid.v === '?.') && tokens[end + 1] && tokens[end + 1].v === 'console' &&
+      (tokens[end + 1].t === 'id' || tokens[end + 1].t === 'kw')) return true;
+  if (mid.v !== '[') return false;
+  var close = closeGroup(tokens, end);
+  if (close < 0) return true;
+  var name = propertyNameText(tokens, content, end + 1, close);
+  return name == null || name === 'console';
+}
+
+function bareConsoleCaptures(tokens, i, consoleShadowed) {
+  var tok = tokens[i];
+  if (!tok || tok.v !== 'console' || (tok.t !== 'id' && tok.t !== 'kw')) return false;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return false;
+  if (tokens.declaredName && tokens.declaredName[i]) return false;
+  if (isDirectConsoleUse(tokens, i)) return false;
+  if (isComparisonUse(tokens, i)) return false;
+  if (isImportClauseName(tokens, i)) return false;
+  // `{ console: c }` is a property name, including inside a function that
+  // already shadows console. A use such as `console.log(console)` refers to
+  // that local binding and must not poison calls outside the scope.
+  var next = tokens[i + 1];
+  if (next && next.v === ':' && !isObjectLiteralKey(tokens, i)) return true;
+  if (consoleShadowed && consoleShadowed(i)) return false;
+  if (isObjectLiteralKey(tokens, i)) return false;
+  return true;
+}
+
+function memberChainEnd(tokens, i) {
+  var end = i + 1;
+  var guard = 0;
+  while (end < tokens.length && guard++ < 32) {
+    var tok = tokens[end];
+    if (!tok) break;
+    if ((tok.v === '.' || tok.v === '?.') && tokens[end + 1]) {
+      end += 2;
+      continue;
+    }
+    if (tok.v === '[') {
+      var close = closeGroup(tokens, end);
+      if (close < 0) return tokens.length;
+      end = close + 1;
+      continue;
+    }
+    break;
+  }
+  return end;
+}
+
+// `console.log(...)` and `console.log\`tag\`` use the builtin as a callee.
+// `console.log = audit` and `const c = console.log` do not.
+function isDirectConsoleUse(tokens, i) {
+  var end = memberChainEnd(tokens, i);
+  var next = tokens[end];
+  if (!next) return false;
+  if (next.v === '(') return true;
+  if (next.t === 'tmpl') return true;
+  return false;
+}
+
+function isComparisonUse(tokens, i) {
+  var end = memberChainEnd(tokens, i);
+  var next = tokens[end];
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (next && CONSOLE_COMPARE_OPS[next.v]) return true;
+  if (prev && CONSOLE_COMPARE_OPS[prev.v]) return true;
+  return false;
+}
+
+// `import { console as c }` names a foreign export, not the global object.
+function isImportClauseName(tokens, i) {
+  var depth = 0;
+  var k;
+  for (k = i; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === '}') depth++;
+    else if (v === '{') {
+      if (depth === 0) {
+        var q = k - 1;
+        while (q >= 0 && tokens[q].v !== ';' && tokens[q].v !== '}') {
+          if (tokens[q].t === 'kw' && tokens[q].v === 'import') return true;
+          if (tokens[q].t === 'kw' && (tokens[q].v === 'const' || tokens[q].v === 'let' || tokens[q].v === 'var' || tokens[q].v === 'function' || tokens[q].v === 'class')) return false;
+          q--;
+        }
+        return false;
+      }
+      if (depth > 0) depth--;
+    } else if (v === ';' && depth === 0) return false;
+  }
+  return false;
+}
+
+// `{ console: audit }` in an object literal is a property name. The same
+// tokens in `const { console: c }` or `({ console: c } = globalThis)` pull
+// the console object out under another name.
+function isObjectLiteralKey(tokens, i) {
+  var next = tokens[i + 1];
+  if (!next || next.v !== ':') return false;
+  var brace = enclosingOpenBrace(tokens, i);
+  if (brace < 0) return false;
+  return !isInsideDestructuringPattern(tokens, brace);
+}
+
+function patternNamesConsole(tokens, i, content) {
+  var tok = tokens[i];
+  if (!tok) return false;
+  if (tok.t === 'str' && tokens[i + 1] && tokens[i + 1].v === ':') {
+    if (literalText(content, tok) !== 'console') return false;
+    var brace = enclosingOpenBrace(tokens, i);
+    if (brace < 0) return true;
+    return isInsideDestructuringPattern(tokens, brace);
+  }
+  if (tok.v !== '[') return false;
+  var close = closeGroup(tokens, i);
+  if (close < 0) return false;
+  if (!tokens[close + 1] || tokens[close + 1].v !== ':') return false;
+  var brace2 = enclosingOpenBrace(tokens, i);
+  if (brace2 < 0) return false;
+  if (!isInsideDestructuringPattern(tokens, brace2)) return false;
+  var name = propertyNameText(tokens, content, i + 1, close);
+  // A static other name is not console. A dynamic key might be.
+  return name == null || name === 'console';
+}
+
+function isInsideDestructuringPattern(tokens, braceIdx) {
+  var idx = braceIdx;
+  var guard = 0;
+  while (idx >= 0 && guard++ < 40) {
+    if (braceIntroducesPattern(tokens, idx)) return true;
+    if (insideArrayPattern(tokens, idx)) return true;
+    if (idx === 0) return false;
+    var parent = enclosingOpenBrace(tokens, idx - 1);
+    if (parent < 0 || parent >= idx) return false;
+    idx = parent;
+  }
+  return true;
+}
+
+function insideArrayPattern(tokens, fromIdx) {
+  var idx = fromIdx;
+  var guard = 0;
+  while (idx >= 0 && guard++ < 40) {
+    var bracket = enclosingOpenBracket(tokens, idx);
+    if (bracket < 0) return false;
+    if (bracketIntroducesPattern(tokens, bracket)) return true;
+    if (bracket === 0) return false;
+    idx = bracket - 1;
+  }
+  return true;
+}
+
+function bracketIntroducesPattern(tokens, bracketIdx) {
+  var prev = bracketIdx > 0 ? tokens[bracketIdx - 1] : null;
+  if (prev && (prev.v === 'const' || prev.v === 'let' || prev.v === 'var' || prev.v === 'using')) return true;
+  var close = closeGroup(tokens, bracketIdx);
+  if (close < 0) return true;
+  var after = tokens[close + 1];
+  if (after && (after.v === '=' || after.v === 'of' || after.v === 'in')) return true;
+  return isParameterBrace(tokens, bracketIdx);
+}
+
+function enclosingOpenBracket(tokens, fromIdx) {
+  var depthBracket = 0;
+  var depthBrace = 0;
+  var depthParen = 0;
+  var k;
+  for (k = fromIdx; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === ']') depthBracket++;
+    else if (v === '[') {
+      if (depthBracket === 0 && depthBrace === 0 && depthParen === 0) return k;
+      if (depthBracket > 0) depthBracket--;
+    } else if (v === '}') depthBrace++;
+    else if (v === '{') {
+      if (depthBrace > 0) depthBrace--;
+    } else if (v === ')') depthParen++;
+    else if (v === '(') {
+      if (depthParen > 0) depthParen--;
+    } else if (v === ';' && depthBracket === 0 && depthBrace === 0 && depthParen === 0) return -1;
+  }
+  return -1;
+}
+
+function braceIntroducesPattern(tokens, braceIdx) {
+  var prev = braceIdx > 0 ? tokens[braceIdx - 1] : null;
+  if (prev && (prev.v === 'const' || prev.v === 'let' || prev.v === 'var' || prev.v === 'using')) return true;
+  var close = closeGroup(tokens, braceIdx);
+  if (close < 0) return true;
+  var after = tokens[close + 1];
+  if (after && (after.v === '=' || after.v === 'of' || after.v === 'in')) return true;
+  return isParameterBrace(tokens, braceIdx);
+}
+
+function isParameterBrace(tokens, braceIdx) {
+  var open = enclosingParen(tokens, braceIdx);
+  if (open < 0) return false;
+  var close = closeGroup(tokens, open);
+  var before = open > 0 ? tokens[open - 1] : null;
+  var after = close >= 0 ? tokens[close + 1] : null;
+  if (after && after.v === '=>') return true;
+  if (!before) return false;
+  if (before.t === 'kw' && (before.v === 'function' || before.v === 'catch')) return true;
+  if (before.t === 'id' || (before.t === 'kw' && before.v === 'async')) {
+    var lead = open > 1 ? tokens[open - 2] : null;
+    if (lead && (lead.v === '*' || (lead.t === 'kw' && (lead.v === 'function' || lead.v === 'async')))) return true;
+    if (after && after.v === '{') return true;
+  }
+  return false;
+}
+
+function enclosingOpenBrace(tokens, fromIdx) {
+  var depthBrace = 0;
+  var depthParen = 0;
+  var depthBracket = 0;
+  var k;
+  for (k = fromIdx; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === '}') depthBrace++;
+    else if (v === '{') {
+      if (depthBrace === 0 && depthParen === 0 && depthBracket === 0) return k;
+      if (depthBrace > 0) depthBrace--;
+    } else if (v === ')') depthParen++;
+    else if (v === '(') {
+      if (depthParen > 0) depthParen--;
+    } else if (v === ']') depthBracket++;
+    else if (v === '[') {
+      if (depthBracket > 0) depthBracket--;
+    } else if (v === ';' && depthBrace === 0 && depthParen === 0 && depthBracket === 0) return -1;
+  }
+  return -1;
+}
+
+function enclosingParen(tokens, fromIdx) {
+  var depth = 0;
+  var k;
+  for (k = fromIdx; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === ')') depth++;
+    else if (v === '(') {
+      if (depth === 0) return k;
+      depth--;
+    }
+  }
+  return -1;
+}
+
+// Reflect.get(globalThis, "console") and the descriptor equivalent are
+// bracket access spelled as a call. A host target with a console key, or a
+// key that is not a proven other name, exposes the object.
+function reflectiveConsoleRead(tokens, i, content) {
+  var tok = tokens[i];
+  if (!tok || tok.t !== 'id' || (tok.v !== 'Object' && tok.v !== 'Reflect')) return false;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return false;
+  var method = memberNameAt(tokens, content, i + 1);
+  if (!method || !tokens[method.end] || tokens[method.end].v !== '(') return false;
+  var reads = tok.v === 'Reflect'
+    ? { get: 1, getOwnPropertyDescriptor: 1 }
+    : { getOwnPropertyDescriptor: 1, getOwnPropertyDescriptors: 1 };
+  if (!reads[method.name]) return false;
+  var first = argRange(tokens, method.end);
+  if (!first || !argIsBareHost(tokens, first.start, first.end)) return false;
+  if (method.name === 'getOwnPropertyDescriptors') return true;
+  var second = argRange(tokens, first.end);
+  if (!second) return true;
+  var name = propertyNameText(tokens, content, second.start, second.end);
+  return name == null || name === 'console';
 }
 
 function isConsoleHost(tok) {
@@ -6828,14 +7140,16 @@ function matchParen(tokens, openIdx) {
   return -1;
 }
 
-function classifySite(content, tokens, startIdx, endIdx, kind, filePath) {
+function classifySite(content, tokens, startIdx, endIdx, kind, filePath, scan) {
   var startTok = tokens[startIdx];
   var endTok = tokens[endIdx];
   var endOffset = consumeStatementEnd(content, endTok.end);
-  var line = lineNumberAt(content, startTok.i);
-  var endLine = lineNumberAt(content, Math.max(startTok.i, endOffset - 1));
+  // Token lines match the normalized source. Counting newlines from 0 on
+  // every site made a file of N logs take O(N^2) time.
+  var line = startTok.line;
+  var endLine = endTok.line;
   var snippet = snippetAt(content, startTok.i, endOffset);
-  var boundary = boundaryReason(content, tokens, startIdx);
+  var boundary = boundaryReason(content, tokens, startIdx, scan);
   if (boundary) return makeSite(filePath, kind, startTok, line, endLine, 'report-only', boundary, snippet);
   if (!linesOnlyContainStatement(content, startTok.i, endOffset)) {
     return makeSite(filePath, kind, startTok, line, endLine, 'report-only', 'sharing a line with other code', snippet);
@@ -6847,7 +7161,7 @@ function classifySite(content, tokens, startIdx, endIdx, kind, filePath) {
       return makeSite(filePath, kind, startTok, line, endLine, 'report-only', 'part of an expression', snippet);
     }
   }
-  var commentReason = attachedCommentReason(content, tokens, startTok.i, endOffset);
+  var commentReason = attachedCommentReason(content, tokens, startTok.i, endOffset, scan, line, endLine);
   if (commentReason) return makeSite(filePath, kind, startTok, line, endLine, 'report-only', commentReason, snippet);
   return makeSite(filePath, kind, startTok, line, endLine, 'appliable', '', snippet);
 }
@@ -6886,13 +7200,6 @@ function consumeStatementEnd(content, offset) {
   return i;
 }
 
-function lineNumberAt(content, index) {
-  var line = 1;
-  var limit = Math.min(index, content.length);
-  for (var i = 0; i < limit; i++) if (content[i] === '\n') line++;
-  return line;
-}
-
 function linesOnlyContainStatement(content, start, end) {
   var lineStart = content.lastIndexOf('\n', start - 1) + 1;
   var lineEnd = content.indexOf('\n', end);
@@ -6912,24 +7219,30 @@ var NEXT_LINE_DIRECTIVE_RE = /@ts-ignore\b|@ts-expect-error\b|eslint-disable-nex
 // Directives whose deletion changes more than the removed statement.
 var DIRECTIVE_RE = /@ts-ignore\b|@ts-expect-error\b|@ts-nocheck\b|@ts-check\b|eslint-disable\b|eslint-enable\b|eslint-env\b|prettier-ignore\b|biome-ignore\b|istanbul\s+ignore\b|c8\s+ignore\b|v8\s+ignore\b|oxlint-disable\b|stylelint-disable\b|tslint:disable\b|node:coverage\b|coverage\s+ignore\b/;
 
-function attachedCommentReason(content, tokens, start, end) {
+function attachedCommentReason(content, tokens, start, end, scan, startLine, endLine) {
   var lineEnd = content.indexOf('\n', end);
   if (lineEnd < 0) lineEnd = content.length;
   var after = content.slice(end, lineEnd);
   if (after.indexOf('//') >= 0 || after.indexOf('/*') >= 0) return 'carrying a trailing comment';
 
-  var startLine = lineNumberAt(content, start);
-  var endLine = lineNumberAt(content, Math.max(start, end - 1));
-  var comments = tokens.comments || [];
-  var c;
-  for (c = 0; c < comments.length; c++) {
-    var comment = comments[c];
-    var commentEnd = commentEndLine(comment);
-    if (commentEnd === startLine - 1 && NEXT_LINE_DIRECTIVE_RE.test(comment.text)) {
-      return 'governed by a directive comment';
+  var comments = scan.comments;
+  var prev = comments.byEnd[startLine - 1];
+  var c, comment, commentEnd, line, list;
+  if (prev) {
+    for (c = 0; c < prev.length; c++) {
+      comment = prev[c];
+      if (NEXT_LINE_DIRECTIVE_RE.test(comment.text)) return 'governed by a directive comment';
     }
-    if (comment.line >= startLine && commentEnd <= endLine && DIRECTIVE_RE.test(comment.text)) {
-      return 'governed by a directive comment';
+  }
+  for (line = startLine; line <= endLine; line++) {
+    list = comments.byLine[line];
+    if (!list) continue;
+    for (c = 0; c < list.length; c++) {
+      comment = list[c];
+      commentEnd = commentEndLine(comment);
+      if (comment.line >= startLine && commentEnd <= endLine && DIRECTIVE_RE.test(comment.text)) {
+        return 'governed by a directive comment';
+      }
     }
   }
   return '';
@@ -6942,23 +7255,123 @@ function commentEndLine(comment) {
   return line;
 }
 
-function boundaryReason(content, tokens, startIdx) {
+// One forward pass for everything classifySite used to rescan from the
+// start of the file: expression nesting, block braces, the keyword that
+// owns a `)`, and which `{` a `}` closes. Comments are indexed by line so
+// directive checks are not O(sites × comments).
+function prepareStatementScan(tokens) {
+  var n = tokens.length;
+  var blockBrace = new Array(n);
+  var exprAt = new Array(n);
+  var parenKw = new Array(n);
+  var matchOpen = new Array(n);
+  var parenStack = [];
+  var braceStack = [];
+  var exprStack = [];
+  var confused = false;
+  var i;
+  for (i = 0; i < n; i++) {
+    var v = tokens[i].v;
+    if (confused) exprAt[i] = 'confused';
+    else {
+      var inner = exprStack.length ? exprStack[exprStack.length - 1] : null;
+      exprAt[i] = (inner === '(' || inner === '[' || inner === 'expr') ? 'expr' : null;
+    }
+    if (v === '{') {
+      var prev = i > 0 ? tokens[i - 1] : null;
+      var isBlock = false;
+      if (!prev) isBlock = true;
+      else if (prev.v === ';' || prev.v === '}' || prev.v === '=>' || prev.v === ')') isBlock = true;
+      else if (prev.v === '{') isBlock = !!blockBrace[i - 1];
+      else if (prev.t === 'kw' && (prev.v === 'else' || prev.v === 'try' || prev.v === 'finally' || prev.v === 'do' || prev.v === 'static')) isBlock = true;
+      blockBrace[i] = isBlock;
+      braceStack.push(i);
+      exprStack.push(isBlock ? 'block' : 'expr');
+      continue;
+    }
+    if (v === '${') {
+      braceStack.push(i);
+      exprStack.push('expr');
+      continue;
+    }
+    if (v === '(' || v === '[') {
+      if (v === '(') parenStack.push(i);
+      exprStack.push(v);
+      continue;
+    }
+    if (v !== ')' && v !== ']' && v !== '}') continue;
+    if (v === ')') {
+      var openParen = parenStack.length ? parenStack.pop() : -1;
+      if (openParen >= 0) parenKw[i] = keywordBeforeParen(tokens, openParen);
+    }
+    if (v === '}') {
+      var openBrace = braceStack.length ? braceStack.pop() : -1;
+      if (openBrace >= 0) matchOpen[i] = openBrace;
+    }
+    if (!exprStack.length) { confused = true; continue; }
+    var top = exprStack[exprStack.length - 1];
+    if (v === '}' && (top === 'block' || top === 'expr')) { exprStack.pop(); continue; }
+    if ((v === ')' && top === '(') || (v === ']' && top === '[')) { exprStack.pop(); continue; }
+    confused = true;
+    exprStack.pop();
+  }
+  return {
+    blockBrace: blockBrace,
+    exprAt: exprAt,
+    parenKw: parenKw,
+    matchOpen: matchOpen,
+    comments: indexDebugComments(tokens.comments || [])
+  };
+}
+
+function keywordBeforeParen(tokens, openIdx) {
+  var before = openIdx > 0 ? tokens[openIdx - 1] : null;
+  // `for await (...)` puts await immediately before the paren. The statement
+  // is still the body of the for, not a free statement.
+  if (before && before.t === 'kw' && before.v === 'await') {
+    var lead = openIdx > 1 ? tokens[openIdx - 2] : null;
+    if (lead && lead.t === 'kw' && lead.v === 'for') return 'for';
+  }
+  if (before && before.t === 'kw') return before.v;
+  return null;
+}
+
+function indexDebugComments(comments) {
+  var byEnd = Object.create(null);
+  var byLine = Object.create(null);
+  var c, comment, end, line, list;
+  for (c = 0; c < comments.length; c++) {
+    comment = comments[c];
+    end = commentEndLine(comment);
+    list = byEnd[end];
+    if (!list) byEnd[end] = list = [];
+    list.push(comment);
+    for (line = comment.line; line <= end; line++) {
+      list = byLine[line];
+      if (!list) byLine[line] = list = [];
+      list.push(comment);
+    }
+  }
+  return { byEnd: byEnd, byLine: byLine };
+}
+
+function boundaryReason(content, tokens, startIdx, scan) {
   var prev = startIdx > 0 ? tokens[startIdx - 1] : null;
   if (!prev) return null;
-  var context = expressionContext(tokens, startIdx);
+  var context = scan.exprAt[startIdx];
   if (context === 'confused') return 'could not be checked safely';
   if (context === 'expr') return 'part of an expression';
   if (prev.v === '=>') return 'inside a one-line arrow without braces';
   if (prev.t === 'kw' && prev.v === 'else') return 'inside a one-line else without braces';
   if (prev.t === 'kw' && prev.v === 'do') return 'inside a one-line do without braces';
   if (prev.v === ')') {
-    var kw = keywordIntroducingParen(tokens, startIdx - 1);
+    var kw = scan.parenKw[startIdx - 1];
     if (kw === 'if') return 'inside a one-line if without braces';
     if (kw === 'for' || kw === 'while') return 'inside a one-line loop without braces';
     if (kw === 'with') return 'inside a one-line with without braces';
   }
   if (prev.v === ';' || prev.v === '}') return null;
-  if (prev.v === '{') return isBlockBrace(tokens, startIdx - 1) ? null : 'part of an expression';
+  if (prev.v === '{') return scan.blockBrace[startIdx - 1] ? null : 'part of an expression';
   if (prev.v === '${') return 'part of an expression';
   if (prev.v === ':') return 'following a label';
   if (hasNewlineBetween(content, prev, tokens[startIdx]) && canEndStatement(prev)) return null;
@@ -6976,28 +7389,6 @@ function canEndStatement(tok) {
   return tok.v === ')' || tok.v === ']' || tok.v === '}' || tok.v === '++' || tok.v === '--';
 }
 
-function expressionContext(tokens, startIdx) {
-  var stack = [];
-  var confused = false;
-  for (var k = 0; k < startIdx; k++) {
-    var v = tokens[k].v;
-    if (v === '(' || v === '[') { stack.push(v); continue; }
-    if (v === '${') { stack.push('expr'); continue; }
-    if (v === '{') { stack.push(isBlockBrace(tokens, k) ? 'block' : 'expr'); continue; }
-    if (v !== ')' && v !== ']' && v !== '}') continue;
-    if (!stack.length) { confused = true; continue; }
-    var top = stack[stack.length - 1];
-    if (v === '}' && (top === 'block' || top === 'expr')) { stack.pop(); continue; }
-    if ((v === ')' && top === '(') || (v === ']' && top === '[')) { stack.pop(); continue; }
-    confused = true;
-    stack.pop();
-  }
-  if (confused) return 'confused';
-  var inner = stack.length ? stack[stack.length - 1] : null;
-  if (inner === '(' || inner === '[' || inner === 'expr') return 'expr';
-  return null;
-}
-
 function isBlockBrace(tokens, braceIdx) {
   var prev = braceIdx > 0 ? tokens[braceIdx - 1] : null;
   if (!prev) return true;
@@ -7007,28 +7398,6 @@ function isBlockBrace(tokens, braceIdx) {
   if (prev.v === ')') return true;
   if (prev.t === 'kw' && (prev.v === 'else' || prev.v === 'try' || prev.v === 'finally' || prev.v === 'do' || prev.v === 'static')) return true;
   return false;
-}
-
-function keywordIntroducingParen(tokens, closeIdx) {
-  var depth = 0;
-  for (var k = closeIdx; k >= 0; k--) {
-    if (tokens[k].v === ')') depth++;
-    else if (tokens[k].v === '(') {
-      depth--;
-      if (depth === 0) {
-        var before = tokens[k - 1];
-        // `for await (...)` puts await immediately before the paren. The
-        // statement is still the body of the for, not a free statement.
-        if (before && before.t === 'kw' && before.v === 'await') {
-          var lead = tokens[k - 2];
-          if (lead && lead.t === 'kw' && lead.v === 'for') return 'for';
-        }
-        if (before && before.t === 'kw') return before.v;
-        return null;
-      }
-    }
-  }
-  return null;
 }
 
 function hasNewlineBetween(content, prevTok, tok) {
@@ -7078,28 +7447,41 @@ var JOIN_HAZARD_OPS = {
   '&&=': 1, '||=': 1, '??=': 1
 };
 
-function markAsiJoinHazards(content, tokens, metas) {
-  var removed = [];
+function markAsiJoinHazards(content, tokens, metas, scan) {
+  var n = tokens.length;
+  var removed = new Array(n);
   var i;
-  for (i = 0; i < tokens.length; i++) removed.push(false);
+  for (i = 0; i < n; i++) removed[i] = false;
   for (i = 0; i < metas.length; i++) {
     var meta = metas[i];
     if (!meta.site || meta.site.status !== 'appliable') continue;
     var a;
-    for (a = meta.startIdx; a <= meta.endIdx && a < tokens.length; a++) removed[a] = true;
+    for (a = meta.startIdx; a <= meta.endIdx && a < n; a++) removed[a] = true;
     meta.semiIdx = consumedSemiIndex(content, tokens, meta.endIdx);
     if (meta.semiIdx >= 0) removed[meta.semiIdx] = true;
+  }
+  // Nearest surviving token on each side, in one pass. Walking that gap from
+  // every site is quadratic when the file is a run of debug statements.
+  var prevLive = new Array(n);
+  var last = -1;
+  for (i = 0; i < n; i++) {
+    prevLive[i] = last;
+    if (!removed[i]) last = i;
+  }
+  var nextLive = new Array(n);
+  var nxt = n;
+  for (i = n - 1; i >= 0; i--) {
+    nextLive[i] = nxt;
+    if (!removed[i]) nxt = i;
   }
   for (i = 0; i < metas.length; i++) {
     var siteMeta = metas[i];
     if (!siteMeta.site || siteMeta.site.status !== 'appliable') continue;
-    var prev = siteMeta.startIdx - 1;
-    while (prev >= 0 && removed[prev]) prev--;
+    var prev = prevLive[siteMeta.startIdx];
     var after = siteMeta.semiIdx >= 0 ? siteMeta.semiIdx : siteMeta.endIdx;
-    var next = after + 1;
-    while (next < tokens.length && removed[next]) next++;
-    var nextTok = next < tokens.length ? tokens[next] : null;
-    if (isJoinHazard(nextTok) && !isHardStatementTerminator(tokens, prev)) {
+    var next = nextLive[after];
+    var nextTok = next < n ? tokens[next] : null;
+    if (isJoinHazard(nextTok) && !isHardStatementTerminator(tokens, prev, scan)) {
       downgradeSite(siteMeta.site, 'separating statements that would join');
     }
   }
@@ -7127,20 +7509,21 @@ function isJoinHazard(tok) {
 
 // `;` or a `}` that actually ends a statement. An object literal or class
 // expression `}` does not: `x = { a: 1 }\n(bar)()` calls the object.
-function isHardStatementTerminator(tokens, idx) {
+function isHardStatementTerminator(tokens, idx, scan) {
   if (idx < 0) return true;
   var tok = tokens[idx];
   if (!tok) return true;
   if (tok.v === ';') return true;
-  if (tok.v === '}' && braceClosesStatement(tokens, idx)) return true;
+  if (tok.v === '}' && braceClosesStatement(tokens, idx, scan)) return true;
   return false;
 }
 
-function braceClosesStatement(tokens, closeIdx) {
-  var openIdx = matchingBraceOpen(tokens, closeIdx);
-  if (openIdx < 0) return false;
+function braceClosesStatement(tokens, closeIdx, scan) {
+  var openIdx = scan && typeof scan.matchOpen[closeIdx] === 'number' ? scan.matchOpen[closeIdx] : matchingBraceOpen(tokens, closeIdx);
+  if (openIdx == null || openIdx < 0) return false;
   if (tokens[openIdx].v === '${') return false;
-  if (isBlockBrace(tokens, openIdx)) return true;
+  var isBlock = scan && closeIdx >= 0 ? scan.blockBrace[openIdx] : isBlockBrace(tokens, openIdx);
+  if (isBlock) return true;
   return declarationBrace(tokens, openIdx);
 }
 
@@ -7286,8 +7669,8 @@ function sourceLinesForDiff(content) {
   return { lines: lines, endsWithNewline: endsWithNewline };
 }
 
-function buildUnifiedDiff(filePath, content, ranges) {
-  var split = sourceLinesForDiff(content);
+function buildUnifiedDiff(filePath, content, ranges, split) {
+  if (!split) split = sourceLinesForDiff(content);
   var lines = split.lines;
   var endsWithNewline = split.endsWithNewline;
   var CONTEXT = 3;
@@ -7349,13 +7732,68 @@ function buildUnifiedDiff(filePath, content, ranges) {
 function diffPaths(filePath) {
   var path = String(filePath || 'file').replace(/\\/g, '/').replace(/^\.\//, '');
   if (!path) path = 'file';
-  var a = 'a/' + path;
-  var b = 'b/' + path;
-  if (/["\\\s]/.test(path)) {
-    var q = function(s) { return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'; };
-    return { gitA: q(a), gitB: q(b), oldP: q(a), newP: q(b) };
-  }
+  var a = quoteGitPath('a/' + path);
+  var b = quoteGitPath('b/' + path);
   return { gitA: a, gitB: b, oldP: a, newP: b };
+}
+
+// Git's C quote (core.quotePath). Bytes below 0x20 or above 0x7e, plus
+// quote and backslash, are wrapped in double quotes. \a \b \t \n \v \f \r
+// \" \\ use the C names; every other quoted byte is a three-digit octal
+// escape of the UTF-8 value. A space is left bare, matching git.
+function quoteGitPath(path) {
+  var bytes = utf8Bytes(path);
+  var i;
+  var needs = false;
+  for (i = 0; i < bytes.length; i++) {
+    if (gitByteNeedsQuote(bytes[i])) { needs = true; break; }
+  }
+  if (!needs) return path;
+  var out = '"';
+  for (i = 0; i < bytes.length; i++) out += gitQuotedByte(bytes[i]);
+  return out + '"';
+}
+
+function gitByteNeedsQuote(b) {
+  return b === 0x22 || b === 0x5c || b < 0x20 || b >= 0x7f;
+}
+
+function gitQuotedByte(b) {
+  if (b === 0x07) return '\\a';
+  if (b === 0x08) return '\\b';
+  if (b === 0x09) return '\\t';
+  if (b === 0x0a) return '\\n';
+  if (b === 0x0b) return '\\v';
+  if (b === 0x0c) return '\\f';
+  if (b === 0x0d) return '\\r';
+  if (b === 0x22) return '\\"';
+  if (b === 0x5c) return '\\\\';
+  if (b < 0x20 || b >= 0x7f) {
+    var oct = b.toString(8);
+    while (oct.length < 3) oct = '0' + oct;
+    return '\\' + oct;
+  }
+  return String.fromCharCode(b);
+}
+
+function utf8Bytes(text) {
+  var bytes = [];
+  var i;
+  for (i = 0; i < text.length; i++) {
+    var c = text.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < text.length) {
+      var c2 = text.charCodeAt(i + 1);
+      if (c2 >= 0xDC00 && c2 <= 0xDFFF) {
+        c = 0x10000 + ((c - 0xD800) << 10) + (c2 - 0xDC00);
+        i++;
+      }
+    }
+    if (c < 0x80) bytes.push(c);
+    else if (c < 0x800) bytes.push(0xC0 | (c >> 6), 0x80 | (c & 0x3F));
+    else if (c < 0x10000) bytes.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 0x3F), 0x80 | (c & 0x3F));
+    else bytes.push(0xF0 | (c >> 18), 0x80 | ((c >> 12) & 0x3F), 0x80 | ((c >> 6) & 0x3F), 0x80 | (c & 0x3F));
+  }
+  return bytes;
 }
 
 var JS_KEYWORDS = {

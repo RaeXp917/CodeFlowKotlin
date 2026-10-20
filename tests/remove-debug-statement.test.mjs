@@ -1241,6 +1241,42 @@ test('writes that replace console stay report-only', async () => {
     'Reflect.set(window, "console", audit);\nconsole.log(record);\n',
     'Reflect.deleteProperty(self, "console");\nconsole.log(record);\n',
     'const c = console;\nc.log = audit;\nconsole.log(record);\n',
+    'const { console: c } = globalThis;\nc.log = audit;\nconsole.log(record);\n',
+    'const { console: c } = globalThis;\nconsole.log(record);\n',
+    'const { console: c } = window;\nconsole.log(record);\n',
+    'let { console: c } = self;\nconsole.log(record);\n',
+    'var { console: c } = global;\nconsole.log(record);\n',
+    '({ console: c } = this);\nconsole.log(record);\n',
+    'const { "console": c } = globalThis;\nconsole.log(record);\n',
+    "const { 'console': c } = window;\nconsole.log(record);\n",
+    'const { ["console"]: c } = globalThis;\nconsole.log(record);\n',
+    "const { ['console']: c } = self;\nconsole.log(record);\n",
+    'const { console: c = fallback } = globalThis;\nconsole.log(record);\n',
+    'const [{ console: c }] = [globalThis];\nconsole.log(record);\n',
+    'for (const { console: c } of [globalThis]) {}\nconsole.log(record);\n',
+    'for ({ console: c } of [globalThis]) {}\nconsole.log(record);\n',
+    'function installAlias({ console: c }) {\n  c.log = audit;\n}\nconsole.log(record);\n',
+    'function installAlias({ console: c } = globalThis) {\n  c.log = audit;\n}\nconsole.log(record);\n',
+    'const { console: { log: nested } } = globalThis;\nconsole.log(record);\n',
+    'const c = globalThis.console;\nconsole.log(record);\n',
+    'const c = window["console"];\nconsole.log(record);\n',
+    'const { log: taken } = console;\nconsole.log(record);\n',
+    'const c = (0, globalThis.console);\nconsole.log(record);\n',
+    'const c = console?.log;\nconsole.log(1);\n',
+    'Reflect.get(globalThis, "console");\nconsole.log(record);\n',
+    'Object.getOwnPropertyDescriptor(window, "console");\nconsole.log(record);\n',
+    'const { console: c, ...rest } = globalThis;\nconsole.log(record);\n',
+    'window[name];\nconsole.log(record);\n',
+    'globalThis["con" + "sole"];\nconsole.log(record);\n',
+    '(globalThis).console;\nconsole.log(record);\n',
+    '((window))["console"];\nconsole.log(record);\n',
+    '(0, globalThis).console.log;\nconsole.log(record);\n',
+    '(self)["console"] = audit;\nconsole.log(record);\n',
+    'const c = console;\nconsole.log(c);\n',
+    'const kept = console.log;\nconsole.log(1);\n',
+    '({ console: saved } = globalThis);\nconsole.log(saved);\n',
+    '({ log } = console);\nconsole.log(1);\n',
+    'const c = console.log;\nc = audit;\nconsole.log(1);\n',
     'let c = window.console;\nc["info"] = audit;\nconsole.info(record);\n',
     'const c = globalThis.console;\nconst d = c;\nd.log = audit;\nconsole.log(record);\n',
     'const c = (console);\nc.log = audit;\nconsole.log(record);\n',
@@ -1269,18 +1305,17 @@ test('writes that replace console stay report-only', async () => {
   }
 
   const untouched = [
-    'const c = console;\nconsole.log(c);\n',
-    'const kept = console.log;\nconsole.log(1);\n',
     'console == audit;\nconsole.log(1);\n',
     'console === audit;\nconsole.log(1);\n',
     'const note = "console = audit";\nconsole.log(note);\n',
     'logger.console = audit;\nconsole.log(1);\n',
     'logger.console.log = audit;\nconsole.log(1);\n',
-    '({ console: saved } = globalThis);\nconsole.log(saved);\n',
-    '({ log } = console);\nconsole.log(1);\n',
+    'const note = { console: audit };\nconsole.log(note);\n',
+    'import { console as renamed } from "./logger";\nconsole.log(1);\n',
+    'function take(console) {\n  console.log(console);\n}\nconsole.log(1);\n',
     'Object.defineProperty(window, "name", { value: "app" });\nconsole.log(1);\n',
     'window.__defineSetter__("onclick", hide);\nconsole.log(1);\n',
-    'const c = console.log;\nc = audit;\nconsole.log(1);\n',
+    'Object.getOwnPropertyDescriptor(window, "name");\nconsole.log(1);\n',
     'i++;\nconsole.log(1);\n',
     'i++\nconsole.log(1);\n',
     '++console.log(1);\nconsole.log(2);\n',
@@ -1336,6 +1371,56 @@ test('writes that replace console stay report-only', async () => {
   assert.match(applied['src/mixed.js'], /console = audit;\nconsole\.log\(record\);\nfunction other\(\) \{\n {2}console\.debug\(record\);/);
   assert.doesNotMatch(applied['src/mixed.js'], /debugger/);
   assert.equal(applied['src/other.js'], '');
+});
+
+test('patch paths use git C quoting and still apply', async () => {
+  const weird = 'src/a\nb\tc"d\u0001e\u0007f café.js';
+  const spaced = 'src/my file.js';
+  const source = 'console.log(1);\nkeep();\n';
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: weird, content: source },
+    { path: spaced, content: source },
+  ]);
+  const weirdPatch = suggestions.filePatches[weird];
+  const weirdLines = weirdPatch.split('\n');
+  const quoted = '"a/src/a\\nb\\tc\\"d\\001e\\af caf\\303\\251.js"';
+  assert.equal(weirdLines[0], 'diff --git ' + quoted + ' ' + quoted.replace('a/', 'b/'));
+  assert.equal(weirdLines[1], '--- ' + quoted);
+  assert.equal(weirdLines[2], '+++ ' + quoted.replace('a/', 'b/'));
+  assert.equal(weirdLines[0].includes('\t'), false);
+  assert.equal(weirdLines[0].includes('\u0001'), false);
+  assert.equal(weirdLines[0].includes('café'), false);
+
+  const spacedPatch = suggestions.filePatches[spaced];
+  assert.match(spacedPatch, /^diff --git a\/src\/my file\.js b\/src\/my file\.js\n/);
+  assert.match(spacedPatch, /^--- a\/src\/my file\.js\n/m);
+  assert.match(spacedPatch, /^\+\+\+ b\/src\/my file\.js\n/m);
+
+  const applied = await applyPatch(
+    [
+      { path: weird, content: source },
+      { path: spaced, content: source },
+    ],
+    suggestions.combinedPatch
+  );
+  assert.equal(applied[weird], 'keep();\n');
+  assert.equal(applied[spaced], 'keep();\n');
+});
+
+test('a few thousand debug statements stay linear to analyze', () => {
+  const lines = [];
+  for (let i = 0; i < 5000; i++) lines.push('console.log(' + i + ');');
+  lines.push('keep();');
+  const content = lines.join('\n') + '\n';
+  const started = Date.now();
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/lots.js', content },
+  ]);
+  const elapsed = Date.now() - started;
+  assert.equal(suggestions.sites.length, 5000);
+  assert.equal(suggestions.sites.every((site) => site.status === 'appliable' && site.patch), true);
+  assert.match(suggestions.filePatches['src/lots.js'], /^diff --git a\/src\/lots\.js /);
+  assert.ok(elapsed < 2000, 'analysis took ' + elapsed + 'ms');
 });
 
 test('index.html does not gain a write path for debug patches', () => {
