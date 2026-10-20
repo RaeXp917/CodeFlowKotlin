@@ -5281,18 +5281,24 @@ function findDebugSites(content, filePath) {
   var normalized = String(content).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   var tokens = tokenizeJs(normalized);
   var consoleShadowed = consoleShadowPredicate(tokens, filePath, normalized);
+  var consoleMutated = consoleMutationReason(tokens, normalized);
   var sites = [];
+  var metas = [];
   for (var ti = 0; ti < tokens.length; ti++) {
     var tok = tokens[ti];
     if (tok.t === 'kw' && tok.v === 'debugger') {
-      sites.push(classifySite(normalized, tokens, ti, ti, 'debugger', filePath));
+      var debuggerSite = classifySite(normalized, tokens, ti, ti, 'debugger', filePath);
+      sites.push(debuggerSite);
+      metas.push({ site: debuggerSite, startIdx: ti, endIdx: ti });
       continue;
     }
     if (tok.t === 'id' && tok.v === 'console' && isConsoleCall(tokens, ti)) {
       var closeIdx = matchParen(tokens, ti + 3);
       var kind = 'console.' + tokens[ti + 2].v;
       if (closeIdx < 0) {
-        sites.push(makeSite(filePath, kind, tok, tok.line, tok.line, 'report-only', 'not isolated from surrounding code', snippetAt(normalized, tok.i, Math.min(normalized.length, tok.i + 80))));
+        var openSite = makeSite(filePath, kind, tok, tok.line, tok.line, 'report-only', 'not isolated from surrounding code', snippetAt(normalized, tok.i, Math.min(normalized.length, tok.i + 80)));
+        sites.push(openSite);
+        metas.push({ site: openSite, startIdx: ti, endIdx: ti });
         continue;
       }
       var site = classifySite(normalized, tokens, ti, closeIdx, kind, filePath);
@@ -5302,15 +5308,19 @@ function findDebugSites(content, filePath) {
       // Valid escapes are decoded before binding resolution; only the failures
       // force the whole file report-only.
       if (!globalReason && tokens.unsafeIdentEscape) globalReason = 'in a file with an escaped identifier';
-      if (globalReason) {
-        site.status = 'report-only';
-        site.reason = globalReason;
-        site.summary = 'The ' + kind + ' at line ' + site.line + ' in ' + filePath + ' is report-only because it is ' + globalReason + '.';
-        delete site.patch;
-      }
+      // Assignment, delete, destructuring, Object.assign / defineProperty, and
+      // aliases (`const c = console; c.log = audit`) can replace the builtin.
+      // File-level: one write makes every console call in the file report-only.
+      if (!globalReason && consoleMutated) globalReason = consoleMutated;
+      if (globalReason) downgradeSite(site, globalReason);
       sites.push(site);
+      metas.push({ site: site, startIdx: ti, endIdx: closeIdx });
     }
   }
+  // Deleting a semicolon-terminated statement can join the lines on either
+  // side (`foo()\nconsole.log(1);\n(bar)()`). Decide with every appliable
+  // removal applied together, so a run of debug lines cannot hide the join.
+  markAsiJoinHazards(normalized, tokens, metas);
   return sites;
 }
 
@@ -5343,8 +5353,12 @@ function consoleShadowAt(tokens, filePath, content) {
   var n = tokens.length;
   var scopes = [];
   var stack = [];
+  // Declaration names are not assignments to an existing binding. `const console = audit`
+  // shadows; it does not write the global console the way `console = audit` does.
+  tokens.declaredName = Object.create(null);
 
   function peek(i) { return i >= 0 && i < n ? tokens[i] : null; }
+  function noteDeclared(i) { if (i >= 0) tokens.declaredName[i] = true; }
   var fileDynamic = false;
 
   function pushScope(functionLike, start, kind) {
@@ -5478,6 +5492,7 @@ function consoleShadowAt(tokens, filePath, content) {
     if (peek(i).v === '[') return arrayPattern(i, isVar);
     if (peek(i).v === '...') return bindingName(i + 1, isVar);
     if (peek(i).t === 'id') {
+      noteDeclared(i);
       if (peek(i).v === 'console') {
         if (isVar) markVar(); else markLet();
       }
@@ -5508,6 +5523,7 @@ function consoleShadowAt(tokens, filePath, content) {
         i++;
         if (peek(i) && peek(i).v === ':') i = bindingName(i + 1, isVar);
         else if (keyIsIdent) {
+          noteDeclared(before);
           if (key === 'console') { if (isVar) markVar(); else markLet(); }
           if (peek(i) && peek(i).v === '=') i = expression(i + 1, { stopComma: true, stopInOf: true });
         }
@@ -5592,6 +5608,7 @@ function consoleShadowAt(tokens, filePath, content) {
 
   function arrowFromIdent(i) {
     var name = peek(i) ? peek(i).v : '';
+    noteDeclared(i);
     pushScope(true, i, 'arrow');
     if (name === 'console') markLet();
     i += 2;
@@ -5653,6 +5670,7 @@ function consoleShadowAt(tokens, filePath, content) {
     var fname = '';
     if (peek(i) && peek(i).t === 'id') {
       fname = peek(i).v;
+      noteDeclared(i);
       if (isStatement && fname === 'console') markVar();
       i++;
     }
@@ -5677,6 +5695,7 @@ function consoleShadowAt(tokens, filePath, content) {
     var name = '';
     if (peek(i) && peek(i).t === 'id') {
       name = peek(i).v;
+      noteDeclared(i);
       if (name === 'console' && bindNameOutside !== false) markLet();
       i++;
     }
@@ -5782,6 +5801,7 @@ function consoleShadowAt(tokens, filePath, content) {
     if (peek(i) && peek(i).v === '(') return expression(start, {});
     if (peek(i) && peek(i).v === 'type') i++;
     if (peek(i) && peek(i).t === 'id') {
+      noteDeclared(i);
       if (peek(i).v === 'console') markVar();
       i++;
       if (peek(i) && peek(i).v === ',') i++;
@@ -5790,6 +5810,7 @@ function consoleShadowAt(tokens, filePath, content) {
       i++;
       if (peek(i) && peek(i).v === 'as') i++;
       if (peek(i) && peek(i).t === 'id') {
+        noteDeclared(i);
         if (peek(i).v === 'console') markVar();
         i++;
       }
@@ -5801,11 +5822,13 @@ function consoleShadowAt(tokens, filePath, content) {
         if (peek(i).v === 'type') i++;
         if (peek(i) && peek(i).t === 'id') {
           var local = peek(i).v;
+          var localIdx = i;
           i++;
           if (peek(i) && peek(i).v === 'as') {
             i++;
-            if (peek(i) && peek(i).t === 'id') { local = peek(i).v; i++; }
+            if (peek(i) && peek(i).t === 'id') { local = peek(i).v; localIdx = i; i++; }
           }
+          noteDeclared(localIdx);
           if (local === 'console') markVar();
           continue;
         }
@@ -6003,6 +6026,7 @@ function consoleShadowAt(tokens, filePath, content) {
       return i;
     }
     if (!(peek(i) && peek(i).t === 'id')) return -1;
+    noteDeclared(i);
     var parts = [peek(i).v];
     i++;
     if (kind !== 'enum') {
@@ -6220,6 +6244,566 @@ function consoleShadowAt(tokens, filePath, content) {
     }
     return false;
   }
+}
+
+function downgradeSite(site, reason) {
+  site.status = 'report-only';
+  site.reason = reason;
+  site.summary = 'The ' + site.kind + ' at line ' + site.line + ' in ' + site.filePath + ' is report-only because it is ' + reason + '.';
+  delete site.patch;
+}
+
+// Hosts whose `.console` is the global console object. `this` is included:
+// a sloppy script can assign `this.console`, and a method's `this` is not
+// worth trying to prove.
+var CONSOLE_HOSTS = { globalThis: 1, window: 1, self: 1, global: 1, this: 1 };
+
+var CONSOLE_ASSIGN_OPS = {
+  '=': 1, '+=': 1, '-=': 1, '*=': 1, '/=': 1, '%=': 1, '**=': 1,
+  '<<=': 1, '>>=': 1, '>>>=': 1, '&=': 1, '|=': 1, '^=': 1,
+  '&&=': 1, '||=': 1, '??=': 1
+};
+
+function consoleMutationReason(tokens, content) {
+  try {
+    if (fileWritesConsole(tokens, content)) return 'in a file that reassigns console';
+  } catch (err) {
+    return 'in a file that reassigns console';
+  }
+  return '';
+}
+
+function isConsoleHost(tok) {
+  return !!(tok && CONSOLE_HOSTS[tok.v] && (tok.t === 'id' || tok.t === 'kw'));
+}
+
+function fileWritesConsole(tokens, content) {
+  var aliases = collectConsoleAliases(tokens, content);
+  var i;
+  for (i = 0; i < tokens.length; i++) {
+    if (assignmentWritesConsole(tokens, i, aliases, content)) return true;
+    if (updateOrDeleteWritesConsole(tokens, i, aliases, content)) return true;
+    if (patternAssignmentWritesConsole(tokens, i, aliases, content)) return true;
+    if (forHeadWritesConsole(tokens, i, aliases, content)) return true;
+    if (mutatorCallWritesConsole(tokens, i, aliases, content)) return true;
+    if (defineAccessorWritesConsole(tokens, i, aliases, content)) return true;
+  }
+  return false;
+}
+
+function collectConsoleAliases(tokens, content) {
+  var aliases = Object.create(null);
+  var guard = 0;
+  var changed = true;
+  while (changed && guard++ < 32) {
+    changed = false;
+    for (var i = 0; i < tokens.length; i++) {
+      var name = aliasBoundAt(tokens, i, aliases, content);
+      if (name && !aliases[name]) {
+        aliases[name] = true;
+        changed = true;
+      }
+    }
+  }
+  return aliases;
+}
+
+// `const c = console`, `c = window.console`, `c = (0, console)`, `d = c`.
+// A later `c.log = audit` mutates the object the alias still might hold.
+function aliasBoundAt(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok || tok.t !== 'id') return '';
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.' || prev.v === ':')) return '';
+  var eq = tokens[i + 1];
+  if (!eq || eq.v !== '=') return '';
+  if (!rhsIsConsoleObject(tokens, i + 2, aliases, content)) return '';
+  return tok.v;
+}
+
+function rhsIsConsoleObject(tokens, i, aliases, content) {
+  if (!tokens[i]) return false;
+  if (tokens[i].v === '(') {
+    var close = closeGroup(tokens, i);
+    if (close < 0) return false;
+    if (!groupYieldsConsole(tokens, i + 1, close, aliases, content)) return false;
+    return !memberOrCall(tokens[close + 1]);
+  }
+  var end = matchConsoleObject(tokens, i, aliases, content);
+  if (end < 0) return false;
+  if (memberOrCall(tokens[end])) return false;
+  return true;
+}
+
+function groupYieldsConsole(tokens, start, end, aliases, content) {
+  var last = start;
+  var depth = 0;
+  for (var i = start; i < end; i++) {
+    var v = tokens[i].v;
+    if (v === '(' || v === '[' || v === '{') depth++;
+    else if (v === ')' || v === ']' || v === '}') {
+      if (depth === 0) return false;
+      depth--;
+    } else if (v === ',' && depth === 0) last = i + 1;
+  }
+  var objEnd = matchConsoleObject(tokens, last, aliases, content);
+  if (objEnd < 0 || objEnd > end) return false;
+  return !memberOrCall(tokens[objEnd]);
+}
+
+function memberOrCall(tok) {
+  if (!tok) return false;
+  return tok.v === '.' || tok.v === '?.' || tok.v === '[' || tok.v === '(';
+}
+
+// A console object: `console`, an alias, or `globalThis` / `window` / `self` /
+// `global` / `this` `.console` or `['console']`. An unknown computed key on a
+// host counts too (`window[name] = ...` might be `console`).
+function matchConsoleObject(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok) return -1;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return -1;
+  if ((tok.t === 'id' || tok.t === 'kw') && tok.v === 'console') return i + 1;
+  if (tok.t === 'id' && aliases && aliases[tok.v]) return i + 1;
+  if (isConsoleHost(tok)) return matchHostConsole(tokens, i, content);
+  return -1;
+}
+
+function matchHostConsole(tokens, i, content) {
+  var mid = tokens[i + 1];
+  if (!mid) return -1;
+  var prop = tokens[i + 2];
+  if ((mid.v === '.' || mid.v === '?.') && prop && prop.v === 'console' && (prop.t === 'id' || prop.t === 'kw')) {
+    return i + 3;
+  }
+  if (mid.v !== '[') return -1;
+  var close = closeGroup(tokens, i + 1);
+  if (close < 0) return -1;
+  var name = propertyNameText(tokens, content, i + 2, close);
+  if (name === 'console' || name == null) return close + 1;
+  return -1;
+}
+
+// End index (exclusive) of a console object or a property path rooted at one.
+function matchConsoleTarget(tokens, i, aliases, content) {
+  var end = matchConsoleObject(tokens, i, aliases, content);
+  if (end < 0) return -1;
+  var guard = 0;
+  while (end < tokens.length && guard++ < 32) {
+    var tok = tokens[end];
+    if (!tok) break;
+    if ((tok.v === '.' || tok.v === '?.') && tokens[end + 1] && (tokens[end + 1].t === 'id' || tokens[end + 1].t === 'kw' || tokens[end + 1].t === 'str' || tokens[end + 1].t === 'num')) {
+      end += 2;
+      continue;
+    }
+    if (tok.v === '[') {
+      var close = closeGroup(tokens, end);
+      if (close < 0) return end;
+      end = close + 1;
+      continue;
+    }
+    break;
+  }
+  return end;
+}
+
+// Bare `console` / `host.console` rebinds the global. A property path mutates
+// the object. Rebinding an alias (`c = other`) does not.
+function spanMutatesConsole(tokens, start, end, aliases, content) {
+  var objEnd = matchConsoleObject(tokens, start, aliases, content);
+  if (objEnd < 0 || objEnd > end) return false;
+  if (objEnd < end) return true;
+  var tok = tokens[start];
+  if (tok && tok.t === 'id' && aliases && aliases[tok.v] && tok.v !== 'console') return false;
+  return true;
+}
+
+function assignmentWritesConsole(tokens, i, aliases, content) {
+  var end = matchConsoleTarget(tokens, i, aliases, content);
+  if (end <= i) return false;
+  var op = tokens[end];
+  if (!op || !CONSOLE_ASSIGN_OPS[op.v]) return false;
+  if (isDeclaredName(tokens, i, end)) return false;
+  return spanMutatesConsole(tokens, i, end, aliases, content);
+}
+
+function isDeclaredName(tokens, start, end) {
+  if (end !== start + 1) return false;
+  return !!(tokens.declaredName && tokens.declaredName[start]);
+}
+
+function updateOrDeleteWritesConsole(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok) return false;
+  if (tok.v === 'delete') return operandWritesConsole(tokens, i + 1, aliases, content);
+  // `i++` is postfix. Only a prefix update (`++console.log`) writes the operand.
+  if ((tok.v === '++' || tok.v === '--') && isPrefixUpdate(tokens, i)) {
+    return operandWritesConsole(tokens, i + 1, aliases, content);
+  }
+  var targetEnd = matchConsoleTarget(tokens, i, aliases, content);
+  if (targetEnd <= i || isDeclaredName(tokens, i, targetEnd)) return false;
+  var post = tokens[targetEnd];
+  if (!post || (post.v !== '++' && post.v !== '--')) return false;
+  return spanMutatesConsole(tokens, i, targetEnd, aliases, content);
+}
+
+// `++i` / `delete x` take the next expression. `i++` does not: the previous
+// token already ended an operand, so the following `console.log(...)` is a call.
+function isPrefixUpdate(tokens, i) {
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (!prev) return true;
+  if (prev.t === 'id' || prev.t === 'num' || prev.t === 'str' || prev.t === 're') return false;
+  if (prev.v === ')' || prev.v === ']' || prev.v === '}' || prev.v === '++' || prev.v === '--') return false;
+  if (prev.t === 'kw' && (prev.v === 'this' || prev.v === 'super')) return false;
+  return true;
+}
+
+// The operand is a write only when it is the console target itself.
+// `++console.log()` and `delete console.log()` increment or delete the call
+// result; `++(console.log)` and `delete (console.log)` still write the property.
+function operandWritesConsole(tokens, i, aliases, content) {
+  var j = i;
+  var wrapped = 0;
+  while (tokens[j] && tokens[j].v === '(') { wrapped++; j++; }
+  var end = matchConsoleTarget(tokens, j, aliases, content);
+  if (end <= j || isDeclaredName(tokens, j, end)) return false;
+  if (tokens[end] && tokens[end].v === '(') return false;
+  var k = end;
+  while (wrapped > 0 && tokens[k] && tokens[k].v === ')') { wrapped--; k++; }
+  return spanMutatesConsole(tokens, j, end, aliases, content);
+}
+
+function patternAssignmentWritesConsole(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok || (tok.v !== '{' && tok.v !== '[')) return false;
+  if (!isBindingPatternStart(tokens, i)) return false;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  // `const { console }` declares a binding. The shadow walker handles it.
+  if (prev && (prev.v === 'const' || prev.v === 'let' || prev.v === 'var' || prev.v === 'using')) return false;
+  var close = closeGroup(tokens, i);
+  if (close < 0) return false;
+  if (!tokens[close + 1] || tokens[close + 1].v !== '=') return false;
+  return patternWritesConsole(tokens, i, close, aliases, content);
+}
+
+function forHeadWritesConsole(tokens, i, aliases, content) {
+  if (!tokens[i] || tokens[i].t !== 'kw' || tokens[i].v !== 'for') return false;
+  var j = i + 1;
+  if (tokens[j] && tokens[j].t === 'kw' && tokens[j].v === 'await') j++;
+  if (!tokens[j] || tokens[j].v !== '(') return false;
+  j++;
+  if (tokens[j] && (tokens[j].v === 'const' || tokens[j].v === 'let' || tokens[j].v === 'var' || tokens[j].v === 'using')) return false;
+  if (tokens[j] && tokens[j].t === 'kw' && tokens[j].v === 'await' && tokens[j + 1] && tokens[j + 1].v === 'using') return false;
+  var start = j;
+  var depth = 0;
+  while (j < tokens.length) {
+    var v = tokens[j].v;
+    if (v === '(' || v === '{' || v === '[' || v === '${') depth++;
+    else if (v === ')' || v === '}' || v === ']') {
+      if (depth === 0) return false;
+      depth--;
+    } else if (depth === 0 && (v === 'of' || v === 'in' || v === ';')) {
+      if (v === ';') return false;
+      return rangeWritesConsole(tokens, start, j, aliases, content);
+    }
+    j++;
+  }
+  return false;
+}
+
+function rangeWritesConsole(tokens, start, end, aliases, content) {
+  if (start >= end) return false;
+  var v = tokens[start].v;
+  if (v === '{' || v === '[') return patternWritesConsole(tokens, start, end, aliases, content);
+  var targetEnd = matchConsoleTarget(tokens, start, aliases, content);
+  if (targetEnd < 0 || targetEnd > end) return false;
+  return spanMutatesConsole(tokens, start, targetEnd, aliases, content);
+}
+
+function patternWritesConsole(tokens, start, end, aliases, content) {
+  var seen = targetWritesConsole(tokens, start, aliases, content);
+  if (!seen) return false;
+  return seen.writes && seen.i <= end + 1;
+}
+
+function targetWritesConsole(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok) return null;
+  if (tok.v === '{') return objectPatternWrites(tokens, i, aliases, content);
+  if (tok.v === '[') return arrayPatternWrites(tokens, i, aliases, content);
+  if (tok.v === '...') {
+    var rest = targetWritesConsole(tokens, i + 1, aliases, content);
+    if (!rest) return { i: i + 1, writes: false };
+    return rest;
+  }
+  var end = matchConsoleTarget(tokens, i, aliases, content);
+  if (end > i) {
+    var writes = spanMutatesConsole(tokens, i, end, aliases, content);
+    var j = end;
+    if (tokens[j] && tokens[j].v === '=' && tokens[j].v.length === 1) j = skipPatternDefault(tokens, j + 1);
+    return { i: j, writes: writes };
+  }
+  var j2 = i + 1;
+  if (tokens[j2] && tokens[j2].v === '=' && (!tokens[j2 + 1] || tokens[j2].v.length === 1)) j2 = skipPatternDefault(tokens, j2 + 1);
+  return { i: j2, writes: false };
+}
+
+function objectPatternWrites(tokens, start, aliases, content) {
+  var i = start + 1;
+  var writes = false;
+  var guard = 0;
+  while (i < tokens.length && tokens[i].v !== '}' && guard++ < 400) {
+    if (tokens[i].v === ',') { i++; continue; }
+    if (tokens[i].v === '...') {
+      var rest = targetWritesConsole(tokens, i + 1, aliases, content);
+      if (!rest || rest.i <= i) { i++; continue; }
+      writes = writes || rest.writes;
+      i = rest.i;
+      continue;
+    }
+    if (tokens[i].v === '[') {
+      var computed = closeGroup(tokens, i);
+      if (computed < 0) return { i: i + 1, writes: true };
+      i = computed + 1;
+      if (tokens[i] && tokens[i].v === ':') {
+        var computedTarget = targetWritesConsole(tokens, i + 1, aliases, content);
+        if (!computedTarget || computedTarget.i <= i) return { i: i + 1, writes: true };
+        writes = writes || computedTarget.writes;
+        i = computedTarget.i;
+      }
+      continue;
+    }
+    var key = tokens[i];
+    i++;
+    if (tokens[i] && tokens[i].v === ':') {
+      var named = targetWritesConsole(tokens, i + 1, aliases, content);
+      if (!named || named.i <= i) return { i: i + 1, writes: true };
+      writes = writes || named.writes;
+      i = named.i;
+      continue;
+    }
+    if (key && (key.t === 'id' || key.t === 'kw') && key.v === 'console') writes = true;
+    if (tokens[i] && tokens[i].v === '=' && tokens[i].v.length === 1) i = skipPatternDefault(tokens, i + 1);
+  }
+  if (i < tokens.length && tokens[i].v === '}') i++;
+  return { i: i, writes: writes };
+}
+
+function arrayPatternWrites(tokens, start, aliases, content) {
+  var i = start + 1;
+  var writes = false;
+  var guard = 0;
+  while (i < tokens.length && tokens[i].v !== ']' && guard++ < 400) {
+    if (tokens[i].v === ',') { i++; continue; }
+    var before = i;
+    var item = targetWritesConsole(tokens, i, aliases, content);
+    if (!item || item.i <= before) return { i: before + 1, writes: true };
+    writes = writes || item.writes;
+    i = item.i;
+  }
+  if (i < tokens.length && tokens[i].v === ']') i++;
+  return { i: i, writes: writes };
+}
+
+function skipPatternDefault(tokens, i) {
+  var depth = 0;
+  var guard = 0;
+  while (i < tokens.length && guard++ < 400) {
+    var v = tokens[i].v;
+    if (v === '(' || v === '[' || v === '{' || v === '${') depth++;
+    else if (v === ')' || v === ']' || v === '}') {
+      if (depth === 0) return i;
+      depth--;
+    } else if (depth === 0 && v === ',') return i;
+    i++;
+  }
+  return i;
+}
+
+function isBindingPatternStart(tokens, i) {
+  if (i === 0) return true;
+  var prev = tokens[i - 1];
+  if (!prev) return true;
+  if (prev.v === '=' || prev.v === '(' || prev.v === ',' || prev.v === ';' || prev.v === '[' || prev.v === '{' || prev.v === '}' || prev.v === ':') return true;
+  if (prev.t === 'kw') {
+    switch (prev.v) {
+      case 'const': case 'let': case 'var': case 'return': case 'of': case 'in':
+      case 'case': case 'throw': case 'yield': case 'await': case 'void':
+      case 'delete': case 'typeof': case 'export': case 'default':
+        return true;
+      default:
+        return false;
+    }
+  }
+  return false;
+}
+
+// Object.assign / defineProperty / defineProperties / setPrototypeOf and the
+// Reflect equivalents. A host as the target counts: assigning onto
+// `globalThis` can replace `console`. defineProperty on a host counts only
+// when the property name is `console` or cannot be proved otherwise.
+function mutatorCallWritesConsole(tokens, i, aliases, content) {
+  var call = matchMutatorCall(tokens, i, content);
+  if (!call) return false;
+  var first = argRange(tokens, call.paren);
+  if (!first) return false;
+  if (call.mode === 'target') {
+    if (argIsConsoleObject(tokens, first.start, first.end, aliases, content)) return true;
+    if (argIsBareHost(tokens, first.start, first.end)) return true;
+    return false;
+  }
+  if (argIsConsoleObject(tokens, first.start, first.end, aliases, content)) return true;
+  if (!argIsBareHost(tokens, first.start, first.end)) return false;
+  var second = argRange(tokens, first.end);
+  if (!second) return true;
+  var name = propertyNameText(tokens, content, second.start, second.end);
+  if (name == null) return true;
+  return name === 'console';
+}
+
+function matchMutatorCall(tokens, i, content) {
+  var tok = tokens[i];
+  if (!tok || tok.t !== 'id') return null;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return null;
+  var table = tok.v === 'Object' ? OBJECT_MUTATORS : tok.v === 'Reflect' ? REFLECT_MUTATORS : null;
+  if (!table) return null;
+  var method = memberNameAt(tokens, content, i + 1);
+  if (!method || !table[method.name]) return null;
+  if (!tokens[method.end] || tokens[method.end].v !== '(') return null;
+  return { mode: table[method.name], paren: method.end };
+}
+
+var OBJECT_MUTATORS = { assign: 'target', defineProperties: 'target', setPrototypeOf: 'target', defineProperty: 'define' };
+var REFLECT_MUTATORS = { defineProperty: 'define', set: 'define', deleteProperty: 'define', setPrototypeOf: 'target' };
+
+function memberNameAt(tokens, content, i) {
+  var tok = tokens[i];
+  if (!tok) return null;
+  if ((tok.v === '.' || tok.v === '?.') && tokens[i + 1] && (tokens[i + 1].t === 'id' || tokens[i + 1].t === 'kw')) {
+    return { name: tokens[i + 1].v, end: i + 2 };
+  }
+  if (tok.v !== '[') return null;
+  var close = closeGroup(tokens, i);
+  if (close < 0) return null;
+  var name = propertyNameText(tokens, content, i + 1, close);
+  if (!name) return null;
+  return { name: name, end: close + 1 };
+}
+
+function argRange(tokens, from) {
+  // `from` is the `(` or the comma that ends the previous argument.
+  if (!tokens[from]) return null;
+  var i = from + 1;
+  if (!tokens[i] || tokens[i].v === ')') return null;
+  var start = i;
+  var depth = 0;
+  while (i < tokens.length) {
+    var v = tokens[i].v;
+    if (v === '(' || v === '[' || v === '{' || v === '${') depth++;
+    else if (v === ')' || v === ']' || v === '}') {
+      if (depth === 0) return { start: start, end: i };
+      depth--;
+    } else if (v === ',' && depth === 0) return { start: start, end: i };
+    i++;
+  }
+  return { start: start, end: i };
+}
+
+function argIsConsoleObject(tokens, start, end, aliases, content) {
+  var i = start;
+  while (i < end && tokens[i] && tokens[i].v === '(') i++;
+  var objEnd = matchConsoleObject(tokens, i, aliases, content);
+  if (objEnd < 0) return false;
+  while (objEnd < end && tokens[objEnd] && tokens[objEnd].v === ')') objEnd++;
+  if (objEnd < end && tokens[objEnd] && (tokens[objEnd].v === 'as' || tokens[objEnd].v === 'satisfies')) return true;
+  return objEnd === end;
+}
+
+function argIsBareHost(tokens, start, end) {
+  return end === start + 1 && isConsoleHost(tokens[start]);
+}
+
+function propertyNameText(tokens, content, start, end) {
+  if (end === start + 1) return literalText(content, tokens[start]);
+  if (end === start + 2 && tokens[start] && tokens[start].t === 'tmpl') return simpleTemplateText(content, tokens[start], tokens[start + 1]);
+  return null;
+}
+
+function literalText(content, tok) {
+  if (!tok) return null;
+  if (tok.t === 'str') return decodeSimpleString(content.slice(tok.i, tok.end));
+  if (tok.t === 'tmpl') return null;
+  return null;
+}
+
+function simpleTemplateText(content, openTok, closeTok) {
+  if (!openTok || openTok.t !== 'tmpl' || !closeTok) return null;
+  var raw = content.slice(openTok.end, closeTok.i);
+  if (raw.charAt(raw.length - 1) !== '`') return null;
+  raw = raw.slice(0, -1);
+  if (raw.indexOf('${') >= 0 || raw.indexOf('\\') >= 0) return null;
+  return raw;
+}
+
+function decodeSimpleString(raw) {
+  if (!raw || raw.length < 2) return null;
+  var q = raw.charAt(0);
+  if ((q !== '"' && q !== "'") || raw.charAt(raw.length - 1) !== q) return null;
+  var body = raw.slice(1, -1);
+  if (body.indexOf('\\') < 0) return body.indexOf('\n') >= 0 ? null : body;
+  var out = '';
+  for (var i = 0; i < body.length; i++) {
+    var ch = body.charAt(i);
+    if (ch !== '\\') { out += ch; continue; }
+    var n = body.charAt(i + 1);
+    if (n === 'u' && body.charAt(i + 2) === '{') {
+      var j = i + 3;
+      var hex = '';
+      while (j < body.length && hex.length < 6 && isHex(body.charAt(j))) { hex += body.charAt(j); j++; }
+      if (!hex || body.charAt(j) !== '}') return null;
+      var cp = parseInt(hex, 16);
+      if (cp > 0x10FFFF) return null;
+      out += cp <= 0xFFFF ? String.fromCharCode(cp) : identCharFromCodePoint(cp);
+      i = j;
+      continue;
+    }
+    if (n === 'u') {
+      var h4 = body.substr(i + 2, 4);
+      if (!/^[0-9a-fA-F]{4}$/.test(h4)) return null;
+      out += String.fromCharCode(parseInt(h4, 16));
+      i += 5;
+      continue;
+    }
+    return null;
+  }
+  return out;
+}
+
+function identCharFromCodePoint(cp) {
+  if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return '';
+  if (cp <= 0xFFFF) return String.fromCharCode(cp);
+  var cu = cp - 0x10000;
+  return String.fromCharCode(0xD800 + (cu >> 10), 0xDC00 + (cu & 0x3FF));
+}
+
+function isHex(ch) { return /[0-9a-fA-F]/.test(ch || ''); }
+
+function closeGroup(tokens, openIdx) {
+  var open = tokens[openIdx] ? tokens[openIdx].v : '';
+  var close = open === '(' ? ')' : open === '[' ? ']' : open === '{' ? '}' : '';
+  if (!close) return -1;
+  var depth = 0;
+  for (var i = openIdx; i < tokens.length; i++) {
+    var v = tokens[i].v;
+    if (v === open) depth++;
+    else if (v === close) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
 }
 
 function isConsoleCall(tokens, ti) {
@@ -6479,6 +7063,194 @@ var CONTINUE_OPS = {
   '=': 1, '+=': 1, '-=': 1, '*=': 1, '/=': 1, '%=': 1,
   '&=': 1, '|=': 1, '^=': 1, '<<=': 1, '>>=': 1, '>>>=': 1, '**=': 1, '&&=': 1, '||=': 1, '??=': 1
 };
+
+// Tokens that can continue the previous expression when a separating statement
+// disappears. `++` and `--` are absent on purpose: a newline before them is a
+// new prefix update, so ASI splits. Identifiers, strings, and `!` / `~` split too.
+var JOIN_HAZARD_OPS = {
+  '(': 1, '[': 1, ',': 1, '.': 1, '?.': 1, '?': 1, ':': 1,
+  '+': 1, '-': 1, '*': 1, '/': 1, '%': 1, '**': 1,
+  '&': 1, '|': 1, '^': 1, '<<': 1, '>>': 1, '>>>': 1,
+  '<': 1, '>': 1, '<=': 1, '>=': 1, '==': 1, '===': 1, '!=': 1, '!==': 1,
+  '&&': 1, '||': 1, '??': 1,
+  '=': 1, '+=': 1, '-=': 1, '*=': 1, '/=': 1, '%=': 1, '**=': 1,
+  '&=': 1, '|=': 1, '^=': 1, '<<=': 1, '>>=': 1, '>>>=': 1,
+  '&&=': 1, '||=': 1, '??=': 1
+};
+
+function markAsiJoinHazards(content, tokens, metas) {
+  var removed = [];
+  var i;
+  for (i = 0; i < tokens.length; i++) removed.push(false);
+  for (i = 0; i < metas.length; i++) {
+    var meta = metas[i];
+    if (!meta.site || meta.site.status !== 'appliable') continue;
+    var a;
+    for (a = meta.startIdx; a <= meta.endIdx && a < tokens.length; a++) removed[a] = true;
+    meta.semiIdx = consumedSemiIndex(content, tokens, meta.endIdx);
+    if (meta.semiIdx >= 0) removed[meta.semiIdx] = true;
+  }
+  for (i = 0; i < metas.length; i++) {
+    var siteMeta = metas[i];
+    if (!siteMeta.site || siteMeta.site.status !== 'appliable') continue;
+    var prev = siteMeta.startIdx - 1;
+    while (prev >= 0 && removed[prev]) prev--;
+    var after = siteMeta.semiIdx >= 0 ? siteMeta.semiIdx : siteMeta.endIdx;
+    var next = after + 1;
+    while (next < tokens.length && removed[next]) next++;
+    var nextTok = next < tokens.length ? tokens[next] : null;
+    if (isJoinHazard(nextTok) && !isHardStatementTerminator(tokens, prev)) {
+      downgradeSite(siteMeta.site, 'separating statements that would join');
+    }
+  }
+}
+
+function consumedSemiIndex(content, tokens, endIdx) {
+  var semi = tokens[endIdx + 1];
+  if (!semi || semi.v !== ';') return -1;
+  var between = content.slice(tokens[endIdx].end, semi.i);
+  if (between.indexOf('\n') >= 0) return -1;
+  if (!/^[\t ]*$/.test(between)) return -1;
+  return endIdx + 1;
+}
+
+function isJoinHazard(tok) {
+  if (!tok) return false;
+  if (tok.t === 'tmpl' || tok.t === 're') return true;
+  if (tok.t === 'kw' && (tok.v === 'in' || tok.v === 'instanceof')) return true;
+  // TypeScript `as` / `satisfies` continue an expression. In plain JS they are
+  // identifiers, so leaving the site report-only is the conservative choice.
+  if (tok.v === 'as' || tok.v === 'satisfies') return true;
+  if (tok.t === 'p' && JOIN_HAZARD_OPS[tok.v]) return true;
+  return false;
+}
+
+// `;` or a `}` that actually ends a statement. An object literal or class
+// expression `}` does not: `x = { a: 1 }\n(bar)()` calls the object.
+function isHardStatementTerminator(tokens, idx) {
+  if (idx < 0) return true;
+  var tok = tokens[idx];
+  if (!tok) return true;
+  if (tok.v === ';') return true;
+  if (tok.v === '}' && braceClosesStatement(tokens, idx)) return true;
+  return false;
+}
+
+function braceClosesStatement(tokens, closeIdx) {
+  var openIdx = matchingBraceOpen(tokens, closeIdx);
+  if (openIdx < 0) return false;
+  if (tokens[openIdx].v === '${') return false;
+  if (isBlockBrace(tokens, openIdx)) return true;
+  return declarationBrace(tokens, openIdx);
+}
+
+function matchingBraceOpen(tokens, closeIdx) {
+  var depth = 0;
+  for (var k = closeIdx; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === '}') depth++;
+    else if (v === '{' || v === '${') {
+      depth--;
+      if (depth === 0) return k;
+    }
+  }
+  return -1;
+}
+
+// `obj.__defineSetter__('log', fn)` is the pre-defineProperty way to replace a
+// method. On `console` any name matters; on a host only the name `console`.
+function defineAccessorWritesConsole(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok) return false;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return false;
+  var receiverConsole = false;
+  var baseEnd = -1;
+  if ((tok.t === 'id' || tok.t === 'kw') && tok.v === 'console') {
+    receiverConsole = true;
+    baseEnd = i + 1;
+  } else if (tok.t === 'id' && aliases && aliases[tok.v]) {
+    receiverConsole = true;
+    baseEnd = i + 1;
+  } else if (isConsoleHost(tok)) {
+    var hostConsole = matchHostConsole(tokens, i, content);
+    if (hostConsole > i) {
+      receiverConsole = true;
+      baseEnd = hostConsole;
+    } else {
+      baseEnd = i + 1;
+    }
+  } else return false;
+  var method = memberNameAt(tokens, content, baseEnd);
+  if (!method || (method.name !== '__defineSetter__' && method.name !== '__defineGetter__')) return false;
+  if (!tokens[method.end] || tokens[method.end].v !== '(') return false;
+  if (receiverConsole) return true;
+  var first = argRange(tokens, method.end);
+  if (!first) return true;
+  var name = propertyNameText(tokens, content, first.start, first.end);
+  if (name == null) return true;
+  return name === 'console';
+}
+
+function declarationBrace(tokens, openIdx) {
+  var i = openIdx - 1;
+  var guard = 0;
+  while (i >= 0 && guard++ < 80) {
+    var tok = tokens[i];
+    var v = tok.v;
+    if (v === '>' || v === ')' || v === ']' || v === '>>' || v === '>>>') {
+      i = skipGroupBackward(tokens, i);
+      continue;
+    }
+    if (tok.t === 'kw' && (v === 'class' || v === 'enum')) return keywordStartsDeclaration(tokens, i);
+    if (tok.t === 'id' && (v === 'namespace' || v === 'module' || v === 'interface')) return keywordStartsDeclaration(tokens, i);
+    if (tok.t === 'id' || tok.t === 'str' || tok.t === 'num' ||
+        v === '.' || v === ',' || v === '?' || v === 'extends' || v === 'implements' ||
+        v === 'declare' || v === 'abstract' || v === 'public' || v === 'private' ||
+        v === 'protected' || v === 'readonly' || v === 'type' || v === 'async' ||
+        v === 'export' || v === 'default' || v === 'const') {
+      i--;
+      continue;
+    }
+    if (tok.t === 'kw' && (v === 'export' || v === 'default' || v === 'const' || v === 'async')) {
+      i--;
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
+function keywordStartsDeclaration(tokens, kwIdx) {
+  var prev = kwIdx > 0 ? tokens[kwIdx - 1] : null;
+  if (!prev) return true;
+  var v = prev.v;
+  if (v === ';' || v === '{' || v === '}') return true;
+  if (v === 'export' || v === 'default' || v === 'declare' || v === 'const' || v === 'abstract') return true;
+  return false;
+}
+
+function skipGroupBackward(tokens, closeIdx) {
+  var close = tokens[closeIdx] ? tokens[closeIdx].v : '';
+  var open = close === ')' ? '(' : close === ']' ? '[' : close === '}' ? '{' : close === '>' ? '<' : '';
+  var extra = 0;
+  if (close === '>>') { open = '<'; extra = 1; }
+  else if (close === '>>>') { open = '<'; extra = 2; }
+  if (!open) return closeIdx - 1;
+  var depth = 1 + extra;
+  for (var k = closeIdx - 1; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === close && close !== '>>' && close !== '>>>') depth++;
+    else if (v === '>') depth++;
+    else if (v === '>>') depth += 2;
+    else if (v === '>>>') depth += 3;
+    else if (v === open || (open === '{' && v === '${')) {
+      depth--;
+      if (depth === 0) return k - 1;
+    }
+  }
+  return -1;
+}
 
 // Logical lines match the scanner (\r\n, bare \r, \n), but each diff line keeps
 // the bytes git apply sees when it splits the working tree on LF. A CRLF line

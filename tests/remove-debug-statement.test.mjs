@@ -589,7 +589,9 @@ test('tagged templates and other expression continuations stay report-only', asy
   assert.equal(byLine[5].reason, 'part of an expression');
   assert.equal(byLine[9].status, 'report-only');
   assert.equal(byLine[9].reason, 'part of an expression');
-  assert.equal(byLine[11].status, 'appliable');
+  assert.equal(byLine[11].status, 'report-only');
+  assert.equal(byLine[11].reason, 'separating statements that would join');
+  assert.equal(byLine[11].patch, undefined);
   assert.equal(byLine[13].status, 'appliable');
   assert.equal(byLine[15].status, 'appliable');
   assert.equal(byLine[15].kind, 'debugger');
@@ -601,7 +603,6 @@ test('tagged templates and other expression continuations stay report-only', asy
   const removed = suggestions.combinedPatch.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---'));
   assert.deepEqual(removed, [
     '-console.log("safe");',
-    '-console.log("z");',
     '-console.debug("kept")',
     '-debugger',
   ]);
@@ -613,7 +614,7 @@ test('tagged templates and other expression continuations stay report-only', asy
   assert.match(applied['src/continue.ts'], /console\.info\("typed"\)\nas string/);
   assert.match(applied['src/continue.ts'], /console\.info\("checked"\)\nsatisfies Logger/);
   assert.doesNotMatch(applied['src/continue.ts'], /console\.log\("safe"\)/);
-  assert.doesNotMatch(applied['src/continue.ts'], /console\.log\("z"\)/);
+  assert.match(applied['src/continue.ts'], /`after-comment`\nconsole\.log\("z"\);\n`separate`/);
   assert.doesNotMatch(applied['src/continue.ts'], /console\.debug\("kept"\)/);
   assert.doesNotMatch(applied['src/continue.ts'], /^debugger$/m);
   assert.match(applied['src/continue.ts'], /^`not-a-tag`$/m);
@@ -1027,6 +1028,314 @@ test('direct eval and other dynamic scope injection stay report-only', async () 
   const top = Parser.collectRemoveDebugStatementSuggestions([{ path: 'src/top.js', content: topSloppy }]);
   assert.equal(top.combinedPatch, '');
   assert.ok(top.sites.every((site) => site.status === 'report-only' && site.reason === 'in a scope where direct eval may shadow console'));
+});
+
+test('deleting a statement must not join the surrounding lines', async () => {
+  const source = [
+    'function calls() {',
+    '  foo();',
+    '  console.log("debug");',
+    '  (bar)();',
+    '  foo()',
+    '  console.log("debug");',
+    '  (bar)();',
+    '  foo()',
+    '  debugger;',
+    '  (bar)();',
+    '  foo()',
+    '  console.log(1);',
+    '  console.debug(2);',
+    '  (bar)();',
+    '  foo();',
+    '  console.log(1);',
+    '  console.debug(2);',
+    '  (bar)();',
+    '  value',
+    '  console.log(1);',
+    '  [0].join();',
+    '  tag',
+    '  console.log(1);',
+    '  `tmpl`;',
+    '  expr',
+    '  console.info(1);',
+    '  /re/g;',
+    '  left',
+    '  console.log(1);',
+    '  +right;',
+    '  left',
+    '  console.log(1);',
+    '  -right;',
+    '  left',
+    '  console.log(1);',
+    '  *right;',
+    '  left',
+    '  console.log(1);',
+    '  / right;',
+    '  left',
+    '  console.log(1);',
+    '  % right;',
+    '  left',
+    '  console.log(1);',
+    '  , right;',
+    '  obj',
+    '  console.log(1);',
+    '  .method();',
+    '  obj',
+    '  console.log(1);',
+    '  ?.method();',
+    '  cond',
+    '  console.log(1);',
+    '  ? yes : no;',
+    '  item',
+    '  console.log(1);',
+    '  in bag;',
+    '  item',
+    '  console.log(1);',
+    '  instanceof Bag;',
+    '  typed',
+    '  console.log(1);',
+    '  as string;',
+    '  checked',
+    '  console.log(1);',
+    '  satisfies Logger;',
+    '  name',
+    '  console.log(1);',
+    '  = value;',
+    '  name',
+    '  console.log(1);',
+    '  += value;',
+    '  bits',
+    '  console.log(1);',
+    '  & mask;',
+    '  bits',
+    '  console.log(1);',
+    '  | mask;',
+    '  bits',
+    '  console.log(1);',
+    '  < limit;',
+    '  x = { a: 1 }',
+    '  console.log(1);',
+    '  (0);',
+    '  let Ctor = class { }',
+    '  console.log(1);',
+    '  (0);',
+    '  foo()',
+    '  console.log(1);',
+    '  ++bar;',
+    '  foo()',
+    '  console.log(1);',
+    '  !bar;',
+    '}',
+    'class Decl {',
+    '  m() { return 1; }',
+    '}',
+    'console.log("after-class");',
+    '(bar)();',
+    'function block() {',
+    '  console.log("first");',
+    '  (bar)();',
+    '  ready();',
+    '  console.log("later");',
+    '  (bar)();',
+    '}',
+    'function nested() {',
+    '  class Inner<T> { }',
+    '  console.log("after-generic");',
+    '  (bar)();',
+    '}',
+    '',
+  ].join('\n');
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/asi.js', content: source },
+  ]);
+  const byLine = Object.fromEntries(suggestions.sites.map((site) => [site.line, site]));
+  const at = (exact) => {
+    const line = lineOf(source, exact);
+    const site = byLine[line];
+    if (!site) throw new Error('no site for ' + JSON.stringify(exact));
+    return site;
+  };
+
+  assert.equal(at('  console.log("debug");').status, 'appliable');
+  const joined = source.split('\n');
+  const unsafeLog = joined.findIndex((line, index) => line === '  console.log("debug");' && joined[index - 1] === '  foo()');
+  assert.equal(byLine[unsafeLog + 1].status, 'report-only');
+  assert.equal(byLine[unsafeLog + 1].reason, 'separating statements that would join');
+  assert.equal(byLine[unsafeLog + 1].patch, undefined);
+  assert.equal(at('  debugger;').status, 'report-only');
+  assert.equal(at('  debugger;').reason, 'separating statements that would join');
+  assert.equal(at('  console.log(1);').status, 'report-only');
+  assert.equal(at('  console.debug(2);').status, 'report-only');
+  assert.equal(at('  console.debug(2);').reason, 'separating statements that would join');
+  const safePair = joined.findIndex((line, index) => line === '  console.log(1);' && joined[index - 1] === '  foo();');
+  assert.equal(byLine[safePair + 1].status, 'appliable');
+  assert.equal(byLine[safePair + 2].status, 'appliable');
+  assert.equal(at('  console.info(1);').reason, 'separating statements that would join');
+  assert.equal(at('console.log("after-class");').status, 'appliable');
+  assert.equal(at('  console.log("first");').status, 'report-only');
+  assert.equal(at('  console.log("first");').reason, 'separating statements that would join');
+  assert.equal(at('  console.log("later");').status, 'appliable');
+  assert.equal(at('  console.log("after-generic");').status, 'appliable');
+
+  const removed = suggestions.combinedPatch.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---'));
+  assert.ok(removed.some((line) => line === '-  console.log("debug");'));
+  assert.ok(!removed.some((line) => line === '-  debugger;'));
+  assert.ok(removed.some((line) => line === '-console.log("after-class");'));
+  assert.ok(!removed.some((line) => line === '-  console.log("first");'));
+  assert.ok(removed.some((line) => line === '-  console.log("later");'));
+
+  const applied = await applyPatch([{ path: 'src/asi.js', content: source }], suggestions.combinedPatch);
+  assert.match(applied['src/asi.js'], /foo\(\);\n {2}\(bar\)\(\);/);
+  assert.match(applied['src/asi.js'], /foo\(\)\n {2}console\.log\("debug"\);\n {2}\(bar\)\(\);/);
+  assert.match(applied['src/asi.js'], /foo\(\)\n {2}debugger;\n {2}\(bar\)\(\);/);
+  assert.match(applied['src/asi.js'], /foo\(\)\n {2}console\.log\(1\);\n {2}console\.debug\(2\);\n {2}\(bar\)\(\);/);
+  assert.match(applied['src/asi.js'], /class Decl \{\n {2}m\(\) \{ return 1; \}\n\}\n\(bar\)\(\);/);
+  assert.match(applied['src/asi.js'], /function block\(\) \{\n {2}console\.log\("first"\);\n {2}\(bar\)\(\);/);
+  assert.doesNotMatch(applied['src/asi.js'], /console\.log\("later"\)/);
+  assert.doesNotMatch(applied['src/asi.js'], /console\.log\("after-generic"\)/);
+  assert.doesNotMatch(applied['src/asi.js'], /console\.log\("after-class"\)/);
+});
+
+test('writes that replace console stay report-only', async () => {
+  const rewritten = [
+    'console = audit;\nconsole.log(record);\n',
+    'console.log = audit;\nconsole.log(record);\n',
+    'console.debug = audit;\nconsole.log(record);\n',
+    'console.info &&= audit;\nconsole.info(record);\n',
+    'console ||= audit;\nconsole.log(record);\n',
+    'console.log ??= audit;\nconsole.debug(record);\n',
+    'globalThis.console = audit;\nconsole.log(record);\n',
+    'window.console = audit;\nconsole.log(record);\n',
+    'self.console = audit;\nconsole.log(record);\n',
+    'global.console = audit;\nconsole.log(record);\n',
+    'this.console = audit;\nconsole.log(record);\n',
+    'globalThis.console.log = audit;\nconsole.log(record);\n',
+    'window["console"] = audit;\nconsole.log(record);\n',
+    "globalThis['console'] = audit;\nconsole.log(record);\n",
+    'self[`console`] = audit;\nconsole.log(record);\n',
+    'console["log"] = audit;\nconsole.log(record);\n',
+    "console['debug'] = audit;\nconsole.debug(record);\n",
+    'console[method] = audit;\nconsole.log(record);\n',
+    'delete console.log;\nconsole.log(record);\n',
+    'delete globalThis.console;\nconsole.log(record);\n',
+    'delete window["console"];\nconsole.log(record);\n',
+    '++console.log;\nconsole.log(record);\n',
+    'console.log++;\nconsole.log(record);\n',
+    'delete (console.log);\nconsole.log(record);\n',
+    '++(console.log);\nconsole.log(record);\n',
+    'const c = console;\n++c.log;\nconsole.log(record);\n',
+    '({ log: console.log } = audit);\nconsole.log(record);\n',
+    '[console.log] = [audit];\nconsole.log(record);\n',
+    '[console] = [audit];\nconsole.log(record);\n',
+    '({ console } = globalThis);\nconsole.log(record);\n',
+    '({ log: globalThis.console.log } = audit);\nconsole.log(record);\n',
+    'for (console of rows) {}\nconsole.log(record);\n',
+    'for (console.log of rows) {}\nconsole.log(record);\n',
+    'Object.assign(console, { log: audit });\nconsole.log(record);\n',
+    'Object.assign(globalThis, extras);\nconsole.log(record);\n',
+    'Object.defineProperty(console, "log", { value: audit });\nconsole.log(record);\n',
+    'Object.defineProperty(globalThis, "console", { value: audit });\nconsole.log(record);\n',
+    'Object.defineProperties(console, { log: { value: audit } });\nconsole.log(record);\n',
+    'Object.setPrototypeOf(console, other);\nconsole.log(record);\n',
+    'Reflect.defineProperty(console, "log", { value: audit });\nconsole.log(record);\n',
+    'Reflect.set(window, "console", audit);\nconsole.log(record);\n',
+    'Reflect.deleteProperty(self, "console");\nconsole.log(record);\n',
+    'const c = console;\nc.log = audit;\nconsole.log(record);\n',
+    'let c = window.console;\nc["info"] = audit;\nconsole.info(record);\n',
+    'const c = globalThis.console;\nconst d = c;\nd.log = audit;\nconsole.log(record);\n',
+    'const c = (console);\nc.log = audit;\nconsole.log(record);\n',
+    'const c = (0, console);\nc.log = audit;\nconsole.log(record);\n',
+    'const c = console;\nObject.assign(c, { log: audit });\nconsole.log(record);\n',
+    'const c = console;\ndelete c.log;\nconsole.log(record);\n',
+    'const c = console;\nObject.defineProperty(c, "log", { value: audit });\nconsole.log(record);\n',
+    'function install(c = console) {\n  c.log = audit;\n}\nconsole.log(record);\n',
+    'function later() {\n  console = audit;\n}\nconsole.log(record);\n',
+    '\\u0063onsole = audit;\nconsole.log(record);\n',
+    'window["\\u0063onsole"] = audit;\nconsole.log(record);\n',
+    'console.__defineSetter__("log", audit);\nconsole.log(record);\n',
+    'globalThis.__defineSetter__("console", audit);\nconsole.log(record);\n',
+    'const c = console as Console;\nc.log = audit;\nconsole.log(record);\n',
+  ];
+  for (const content of rewritten) {
+    const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+      { path: 'src/rewrite.js', content },
+    ]);
+    assert.equal(suggestions.combinedPatch, '', content);
+    assert.ok(suggestions.sites.length >= 1, content);
+    assert.ok(
+      suggestions.sites.every((site) => site.kind === 'debugger' || (site.status === 'report-only' && site.reason === 'in a file that reassigns console')),
+      content + '\n' + JSON.stringify(suggestions.sites.map((site) => [site.line, site.kind, site.status, site.reason]))
+    );
+  }
+
+  const untouched = [
+    'const c = console;\nconsole.log(c);\n',
+    'const kept = console.log;\nconsole.log(1);\n',
+    'console == audit;\nconsole.log(1);\n',
+    'console === audit;\nconsole.log(1);\n',
+    'const note = "console = audit";\nconsole.log(note);\n',
+    'logger.console = audit;\nconsole.log(1);\n',
+    'logger.console.log = audit;\nconsole.log(1);\n',
+    '({ console: saved } = globalThis);\nconsole.log(saved);\n',
+    '({ log } = console);\nconsole.log(1);\n',
+    'Object.defineProperty(window, "name", { value: "app" });\nconsole.log(1);\n',
+    'window.__defineSetter__("onclick", hide);\nconsole.log(1);\n',
+    'const c = console.log;\nc = audit;\nconsole.log(1);\n',
+    'i++;\nconsole.log(1);\n',
+    'i++\nconsole.log(1);\n',
+    '++console.log(1);\nconsole.log(2);\n',
+    'delete console.log();\nconsole.log(1);\n',
+  ];
+  for (const content of untouched) {
+    const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+      { path: 'src/keep.js', content },
+    ]);
+    assert.ok(
+      suggestions.sites.some((site) => site.status === 'appliable'),
+      content + '\n' + JSON.stringify(suggestions.sites.map((site) => [site.line, site.status, site.reason]))
+    );
+  }
+
+  const mixed = [
+    'console = audit;',
+    'console.log(record);',
+    'debugger;',
+    'function other() {',
+    '  console.debug(record);',
+    '}',
+    '',
+  ].join('\n');
+  const mixedSuggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/mixed.js', content: mixed },
+    { path: 'src/other.js', content: 'console.log(1);\n' },
+  ]);
+  const mixedByLine = Object.fromEntries(
+    mixedSuggestions.sites.filter((site) => site.filePath === 'src/mixed.js').map((site) => [site.line, site])
+  );
+  assert.equal(mixedByLine[2].status, 'report-only');
+  assert.equal(mixedByLine[2].reason, 'in a file that reassigns console');
+  assert.equal(mixedByLine[2].patch, undefined);
+  assert.equal(mixedByLine[3].status, 'appliable');
+  assert.equal(mixedByLine[3].kind, 'debugger');
+  assert.equal(mixedByLine[5].status, 'report-only');
+  assert.equal(mixedByLine[5].reason, 'in a file that reassigns console');
+  const other = mixedSuggestions.sites.find((site) => site.filePath === 'src/other.js');
+  assert.equal(other.status, 'appliable');
+  assert.match(mixedSuggestions.combinedPatch, /src\/other\.js/);
+  assert.ok(mixedSuggestions.combinedPatch.includes('-debugger;'));
+  assert.ok(!mixedSuggestions.combinedPatch.includes('-console = audit'));
+  assert.ok(!mixedSuggestions.combinedPatch.includes('-console.log(record)'));
+
+  const applied = await applyPatch(
+    [
+      { path: 'src/mixed.js', content: mixed },
+      { path: 'src/other.js', content: 'console.log(1);\n' },
+    ],
+    mixedSuggestions.combinedPatch
+  );
+  assert.match(applied['src/mixed.js'], /console = audit;\nconsole\.log\(record\);\nfunction other\(\) \{\n {2}console\.debug\(record\);/);
+  assert.doesNotMatch(applied['src/mixed.js'], /debugger/);
+  assert.equal(applied['src/other.js'], '');
 });
 
 test('index.html does not gain a write path for debug patches', () => {
