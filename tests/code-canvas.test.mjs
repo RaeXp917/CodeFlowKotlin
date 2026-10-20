@@ -1494,6 +1494,77 @@ test('compactAnalysisForCache drops raw source and keeps graph metadata', () => 
   assert.equal(compact.issues[0].title, 'Unused Functions');
 });
 
+test('compactAnalysisForCache strips debug-statement snippets and patches', () => {
+  const secret = 's3cret-token';
+  const snippet = `console.log("${secret}")`;
+  const patch = [
+    'diff --git a/src/a.js b/src/a.js',
+    '--- a/src/a.js',
+    '+++ b/src/a.js',
+    '@@ -1,3 +1,2 @@',
+    ' function load() {',
+    `-  const password = "${secret}";`,
+    `-  ${snippet};`,
+    '   return password;',
+    ' }',
+    '',
+  ].join('\n');
+  const original = {
+    files: [{ path: 'src/a.js', content: `function load(){\n  const password = "${secret}";\n  ${snippet};\n  return password;\n}\n` }],
+    refactorSuggestions: {
+      transformId: 'remove-debug-statement',
+      sites: [{
+        findingId: 'remove-debug-statement:src/a.js:3:3',
+        transformId: 'remove-debug-statement',
+        filePath: 'src/a.js',
+        line: 3,
+        endLine: 3,
+        kind: 'console.log',
+        status: 'appliable',
+        reason: '',
+        summary: 'Remove the standalone console.log statement at line 3 in src/a.js. This patch removes code.',
+        snippet,
+        patch
+      }, {
+        findingId: 'remove-debug-statement:src/a.js:4:3',
+        filePath: 'src/a.js',
+        line: 4,
+        status: 'report-only',
+        reason: 'inside a one-line if without braces',
+        summary: 'The console.log at line 4 in src/a.js is report-only because it is inside a one-line if without braces.',
+        snippet: `if (ready) console.log("${secret}")`
+      }],
+      filePatches: { 'src/a.js': patch },
+      combinedPatch: patch
+    }
+  };
+  const compact = context.compactAnalysisForCache(original);
+  const persisted = JSON.stringify(compact);
+  assert.equal(persisted.includes(secret), false);
+  assert.equal(persisted.includes('password'), false);
+  assert.equal(persisted.includes('diff --git'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(compact.files[0], 'content'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(compact.refactorSuggestions, 'filePatches'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(compact.refactorSuggestions, 'combinedPatch'), false);
+  assert.equal(compact.refactorSuggestions.transformId, 'remove-debug-statement');
+  assert.equal(compact.refactorSuggestions.sites[0].status, 'appliable');
+  assert.equal(compact.refactorSuggestions.sites[0].line, 3);
+  assert.equal(compact.refactorSuggestions.sites[0].filePath, 'src/a.js');
+  assert.equal(compact.refactorSuggestions.sites[0].summary.includes('line 3'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(compact.refactorSuggestions.sites[0], 'snippet'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(compact.refactorSuggestions.sites[0], 'patch'), false);
+  assert.equal(compact.refactorSuggestions.sites[1].status, 'report-only');
+  assert.equal(compact.refactorSuggestions.sites[1].reason, 'inside a one-line if without braces');
+  assert.equal(Object.prototype.hasOwnProperty.call(compact.refactorSuggestions.sites[1], 'snippet'), false);
+  assert.equal(original.refactorSuggestions.sites[0].snippet, snippet);
+  assert.equal(original.refactorSuggestions.sites[0].patch, patch);
+  assert.equal(original.refactorSuggestions.combinedPatch, patch);
+  assert.equal(original.files[0].content.includes(secret), true);
+  const again = context.compactAnalysisForCache(compact);
+  assert.equal(JSON.stringify(again).includes(secret), false);
+  assert.equal(again.refactorSuggestions.sites[0].status, 'appliable');
+});
+
 test('hydrated sources stay in memory and are not treated as cached source', () => {
   const cached = { files: [{ path: 'src/a.js', name: 'a.js', functions: [{ name: 'hello', line: 1 }] }] };
   assert.equal(context.analysisFileNeedsSource(cached.files[0]), true);

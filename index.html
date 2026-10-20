@@ -198,6 +198,13 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .security-path{font-size:9px;color:var(--t3);font-family:monospace}
 .security-line{font-size:9px;color:var(--acc);margin-top:4px}
 .security-code{font-size:9px;background:var(--bg3);padding:6px 8px;border-radius:4px;margin-top:6px;font-family:monospace;color:var(--orange);overflow-x:auto;white-space:pre}
+.debug-patch-panel{margin:0 0 14px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)}
+.debug-patch-card{background:var(--bg0);border:1px solid var(--border2);border-radius:8px;padding:10px;margin-bottom:8px}
+.debug-patch-reason{font-size:10px;color:var(--orange);margin-top:4px;line-height:1.4}
+.patch-preview{margin-top:8px;background:var(--bg3);border-radius:6px;padding:8px;font-family:monospace;font-size:10px;line-height:1.45;overflow:auto;max-height:200px;white-space:pre}
+.patch-line-meta{color:var(--t3)}
+.patch-line-del{color:var(--red)}
+.patch-line-ctx{color:var(--t2)}
 .fn-item{background:var(--bg0);border-radius:6px;margin-bottom:6px;overflow:hidden}
 .fn-header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;cursor:pointer}
 .fn-header:hover{background:var(--hover)}
@@ -5158,6 +5165,2909 @@ function buildArchitectureDiagram(files){
     return diagram;
 }
 
+
+// Patch-only remove-debug-statement suggestions. Produces a unified diff the
+// user downloads and applies with git apply. This code never writes source files.
+(function(){
+
+function collectRemoveDebugStatementSuggestions(files) {
+  var sites = [];
+  var filePatches = Object.create(null);
+  var combinedParts = [];
+  (files || []).forEach(function(file) {
+    if (!file || file.content == null) return;
+    var path = String(file.path || file.name || '');
+    if (!isJsOrTsPath(path)) {
+      if (nonJsDebugFinding(file.content)) {
+        sites.push({
+          findingId: 'remove-debug-statement:' + path + ':unsupported',
+          transformId: 'remove-debug-statement',
+          filePath: path,
+          line: null,
+          endLine: null,
+          status: 'report-only',
+          reason: 'unsupported language',
+          summary: 'Debug statements in ' + path + ' are report-only because the file is an unsupported language.',
+          snippet: ''
+        });
+      }
+      return;
+    }
+    var found;
+    try {
+      found = findDebugSites(file.content, path);
+    } catch (err) {
+      sites.push({
+        findingId: 'remove-debug-statement:' + path + ':unchecked',
+        transformId: 'remove-debug-statement',
+        filePath: path,
+        line: null,
+        endLine: null,
+        status: 'report-only',
+        reason: 'could not be checked safely',
+        summary: 'Debug statements in ' + path + ' are report-only because the file could not be checked safely.',
+        snippet: ''
+      });
+      return;
+    }
+    var ranges = [];
+    var bareCr = hasBareCarriageReturn(file.content);
+    found.forEach(function(site) {
+      // A bare CR is a logical line break for the scanner, but git apply splits
+      // the working tree on LF only, so no line patch can match those bytes.
+      if (bareCr && site.status === 'appliable') {
+        site.status = 'report-only';
+        site.reason = 'using line endings git apply cannot match';
+        site.summary = 'The ' + site.kind + ' at line ' + site.line + ' in ' + path + ' is report-only because it is ' + site.reason + '.';
+        delete site.patch;
+      }
+      sites.push(site);
+      if (site.status === 'appliable') ranges.push({ start: site.line, end: site.endLine });
+    });
+    if (ranges.length) {
+      // Split the file once. Per-site patches used to rescan the whole source,
+      // which is quadratic when every line is a debug statement.
+      var split = sourceLinesForDiff(file.content);
+      var patch = buildUnifiedDiff(path, file.content, ranges, split);
+      filePatches[path] = patch;
+      combinedParts.push(patch);
+      var si;
+      for (si = 0; si < found.length; si++) {
+        var one = found[si];
+        if (one.status !== 'appliable') continue;
+        one.patch = buildUnifiedDiff(path, file.content, [{ start: one.line, end: one.endLine }], split);
+      }
+    }
+  });
+  return {
+    transformId: 'remove-debug-statement',
+    sites: sites,
+    filePatches: filePatches,
+    combinedPatch: combinedParts.join('')
+  };
+}
+
+function isJsOrTsPath(path) {
+  return /\.(?:[cm]js|[cm]ts|jsx?|tsx?)$/i.test(path || '');
+}
+
+// `.mjs` / `.mts` are modules, so they are strict even with no import.
+function isAlwaysStrictModulePath(path) {
+  return /\.m[jt]s$/i.test(path || '');
+}
+
+function hasModuleSyntax(tokens) {
+  for (var i = 0; i < tokens.length; i++) {
+    var tok = tokens[i];
+    if (tok.t === 'kw' && tok.v === 'export') return true;
+    if (tok.t !== 'kw' || tok.v !== 'import') continue;
+    var next = tokens[i + 1];
+    // `import()` is a dynamic import and can appear in a script.
+    if (next && next.v === '(') continue;
+    return true;
+  }
+  return false;
+}
+
+function nonJsDebugFinding(content) {
+  var matches = String(content).match(/console\.(log|debug|info)\(/g);
+  return !!(matches && matches.length > 3);
+}
+
+function hasBareCarriageReturn(content) {
+  var text = String(content);
+  for (var i = 0; i < text.length; i++) {
+    if (text.charAt(i) === '\r' && text.charAt(i + 1) !== '\n') return true;
+  }
+  return false;
+}
+
+function findDebugSites(content, filePath) {
+  var normalized = String(content).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  var tokens = tokenizeJs(normalized);
+  var scan = prepareStatementScan(tokens);
+  var consoleShadowed = consoleShadowPredicate(tokens, filePath, normalized);
+  var consoleMutated = consoleMutationReason(tokens, normalized, consoleShadowed);
+  var sites = [];
+  var metas = [];
+  for (var ti = 0; ti < tokens.length; ti++) {
+    var tok = tokens[ti];
+    if (tok.t === 'kw' && tok.v === 'debugger') {
+      var debuggerSite = classifySite(normalized, tokens, ti, ti, 'debugger', filePath, scan);
+      sites.push(debuggerSite);
+      metas.push({ site: debuggerSite, startIdx: ti, endIdx: ti });
+      continue;
+    }
+    if (tok.t === 'id' && tok.v === 'console' && isConsoleCall(tokens, ti)) {
+      var closeIdx = matchParen(tokens, ti + 3);
+      var kind = 'console.' + tokens[ti + 2].v;
+      if (closeIdx < 0) {
+        var openSite = makeSite(filePath, kind, tok, tok.line, tok.line, 'report-only', 'not isolated from surrounding code', snippetAt(normalized, tok.i, Math.min(normalized.length, tok.i + 80)));
+        sites.push(openSite);
+        metas.push({ site: openSite, startIdx: ti, endIdx: ti });
+        continue;
+      }
+      var site = classifySite(normalized, tokens, ti, closeIdx, kind, filePath, scan);
+      var globalReason = consoleReferenceReason(tokens, ti, consoleShadowed);
+      // A broken identifier escape (illegal keyword escape, bad \u, a
+      // non-identifier code point) can hide a binding the walker never sees.
+      // Valid escapes are decoded before binding resolution; only the failures
+      // force the whole file report-only.
+      if (!globalReason && tokens.unsafeIdentEscape) globalReason = 'in a file with an escaped identifier';
+      // A declared binding named console is a scope shadow (handled above).
+      // Anything that can alias or replace the global object is file-level:
+      // assignment, destructuring (`const { console: c } = globalThis`),
+      // `const c = console`, a property taken off console, or any
+      // globalThis/window/self/global/this access to console. One hit makes
+      // every console call in the file report-only.
+      if (!globalReason && consoleMutated) globalReason = consoleMutated;
+      if (globalReason) downgradeSite(site, globalReason);
+      sites.push(site);
+      metas.push({ site: site, startIdx: ti, endIdx: closeIdx });
+    }
+  }
+  // Deleting a semicolon-terminated statement can join the lines on either
+  // side (`foo()\nconsole.log(1);\n(bar)()`). Decide with every appliable
+  // removal applied together, so a run of debug lines cannot hide the join.
+  markAsiJoinHazards(normalized, tokens, metas, scan);
+  return sites;
+}
+
+function consoleReferenceReason(tokens, ti, consoleShadowed) {
+  var prev = ti > 0 ? tokens[ti - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return 'not the global console';
+  try {
+    return consoleShadowed(ti) || '';
+  } catch (err) {
+    return 'shadowed by a local console binding';
+  }
+}
+
+function consoleShadowPredicate(tokens, filePath, content) {
+  try {
+    return consoleShadowAt(tokens, filePath, content);
+  } catch (err) {
+    return function() { return 'shadowed by a local console binding'; };
+  }
+}
+
+// True when a local `console` binding (parameter, import, declaration, catch,
+// class name, namespace, module, enum, export-default name, or `with` object)
+// is in scope. Identifier escapes are decoded before this runs. Member calls
+// are rejected separately. A direct `eval(...)` in a sloppy function, or any
+// other call that can inject a `console` binding (`(0, eval)`, `eval?.()`,
+// `new Function`), keeps the affected calls report-only. A failure to resolve
+// the binding is treated as shadowed so the patch stays report-only.
+function consoleShadowAt(tokens, filePath, content) {
+  var n = tokens.length;
+  var scopes = [];
+  var stack = [];
+  // Declaration names are not assignments to an existing binding. `const console = audit`
+  // shadows; it does not write the global console the way `console = audit` does.
+  tokens.declaredName = Object.create(null);
+
+  function peek(i) { return i >= 0 && i < n ? tokens[i] : null; }
+  function noteDeclared(i) { if (i >= 0) tokens.declaredName[i] = true; }
+  var fileDynamic = false;
+
+  function pushScope(functionLike, start, kind) {
+    var parent = stack.length ? stack[stack.length - 1] : -1;
+    scopes.push({
+      parent: parent,
+      binds: false,
+      functionLike: !!functionLike,
+      start: start,
+      end: n,
+      kind: kind || '',
+      strict: parent >= 0 ? !!scopes[parent].strict : false,
+      directEval: false
+    });
+    stack.push(scopes.length - 1);
+  }
+
+  // A Use Strict Directive is the exact source `"use strict"` or `'use strict'`,
+  // alone as an expression statement in the prologue. Escapes do not count.
+  function strictDirectiveAt(i) {
+    var guard = 0;
+    while (i < n && guard++ < 64) {
+      var tok = peek(i);
+      if (!tok || tok.t !== 'str') return false;
+      var exact = isExactUseStrict(tok);
+      var next = peek(i + 1);
+      if (next && next.v === ';') {
+        if (exact) return true;
+        i += 2;
+        continue;
+      }
+      if (!next || next.v === '}' || next.line > tok.line) {
+        if (exact) return true;
+        if (!next || next.v === '}') return false;
+        i++;
+        continue;
+      }
+      return false;
+    }
+    return false;
+  }
+  function isExactUseStrict(tok) {
+    var raw = String(content || '').slice(tok.i, tok.end);
+    return raw === '"use strict"' || raw === "'use strict'";
+  }
+  function popScope(end) {
+    if (stack.length <= 1) return;
+    scopes[stack.pop()].end = end;
+  }
+  function markLet() {
+    if (!stack.length) return;
+    scopes[stack[stack.length - 1]].binds = true;
+  }
+  function markVar() {
+    for (var s = stack.length - 1; s >= 0; s--) {
+      if (scopes[stack[s]].functionLike) {
+        scopes[stack[s]].binds = true;
+        return;
+      }
+    }
+    if (scopes.length) scopes[0].binds = true;
+  }
+
+  pushScope(true, 0, 'script');
+  if (isAlwaysStrictModulePath(filePath) || hasModuleSyntax(tokens) || strictDirectiveAt(0)) {
+    scopes[0].strict = true;
+  }
+
+  function skipType(i) {
+    if (!peek(i) || peek(i).v !== ':') return i;
+    i++;
+    var depth = 0;
+    while (i < n) {
+      var v = peek(i).v;
+      if (v === '(' || v === '[' || v === '{' || v === '<') { depth++; i++; continue; }
+      if (v === ')' || v === ']' || v === '}' || v === '>') {
+        if (depth === 0) break;
+        depth--;
+        i++;
+        continue;
+      }
+      if (depth === 0 && (v === ',' || v === '=' || v === ';')) break;
+      i++;
+    }
+    return i;
+  }
+
+  function maybeSkipTypeArgs(i) {
+    if (!peek(i) || peek(i).v !== '<') return i;
+    var j = i;
+    var depth = 0;
+    while (j < n) {
+      var v = peek(j).v;
+      if (v === '<') depth++;
+      else if (v === '>') {
+        depth--;
+        j++;
+        if (depth === 0) {
+          if (peek(j) && (peek(j).v === '(' || peek(j).v === '{' || peek(j).v === 'extends' || peek(j).v === 'implements')) return j;
+          return i;
+        }
+        continue;
+      } else if (v === ';' || v === '=>' || v === '{') return i;
+      j++;
+    }
+    return i;
+  }
+
+  function skipGroup(start) {
+    var open = peek(start) ? peek(start).v : '';
+    var close = open === '(' ? ')' : open === '[' ? ']' : open === '{' ? '}' : '';
+    if (!close) return start + 1;
+    var depth = 0;
+    var i = start;
+    while (i < n) {
+      var v = peek(i).v;
+      if (v === open) depth++;
+      else if (v === close) {
+        depth--;
+        if (depth === 0) return i + 1;
+      }
+      i++;
+    }
+    return i;
+  }
+
+  function bindingName(i, isVar) {
+    if (!peek(i)) return i;
+    var start = i;
+    if (peek(i).v === '{') return objectPattern(i, isVar);
+    if (peek(i).v === '[') return arrayPattern(i, isVar);
+    if (peek(i).v === '...') return bindingName(i + 1, isVar);
+    if (peek(i).t === 'id') {
+      noteDeclared(i);
+      if (peek(i).v === 'console') {
+        if (isVar) markVar(); else markLet();
+      }
+      i++;
+      if (peek(i) && peek(i).v === '?') i++;
+      if (peek(i) && peek(i).v === ':') i = skipType(i);
+      if (peek(i) && peek(i).v === '=') i = expression(i + 1, { stopComma: true, stopInOf: true });
+      return i > start ? i : start + 1;
+    }
+    return start + 1;
+  }
+
+  function objectPattern(start, isVar) {
+    var i = start + 1;
+    while (i < n && peek(i).v !== '}') {
+      var before = i;
+      if (peek(i).v === ',') { i++; continue; }
+      if (peek(i).v === '...') { i = bindingName(i + 1, isVar); if (i <= before) i = before + 1; continue; }
+      if (peek(i).v === '[') {
+        i = skipGroup(i);
+        if (peek(i) && peek(i).v === ':') i = bindingName(i + 1, isVar);
+        if (i <= before) i = before + 1;
+        continue;
+      }
+      if (peek(i).t === 'id' || peek(i).t === 'str' || peek(i).t === 'num' || peek(i).t === 'kw') {
+        var key = peek(i).v;
+        var keyIsIdent = peek(i).t === 'id';
+        i++;
+        if (peek(i) && peek(i).v === ':') i = bindingName(i + 1, isVar);
+        else if (keyIsIdent) {
+          noteDeclared(before);
+          if (key === 'console') { if (isVar) markVar(); else markLet(); }
+          if (peek(i) && peek(i).v === '=') i = expression(i + 1, { stopComma: true, stopInOf: true });
+        }
+        if (i <= before) i = before + 1;
+        continue;
+      }
+      i++;
+    }
+    if (i < n && peek(i).v === '}') i++;
+    return i;
+  }
+
+  function arrayPattern(start, isVar) {
+    var i = start + 1;
+    while (i < n && peek(i).v !== ']') {
+      var before = i;
+      if (peek(i).v === ',') { i++; continue; }
+      i = bindingName(i, isVar);
+      if (i <= before) i = before + 1;
+    }
+    if (i < n && peek(i).v === ']') i++;
+    return i;
+  }
+
+  function isHardStmtBoundary(tok) {
+    if (!tok || tok.t !== 'kw') return false;
+    switch (tok.v) {
+      case 'var': case 'let': case 'const': case 'import': case 'export':
+      case 'if': case 'for': case 'while': case 'do': case 'switch':
+      case 'try': case 'return': case 'throw': case 'break': case 'continue':
+      case 'debugger': case 'with': case 'else': case 'catch': case 'finally':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function expression(i, flags) {
+    flags = flags || {};
+    var consumed = false;
+    while (i < n) {
+      var tok = peek(i);
+      var v = tok.v;
+      if (consumed && isHardStmtBoundary(tok)) return i;
+      if (consumed && tok.t === 'kw' && v === 'async' && peek(i + 1) && peek(i + 1).v === 'function') return i;
+      if (v === ';' || v === ')' || v === ']' || v === '}') return i;
+      if (flags.stopComma && v === ',') return i;
+      if (flags.stopInOf && tok.t === 'kw' && (v === 'of' || v === 'in')) return i;
+      if (flags.stopColon && v === ':') return i;
+      if (flags.stopBrace && v === '{') return i;
+      if (tok.t === 'kw' && v === 'function') { i = functionDecl(i, false); consumed = true; continue; }
+      if (tok.t === 'kw' && v === 'class') { i = classDecl(i); consumed = true; continue; }
+      if (v === '(') {
+        var afterParen = skipGroup(i);
+        if (peek(afterParen) && peek(afterParen).v === '=>') { i = arrowFromParen(i); consumed = true; continue; }
+        i = expression(i + 1, {});
+        if (peek(i) && peek(i).v === ')') i++;
+        consumed = true;
+        continue;
+      }
+      if ((tok.t === 'id' || (tok.t === 'kw' && v === 'async')) && peek(i + 1) && peek(i + 1).v === '=>') {
+        i = arrowFromIdent(tok.t === 'kw' ? i + 1 : i);
+        consumed = true;
+        continue;
+      }
+      if (tok.t === 'kw' && v === 'async' && peek(i + 1) && peek(i + 1).v === '(') {
+        var afterAsync = skipGroup(i + 1);
+        if (peek(afterAsync) && peek(afterAsync).v === '=>') { i = arrowFromParen(i + 1); consumed = true; continue; }
+      }
+      if (v === '{') {
+        if (isBlockBrace(tokens, i)) i = block(i);
+        else i = skipGroup(i);
+        consumed = true;
+        continue;
+      }
+      if (v === '[') { i = skipGroup(i); consumed = true; continue; }
+      i++;
+      consumed = true;
+    }
+    return i;
+  }
+
+  function arrowFromIdent(i) {
+    var name = peek(i) ? peek(i).v : '';
+    noteDeclared(i);
+    pushScope(true, i, 'arrow');
+    if (name === 'console') markLet();
+    i += 2;
+    i = arrowBody(i);
+    popScope(i);
+    return i;
+  }
+
+  function arrowFromParen(parenIdx) {
+    pushScope(true, parenIdx, 'arrow');
+    var i = params(parenIdx);
+    if (peek(i) && peek(i).v === ':') i = skipType(i);
+    if (peek(i) && peek(i).v === '=>') i++;
+    i = arrowBody(i);
+    popScope(i);
+    return i;
+  }
+
+  function arrowBody(i) {
+    if (peek(i) && peek(i).v === '{') {
+      if (strictDirectiveAt(i + 1)) scopes[stack[stack.length - 1]].strict = true;
+      return block(i);
+    }
+    return expression(i, { stopComma: true });
+  }
+
+  function params(parenIdx) {
+    var i = parenIdx + 1;
+    while (i < n && peek(i).v !== ')') {
+      var before = i;
+      if (peek(i).v === ',') { i++; continue; }
+      if (peek(i).t === 'id' && peek(i).v === 'this') {
+        i++;
+        if (peek(i) && peek(i).v === ':') i = skipType(i);
+        continue;
+      }
+      i = bindingName(i, false);
+      if (i <= before) i = before + 1;
+    }
+    if (i < n && peek(i).v === ')') i++;
+    return i;
+  }
+
+  function block(start) {
+    pushScope(false, start, 'block');
+    var i = start + 1;
+    while (i < n && peek(i).v !== '}') {
+      var next = statement(i);
+      i = next > i ? next : i + 1;
+    }
+    if (i < n && peek(i).v === '}') i++;
+    popScope(i);
+    return i;
+  }
+
+  function functionDecl(start, isStatement) {
+    var i = start + 1;
+    if (peek(i) && peek(i).v === '*') i++;
+    var fname = '';
+    if (peek(i) && peek(i).t === 'id') {
+      fname = peek(i).v;
+      noteDeclared(i);
+      if (isStatement && fname === 'console') markVar();
+      i++;
+    }
+    i = maybeSkipTypeArgs(i);
+    if (peek(i) && peek(i).v === '(') {
+      pushScope(true, i, 'function');
+      if (fname === 'console') markLet();
+      i = params(i);
+      if (peek(i) && peek(i).v === ':') i = skipType(i);
+      if (peek(i) && peek(i).v === '{') {
+        if (strictDirectiveAt(i + 1)) scopes[stack[stack.length - 1]].strict = true;
+        i = block(i);
+      } else if (peek(i) && peek(i).v === ';') i++;
+      popScope(i);
+      return i;
+    }
+    return i > start ? i : start + 1;
+  }
+
+  function classDecl(start, bindNameOutside) {
+    var i = start + 1;
+    var name = '';
+    if (peek(i) && peek(i).t === 'id') {
+      name = peek(i).v;
+      noteDeclared(i);
+      if (name === 'console' && bindNameOutside !== false) markLet();
+      i++;
+    }
+    i = maybeSkipTypeArgs(i);
+    if (peek(i) && (peek(i).v === 'extends' || peek(i).v === 'implements')) {
+      i++;
+      while (i < n && peek(i) && peek(i).v !== '{' && peek(i).v !== ';') {
+        var beforeClause = i;
+        if (peek(i).v === ',') { i++; continue; }
+        i = expression(i, { stopBrace: true });
+        if (i <= beforeClause) { i = beforeClause + 1; break; }
+      }
+    }
+    if (peek(i) && peek(i).v === '{') {
+      pushScope(false, i, 'class');
+      // Class bodies, methods, fields, and static blocks are always strict.
+      scopes[stack[stack.length - 1]].strict = true;
+      if (name === 'console') markLet();
+      i = classBody(i);
+      popScope(i);
+    }
+    return i > start ? i : start + 1;
+  }
+
+  function classBody(start) {
+    var i = start + 1;
+    while (i < n && peek(i).v !== '}') {
+      var next = classElement(i);
+      i = next > i ? next : i + 1;
+    }
+    if (i < n && peek(i).v === '}') i++;
+    return i;
+  }
+
+  function classElement(i) {
+    var start = i;
+    if (peek(i) && peek(i).v === ';') return i + 1;
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'static' && peek(i + 1) && peek(i + 1).v === '{') return block(i + 1);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'static') i++;
+    if (peek(i) && peek(i).v === 'declare') i++;
+    if (peek(i) && (peek(i).v === 'public' || peek(i).v === 'private' || peek(i).v === 'protected' || peek(i).v === 'readonly' || peek(i).v === 'override' || peek(i).v === 'abstract')) i++;
+    if (peek(i) && peek(i).v === '*') i++;
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'async') i++;
+    if (peek(i) && peek(i).t === 'id' && (peek(i).v === 'get' || peek(i).v === 'set') && peek(i + 1) && peek(i + 1).v !== '(' && peek(i + 1).v !== '=' && peek(i + 1).v !== ';') i++;
+    if (peek(i) && peek(i).v === '[') i = skipGroup(i);
+    else if (peek(i) && peek(i).v !== '(' && peek(i).v !== '=' && peek(i).v !== ';') i++;
+    if (peek(i) && peek(i).v === '?') i++;
+    if (peek(i) && peek(i).v === '(') {
+      pushScope(true, i, 'method');
+      i = params(i);
+      if (peek(i) && peek(i).v === ':') i = skipType(i);
+      if (peek(i) && peek(i).v === '{') i = block(i);
+      else if (peek(i) && peek(i).v === ';') i++;
+      popScope(i);
+      return i;
+    }
+    if (peek(i) && peek(i).v === '=') {
+      i = expression(i + 1, { stopComma: true });
+      if (peek(i) && peek(i).v === ';') i++;
+      return i > start ? i : start + 1;
+    }
+    if (peek(i) && peek(i).v === ':') i = skipType(i);
+    if (peek(i) && peek(i).v === ';') i++;
+    return i > start ? i : start + 1;
+  }
+
+  function varDecls(start) {
+    var isVar = peek(start) && peek(start).v === 'var';
+    var i = start + 1;
+    while (i < n) {
+      var before = i;
+      i = bindingName(i, isVar);
+      if (i <= before) i = before + 1;
+      if (peek(i) && peek(i).v === '=') i = expression(i + 1, { stopComma: true, stopInOf: true });
+      if (peek(i) && peek(i).v === ',') { i++; continue; }
+      break;
+    }
+    if (peek(i) && peek(i).v === ';') i++;
+    return i;
+  }
+
+  function usingDecl(start) {
+    var i = start;
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'await') i++;
+    if (!(peek(i) && peek(i).t === 'id' && peek(i).v === 'using')) return start + 1;
+    var next = peek(i + 1);
+    if (!next || !(next.t === 'id' || next.v === '{' || next.v === '[')) return start + 1;
+    i++;
+    while (i < n) {
+      var before = i;
+      i = bindingName(i, false);
+      if (i <= before) i = before + 1;
+      if (peek(i) && peek(i).v === '=') i = expression(i + 1, { stopComma: true, stopInOf: true });
+      if (peek(i) && peek(i).v === ',') { i++; continue; }
+      break;
+    }
+    if (peek(i) && peek(i).v === ';') i++;
+    return i;
+  }
+
+  function importDecl(start) {
+    var i = start + 1;
+    if (peek(i) && peek(i).v === '(') return expression(start, {});
+    if (peek(i) && peek(i).v === 'type') i++;
+    if (peek(i) && peek(i).t === 'id') {
+      noteDeclared(i);
+      if (peek(i).v === 'console') markVar();
+      i++;
+      if (peek(i) && peek(i).v === ',') i++;
+    }
+    if (peek(i) && peek(i).v === '*') {
+      i++;
+      if (peek(i) && peek(i).v === 'as') i++;
+      if (peek(i) && peek(i).t === 'id') {
+        noteDeclared(i);
+        if (peek(i).v === 'console') markVar();
+        i++;
+      }
+    }
+    if (peek(i) && peek(i).v === '{') {
+      i++;
+      while (i < n && peek(i).v !== '}') {
+        if (peek(i).v === ',') { i++; continue; }
+        if (peek(i).v === 'type') i++;
+        if (peek(i) && peek(i).t === 'id') {
+          var local = peek(i).v;
+          var localIdx = i;
+          i++;
+          if (peek(i) && peek(i).v === 'as') {
+            i++;
+            if (peek(i) && peek(i).t === 'id') { local = peek(i).v; localIdx = i; i++; }
+          }
+          noteDeclared(localIdx);
+          if (local === 'console') markVar();
+          continue;
+        }
+        i++;
+      }
+      if (i < n && peek(i).v === '}') i++;
+    }
+    while (i < n && peek(i).v !== ';' && peek(i).v !== '}') i++;
+    if (i < n && peek(i).v === ';') i++;
+    return i > start ? i : start + 1;
+  }
+
+  function exportDecl(i) {
+    i++;
+    if (peek(i) && peek(i).v === 'default') {
+      i++;
+      // `export default function console` / `export default class console`
+      // bind that name in the enclosing scope, same as a declaration.
+      // Anonymous `export default function () {}` binds nothing.
+      if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'function') return functionDecl(i, true);
+      if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'class') return classDecl(i);
+      if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'async') return asyncStmt(i);
+      i = expression(i, {});
+      if (peek(i) && peek(i).v === ';') i++;
+      return i;
+    }
+    if (peek(i) && peek(i).v === 'type') i++;
+    var exportedBinding = tryTsRuntimeBindingDecl(i);
+    if (exportedBinding >= 0) return exportedBinding;
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'function') return functionDecl(i, true);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'class') return classDecl(i);
+    if (peek(i) && peek(i).t === 'kw' && (peek(i).v === 'var' || peek(i).v === 'let' || peek(i).v === 'const')) return varDecls(i);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'async') return asyncStmt(i);
+    if (peek(i) && (peek(i).v === '{' || peek(i).v === '*')) {
+      while (i < n && peek(i).v !== ';') i++;
+      if (i < n && peek(i).v === ';') i++;
+      return i;
+    }
+    return statement(i);
+  }
+
+  function forStmt(start) {
+    var i = start + 1;
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'await') i++;
+    if (!peek(i) || peek(i).v !== '(') return i;
+    pushScope(false, start, 'for');
+    i++;
+    if (peek(i) && peek(i).t === 'kw' && (peek(i).v === 'var' || peek(i).v === 'let' || peek(i).v === 'const')) i = varDecls(i);
+    else if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'await' && peek(i + 1) && peek(i + 1).t === 'id' && peek(i + 1).v === 'using') i = usingDecl(i);
+    else if (peek(i) && peek(i).t === 'id' && peek(i).v === 'using') i = usingDecl(i);
+    var depth = 1;
+    while (i < n && depth > 0) {
+      var v = peek(i).v;
+      if (v === '(') { depth++; i++; continue; }
+      if (v === ')') {
+        depth--;
+        i++;
+        if (depth === 0) break;
+        continue;
+      }
+      i++;
+    }
+    i = statement(i);
+    popScope(i);
+    return i;
+  }
+
+  // `with (obj)` puts obj on the scope chain, so `console` inside the body
+  // (including functions declared there) may be obj.console rather than the
+  // global. The head expression is still resolved in the outer scope.
+  function withStmt(start) {
+    var i = start + 1;
+    if (peek(i) && peek(i).v === '(') {
+      i = expression(i + 1, {});
+      if (peek(i) && peek(i).v === ')') i++;
+    }
+    pushScope(false, i, 'with');
+    markLet();
+    i = statement(i);
+    popScope(i);
+    return i;
+  }
+
+  function headerStmt(i) {
+    var kw = peek(i).v;
+    i++;
+    if (peek(i) && peek(i).v === '(') {
+      i = expression(i + 1, {});
+      if (peek(i) && peek(i).v === ')') i++;
+    }
+    i = statement(i);
+    if (kw === 'if' && peek(i) && peek(i).t === 'kw' && peek(i).v === 'else') {
+      i++;
+      i = statement(i);
+    }
+    return i;
+  }
+
+  function doStmt(i) {
+    i++;
+    i = statement(i);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'while') {
+      i++;
+      if (peek(i) && peek(i).v === '(') {
+        i = expression(i + 1, {});
+        if (peek(i) && peek(i).v === ')') i++;
+      }
+      if (peek(i) && peek(i).v === ';') i++;
+    }
+    return i;
+  }
+
+  function switchStmt(i) {
+    i++;
+    if (peek(i) && peek(i).v === '(') {
+      i = expression(i + 1, {});
+      if (peek(i) && peek(i).v === ')') i++;
+    }
+    if (peek(i) && peek(i).v === '{') return block(i);
+    return i;
+  }
+
+  function tryStmt(i) {
+    i++;
+    if (peek(i) && peek(i).v === '{') i = block(i);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'catch') i = catchClause(i);
+    if (peek(i) && peek(i).t === 'kw' && peek(i).v === 'finally') {
+      i++;
+      if (peek(i) && peek(i).v === '{') i = block(i);
+    }
+    return i;
+  }
+
+  function catchClause(i) {
+    i++;
+    pushScope(false, i, 'catch');
+    if (peek(i) && peek(i).v === '(') {
+      i++;
+      if (peek(i) && peek(i).v !== ')') i = bindingName(i, false);
+      if (peek(i) && peek(i).v === ')') i++;
+    }
+    if (peek(i) && peek(i).v === '{') i = block(i);
+    popScope(i);
+    return i;
+  }
+
+  function asyncStmt(i) {
+    var next = peek(i + 1);
+    if (next && next.t === 'kw' && next.v === 'function') return functionDecl(i + 1, true);
+    if (next && next.v === '(') {
+      var after = skipGroup(i + 1);
+      if (peek(after) && peek(after).v === '=>') return arrowFromParen(i + 1);
+    }
+    if (next && next.t === 'id' && peek(i + 2) && peek(i + 2).v === '=>') return arrowFromIdent(i + 1);
+    return expression(i, {});
+  }
+
+  // `namespace` / `module` / `enum` named console introduce a runtime binding
+  // (TS emits them as `var`). Qualified names only bind the first identifier
+  // in the enclosing scope; later identifiers are in scope inside the body.
+  function tsBindingKeyword(i) {
+    var guard = 0;
+    while (i < n && guard++ < 4) {
+      var t = peek(i);
+      if (!t) return -1;
+      if (t.t === 'id' && t.v === 'declare') { i++; continue; }
+      if (t.t === 'kw' && t.v === 'const') {
+        var next = peek(i + 1);
+        if (next && next.t === 'kw' && next.v === 'enum') return i + 1;
+        return -1;
+      }
+      if (t.t === 'id' && (t.v === 'namespace' || t.v === 'module')) return i;
+      if (t.t === 'kw' && t.v === 'enum') return i;
+      return -1;
+    }
+    return -1;
+  }
+
+  function tryTsRuntimeBindingDecl(i) {
+    var start = tsBindingKeyword(i);
+    if (start < 0) return -1;
+    var kind = peek(start).v;
+    i = start + 1;
+    if (kind === 'module' && peek(i) && peek(i).t === 'str') {
+      i++;
+      if (!(peek(i) && peek(i).v === '{')) return i;
+      pushScope(false, i, 'module');
+      i++;
+      while (i < n && peek(i) && peek(i).v !== '}') {
+        var skipped = statement(i);
+        i = skipped > i ? skipped : i + 1;
+      }
+      if (i < n && peek(i) && peek(i).v === '}') i++;
+      popScope(i);
+      return i;
+    }
+    if (!(peek(i) && peek(i).t === 'id')) return -1;
+    noteDeclared(i);
+    var parts = [peek(i).v];
+    i++;
+    if (kind !== 'enum') {
+      while (peek(i) && peek(i).v === '.' && peek(i + 1) && peek(i + 1).t === 'id') {
+        parts.push(peek(i + 1).v);
+        i += 2;
+      }
+    }
+    if (!(peek(i) && peek(i).v === '{')) return -1;
+    if (parts[0] === 'console') markLet();
+    pushScope(false, i, kind);
+    var partIndex;
+    for (partIndex = 0; partIndex < parts.length; partIndex++) {
+      if (parts[partIndex] === 'console') { markLet(); break; }
+    }
+    if (kind === 'enum') {
+      i = skipGroup(i);
+      popScope(i);
+      return i;
+    }
+    i++;
+    while (i < n && peek(i) && peek(i).v !== '}') {
+      var nextStmt = statement(i);
+      i = nextStmt > i ? nextStmt : i + 1;
+    }
+    if (i < n && peek(i) && peek(i).v === '}') i++;
+    popScope(i);
+    return i;
+  }
+
+  function statement(i) {
+    if (i >= n || !peek(i)) return n;
+    var tok = peek(i);
+    if (tok.v === ';') return i + 1;
+    if (tok.v === '}') return i;
+    if (tok.t === 'kw' && tok.v === 'case') {
+      i = expression(i + 1, { stopColon: true });
+      if (peek(i) && peek(i).v === ':') i++;
+      return i;
+    }
+    if (tok.t === 'kw' && tok.v === 'default' && peek(i + 1) && peek(i + 1).v === ':') return i + 2;
+    if (tok.t === 'kw' && tok.v === 'function') return functionDecl(i, true);
+    if (tok.t === 'kw' && tok.v === 'class') return classDecl(i);
+    var runtimeBinding = tryTsRuntimeBindingDecl(i);
+    if (runtimeBinding >= 0) return runtimeBinding;
+    if (tok.t === 'kw' && (tok.v === 'var' || tok.v === 'let' || tok.v === 'const')) return varDecls(i);
+    if (tok.t === 'kw' && tok.v === 'import') return importDecl(i);
+    if (tok.t === 'kw' && tok.v === 'export') return exportDecl(i);
+    if (tok.t === 'kw' && tok.v === 'for') return forStmt(i);
+    if (tok.t === 'kw' && tok.v === 'with') return withStmt(i);
+    if (tok.t === 'kw' && (tok.v === 'while' || tok.v === 'if')) return headerStmt(i);
+    if (tok.t === 'kw' && tok.v === 'do') return doStmt(i);
+    if (tok.t === 'kw' && tok.v === 'switch') return switchStmt(i);
+    if (tok.t === 'kw' && tok.v === 'try') return tryStmt(i);
+    if (tok.t === 'kw' && tok.v === 'catch') return catchClause(i);
+    if (tok.t === 'kw' && tok.v === 'finally') {
+      i++;
+      if (peek(i) && peek(i).v === '{') return block(i);
+      return i;
+    }
+    if (tok.t === 'kw' && tok.v === 'async') return asyncStmt(i);
+    if (tok.t === 'kw' && tok.v === 'await' && peek(i + 1) && peek(i + 1).t === 'id' && peek(i + 1).v === 'using') return usingDecl(i);
+    if (tok.t === 'id' && tok.v === 'using') return usingDecl(i);
+    if (tok.v === '{') {
+      if (isBlockBrace(tokens, i)) return block(i);
+    }
+    if (tok.t === 'id' && peek(i + 1) && peek(i + 1).v === ':') return statement(i + 2);
+    i = expression(i, {});
+    if (peek(i) && peek(i).v === ';') i++;
+    return i;
+  }
+
+  var index = 0;
+  while (index < n) {
+    var next = statement(index);
+    index = next > index ? next : index + 1;
+  }
+
+  // Direct eval is resolved from tokens, not from how far the walker got, so a
+  // `for (...)` header or an object method still counts. When the enclosing
+  // scope cannot be proved strict, the nearest sloppy function (or the script)
+  // stays report-only. Indirect eval and the Function constructor can replace
+  // the global console, so the whole file stays report-only.
+  scanDynamicScope();
+
+  return function(tokenIndex) {
+    if (fileDynamic) return 'in a file where dynamic code may shadow console';
+    var binding = '';
+    var evalReason = '';
+    for (var s = 0; s < scopes.length; s++) {
+      var scope = scopes[s];
+      if (tokenIndex < scope.start || tokenIndex >= scope.end) continue;
+      if (scope.binds) binding = 'shadowed by a local console binding';
+      if (scope.directEval) evalReason = 'in a scope where direct eval may shadow console';
+    }
+    return binding || evalReason;
+  };
+
+  function scanDynamicScope() {
+    for (var i = 0; i < n; i++) {
+      var tok = tokens[i];
+      if (tok.t === 'id' && tok.v === 'Function' && isFunctionConstructor(i)) {
+        fileDynamic = true;
+        continue;
+      }
+      if (!(tok.t === 'id' && tok.v === 'eval')) continue;
+      var use = classifyEvalUse(i);
+      if (use === 'direct') poisonDirectEval(i);
+      else if (use === 'global') fileDynamic = true;
+    }
+  }
+
+  // `new Function(...)` and a call named Function. A `function Function`
+  // declaration is not the constructor. A method named Function is treated
+  // as a call anyway: report-only is safer than guessing object-literal shape.
+  function isFunctionConstructor(i) {
+    var prev = i > 0 ? tokens[i - 1] : null;
+    if (prev && prev.t === 'kw' && prev.v === 'function') return false;
+    if (prev && prev.v === '*') {
+      var lead = tokens[i - 2];
+      if (lead && lead.t === 'kw' && lead.v === 'function') return false;
+    }
+    if (prev && prev.t === 'kw' && prev.v === 'new') return true;
+    var next = peek(i + 1);
+    if (next && next.v === '(') return true;
+    if (next && next.v === '?.' && peek(i + 2) && peek(i + 2).v === '(') return true;
+    return false;
+  }
+
+  function poisonDirectEval(tokenIndex) {
+    var s = innermostScope(tokenIndex);
+    while (s >= 0) {
+      if (scopes[s].strict) return;
+      if (scopes[s].functionLike) {
+        scopes[s].directEval = true;
+        return;
+      }
+      s = scopes[s].parent;
+    }
+  }
+
+  function innermostScope(tokenIndex) {
+    var best = 0;
+    var bestStart = -1;
+    for (var s = 0; s < scopes.length; s++) {
+      var scope = scopes[s];
+      if (tokenIndex >= scope.start && tokenIndex < scope.end && scope.start >= bestStart) {
+        best = s;
+        bestStart = scope.start;
+      }
+    }
+    return best;
+  }
+
+  function classifyEvalUse(i) {
+    var prev = i > 0 ? tokens[i - 1] : null;
+    var next = peek(i + 1);
+    if (prev && (prev.v === '.' || prev.v === '?.')) {
+      if (next && (next.v === '(' || (next.v === '?.' && peek(i + 2) && peek(i + 2).v === '('))) return 'global';
+      // `(obj.eval)(code)` is still an indirect eval call.
+      if (isParenthesizedEvalCall(i)) return 'global';
+      return '';
+    }
+    if (next && next.v === '(') return 'direct';
+    // `eval?.()` and `eval.call` / `eval.apply` / `eval.bind` are indirect.
+    if (next && next.v === '?.' && peek(i + 2) && peek(i + 2).v === '(') return 'global';
+    if (next && next.v === '.') {
+      var prop = peek(i + 2);
+      if (prop && (prop.v === 'call' || prop.v === 'apply' || prop.v === 'bind')) return 'global';
+    }
+    if (isParenthesizedEvalCall(i)) return onlyWrappedEval(i) ? 'direct' : 'global';
+    return '';
+  }
+
+  function onlyWrappedEval(i) {
+    var a = i - 1;
+    while (a >= 0 && tokens[a].v === '(') a--;
+    if (a === i - 1) return false;
+    var b = i + 1;
+    while (b < n && tokens[b].v === ')') b++;
+    return !!(tokens[b] && tokens[b].v === '(');
+  }
+
+  // True when some parenthesized group that contains this `eval` is itself
+  // called: `(eval)(`, `(0, eval)(`, and `((0, eval))(`.
+  function isParenthesizedEvalCall(i) {
+    var starts = [];
+    var depth = 0;
+    for (var j = 0; j <= i; j++) {
+      if (tokens[j].v === '(') {
+        depth++;
+        starts[depth] = j;
+      } else if (tokens[j].v === ')') {
+        if (depth > 0) depth--;
+      }
+    }
+    for (var d = depth; d >= 1; d--) {
+      var open = starts[d];
+      if (open == null) continue;
+      var dd = 0;
+      for (var k = open; k < n; k++) {
+        if (tokens[k].v === '(') dd++;
+        else if (tokens[k].v === ')') {
+          dd--;
+          if (dd === 0) {
+            if (tokens[k + 1] && tokens[k + 1].v === '(') {
+              var before = tokens[open - 1];
+              if (before && (before.v === '.' || before.v === '?.')) return false;
+              return true;
+            }
+            break;
+          }
+        }
+      }
+    }
+    return false;
+  }
+}
+
+function downgradeSite(site, reason) {
+  site.status = 'report-only';
+  site.reason = reason;
+  site.summary = 'The ' + site.kind + ' at line ' + site.line + ' in ' + site.filePath + ' is report-only because it is ' + reason + '.';
+  delete site.patch;
+}
+
+// Hosts whose `.console` is the global console object. `this` is included:
+// a sloppy script can assign `this.console`, and a method's `this` is not
+// worth trying to prove.
+var CONSOLE_HOSTS = { globalThis: 1, window: 1, self: 1, global: 1, this: 1 };
+
+var CONSOLE_ASSIGN_OPS = {
+  '=': 1, '+=': 1, '-=': 1, '*=': 1, '/=': 1, '%=': 1, '**=': 1,
+  '<<=': 1, '>>=': 1, '>>>=': 1, '&=': 1, '|=': 1, '^=': 1,
+  '&&=': 1, '||=': 1, '??=': 1
+};
+
+function consoleMutationReason(tokens, content, consoleShadowed) {
+  try {
+    if (fileWritesConsole(tokens, content) || fileExposesConsole(tokens, content, consoleShadowed)) {
+      return 'in a file that reassigns console';
+    }
+  } catch (err) {
+    return 'in a file that reassigns console';
+  }
+  return '';
+}
+
+// File-level gate for aliasing. A later write through the alias is not
+// required: capturing the object (`const c = console`, `const { console: c } =
+// globalThis`, `({ log } = console)`) or reading it off a host is enough.
+// Declared names (`function save(console)`, `const { console }`) are skipped
+// so a sibling call outside that binding can still be patched. Comparisons
+// and direct calls are not captures. Uncertainty poisons the file.
+var CONSOLE_COMPARE_OPS = { '==': 1, '===': 1, '!=': 1, '!==': 1, '<': 1, '>': 1, '<=': 1, '>=': 1 };
+
+function fileExposesConsole(tokens, content, consoleShadowed) {
+  var i;
+  for (i = 0; i < tokens.length; i++) {
+    if (hostAccessesConsole(tokens, i, content)) return true;
+    if (bareConsoleCaptures(tokens, i, consoleShadowed)) return true;
+    if (patternNamesConsole(tokens, i, content)) return true;
+    if (reflectiveConsoleRead(tokens, i, content)) return true;
+  }
+  return false;
+}
+
+function hostAccessesConsole(tokens, i, content) {
+  if (!isConsoleHost(tokens[i])) return false;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return false;
+  // `(globalThis).console`, `((window))['console']`, and `(0, self).console`
+  // still read the host. Skipping the closing parens is conservative: a call
+  // that merely receives the host can be marked too, which only forces
+  // report-only.
+  var end = i + 1;
+  var guard = 0;
+  while (end < tokens.length && tokens[end].v === ')' && guard++ < 32) end++;
+  var mid = tokens[end];
+  if (!mid) return false;
+  if ((mid.v === '.' || mid.v === '?.') && tokens[end + 1] && tokens[end + 1].v === 'console' &&
+      (tokens[end + 1].t === 'id' || tokens[end + 1].t === 'kw')) return true;
+  if (mid.v !== '[') return false;
+  var close = closeGroup(tokens, end);
+  if (close < 0) return true;
+  var name = propertyNameText(tokens, content, end + 1, close);
+  return name == null || name === 'console';
+}
+
+function bareConsoleCaptures(tokens, i, consoleShadowed) {
+  var tok = tokens[i];
+  if (!tok || tok.v !== 'console' || (tok.t !== 'id' && tok.t !== 'kw')) return false;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return false;
+  if (tokens.declaredName && tokens.declaredName[i]) return false;
+  if (isDirectConsoleUse(tokens, i)) return false;
+  if (isComparisonUse(tokens, i)) return false;
+  if (isImportClauseName(tokens, i)) return false;
+  // `{ console: c }` is a property name, including inside a function that
+  // already shadows console. A use such as `console.log(console)` refers to
+  // that local binding and must not poison calls outside the scope.
+  var next = tokens[i + 1];
+  if (next && next.v === ':' && !isObjectLiteralKey(tokens, i)) return true;
+  if (consoleShadowed && consoleShadowed(i)) return false;
+  if (isObjectLiteralKey(tokens, i)) return false;
+  return true;
+}
+
+function memberChainEnd(tokens, i) {
+  var end = i + 1;
+  var guard = 0;
+  while (end < tokens.length && guard++ < 32) {
+    var tok = tokens[end];
+    if (!tok) break;
+    if ((tok.v === '.' || tok.v === '?.') && tokens[end + 1]) {
+      end += 2;
+      continue;
+    }
+    if (tok.v === '[') {
+      var close = closeGroup(tokens, end);
+      if (close < 0) return tokens.length;
+      end = close + 1;
+      continue;
+    }
+    break;
+  }
+  return end;
+}
+
+// `console.log(...)` and `console.log\`tag\`` use the builtin as a callee.
+// `console.log = audit` and `const c = console.log` do not.
+function isDirectConsoleUse(tokens, i) {
+  var end = memberChainEnd(tokens, i);
+  var next = tokens[end];
+  if (!next) return false;
+  if (next.v === '(') return true;
+  if (next.t === 'tmpl') return true;
+  return false;
+}
+
+function isComparisonUse(tokens, i) {
+  var end = memberChainEnd(tokens, i);
+  var next = tokens[end];
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (next && CONSOLE_COMPARE_OPS[next.v]) return true;
+  if (prev && CONSOLE_COMPARE_OPS[prev.v]) return true;
+  return false;
+}
+
+// `import { console as c }` names a foreign export, not the global object.
+function isImportClauseName(tokens, i) {
+  var depth = 0;
+  var k;
+  for (k = i; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === '}') depth++;
+    else if (v === '{') {
+      if (depth === 0) {
+        var q = k - 1;
+        while (q >= 0 && tokens[q].v !== ';' && tokens[q].v !== '}') {
+          if (tokens[q].t === 'kw' && tokens[q].v === 'import') return true;
+          if (tokens[q].t === 'kw' && (tokens[q].v === 'const' || tokens[q].v === 'let' || tokens[q].v === 'var' || tokens[q].v === 'function' || tokens[q].v === 'class')) return false;
+          q--;
+        }
+        return false;
+      }
+      if (depth > 0) depth--;
+    } else if (v === ';' && depth === 0) return false;
+  }
+  return false;
+}
+
+// `{ console: audit }` in an object literal is a property name. The same
+// tokens in `const { console: c }` or `({ console: c } = globalThis)` pull
+// the console object out under another name.
+function isObjectLiteralKey(tokens, i) {
+  var next = tokens[i + 1];
+  if (!next || next.v !== ':') return false;
+  var brace = enclosingOpenBrace(tokens, i);
+  if (brace < 0) return false;
+  return !isInsideDestructuringPattern(tokens, brace);
+}
+
+function patternNamesConsole(tokens, i, content) {
+  var tok = tokens[i];
+  if (!tok) return false;
+  if (tok.t === 'str' && tokens[i + 1] && tokens[i + 1].v === ':') {
+    if (literalText(content, tok) !== 'console') return false;
+    var brace = enclosingOpenBrace(tokens, i);
+    if (brace < 0) return true;
+    return isInsideDestructuringPattern(tokens, brace);
+  }
+  if (tok.v !== '[') return false;
+  var close = closeGroup(tokens, i);
+  if (close < 0) return false;
+  if (!tokens[close + 1] || tokens[close + 1].v !== ':') return false;
+  var brace2 = enclosingOpenBrace(tokens, i);
+  if (brace2 < 0) return false;
+  if (!isInsideDestructuringPattern(tokens, brace2)) return false;
+  var name = propertyNameText(tokens, content, i + 1, close);
+  // A static other name is not console. A dynamic key might be.
+  return name == null || name === 'console';
+}
+
+function isInsideDestructuringPattern(tokens, braceIdx) {
+  var idx = braceIdx;
+  var guard = 0;
+  while (idx >= 0 && guard++ < 40) {
+    if (braceIntroducesPattern(tokens, idx)) return true;
+    if (insideArrayPattern(tokens, idx)) return true;
+    if (idx === 0) return false;
+    var parent = enclosingOpenBrace(tokens, idx - 1);
+    if (parent < 0 || parent >= idx) return false;
+    idx = parent;
+  }
+  return true;
+}
+
+function insideArrayPattern(tokens, fromIdx) {
+  var idx = fromIdx;
+  var guard = 0;
+  while (idx >= 0 && guard++ < 40) {
+    var bracket = enclosingOpenBracket(tokens, idx);
+    if (bracket < 0) return false;
+    if (bracketIntroducesPattern(tokens, bracket)) return true;
+    if (bracket === 0) return false;
+    idx = bracket - 1;
+  }
+  return true;
+}
+
+function bracketIntroducesPattern(tokens, bracketIdx) {
+  var prev = bracketIdx > 0 ? tokens[bracketIdx - 1] : null;
+  if (prev && (prev.v === 'const' || prev.v === 'let' || prev.v === 'var' || prev.v === 'using')) return true;
+  var close = closeGroup(tokens, bracketIdx);
+  if (close < 0) return true;
+  var after = tokens[close + 1];
+  if (after && (after.v === '=' || after.v === 'of' || after.v === 'in')) return true;
+  return isParameterBrace(tokens, bracketIdx);
+}
+
+function enclosingOpenBracket(tokens, fromIdx) {
+  var depthBracket = 0;
+  var depthBrace = 0;
+  var depthParen = 0;
+  var k;
+  for (k = fromIdx; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === ']') depthBracket++;
+    else if (v === '[') {
+      if (depthBracket === 0 && depthBrace === 0 && depthParen === 0) return k;
+      if (depthBracket > 0) depthBracket--;
+    } else if (v === '}') depthBrace++;
+    else if (v === '{') {
+      if (depthBrace > 0) depthBrace--;
+    } else if (v === ')') depthParen++;
+    else if (v === '(') {
+      if (depthParen > 0) depthParen--;
+    } else if (v === ';' && depthBracket === 0 && depthBrace === 0 && depthParen === 0) return -1;
+  }
+  return -1;
+}
+
+function braceIntroducesPattern(tokens, braceIdx) {
+  var prev = braceIdx > 0 ? tokens[braceIdx - 1] : null;
+  if (prev && (prev.v === 'const' || prev.v === 'let' || prev.v === 'var' || prev.v === 'using')) return true;
+  var close = closeGroup(tokens, braceIdx);
+  if (close < 0) return true;
+  var after = tokens[close + 1];
+  if (after && (after.v === '=' || after.v === 'of' || after.v === 'in')) return true;
+  return isParameterBrace(tokens, braceIdx);
+}
+
+function isParameterBrace(tokens, braceIdx) {
+  var open = enclosingParen(tokens, braceIdx);
+  if (open < 0) return false;
+  var close = closeGroup(tokens, open);
+  var before = open > 0 ? tokens[open - 1] : null;
+  var after = close >= 0 ? tokens[close + 1] : null;
+  if (after && after.v === '=>') return true;
+  if (!before) return false;
+  if (before.t === 'kw' && (before.v === 'function' || before.v === 'catch')) return true;
+  if (before.t === 'id' || (before.t === 'kw' && before.v === 'async')) {
+    var lead = open > 1 ? tokens[open - 2] : null;
+    if (lead && (lead.v === '*' || (lead.t === 'kw' && (lead.v === 'function' || lead.v === 'async')))) return true;
+    if (after && after.v === '{') return true;
+  }
+  return false;
+}
+
+function enclosingOpenBrace(tokens, fromIdx) {
+  var depthBrace = 0;
+  var depthParen = 0;
+  var depthBracket = 0;
+  var k;
+  for (k = fromIdx; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === '}') depthBrace++;
+    else if (v === '{') {
+      if (depthBrace === 0 && depthParen === 0 && depthBracket === 0) return k;
+      if (depthBrace > 0) depthBrace--;
+    } else if (v === ')') depthParen++;
+    else if (v === '(') {
+      if (depthParen > 0) depthParen--;
+    } else if (v === ']') depthBracket++;
+    else if (v === '[') {
+      if (depthBracket > 0) depthBracket--;
+    } else if (v === ';' && depthBrace === 0 && depthParen === 0 && depthBracket === 0) return -1;
+  }
+  return -1;
+}
+
+function enclosingParen(tokens, fromIdx) {
+  var depth = 0;
+  var k;
+  for (k = fromIdx; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === ')') depth++;
+    else if (v === '(') {
+      if (depth === 0) return k;
+      depth--;
+    }
+  }
+  return -1;
+}
+
+// Reflect.get(globalThis, "console") and the descriptor equivalent are
+// bracket access spelled as a call. A host target with a console key, or a
+// key that is not a proven other name, exposes the object.
+function reflectiveConsoleRead(tokens, i, content) {
+  var tok = tokens[i];
+  if (!tok || tok.t !== 'id' || (tok.v !== 'Object' && tok.v !== 'Reflect')) return false;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return false;
+  var method = memberNameAt(tokens, content, i + 1);
+  if (!method || !tokens[method.end] || tokens[method.end].v !== '(') return false;
+  var reads = tok.v === 'Reflect'
+    ? { get: 1, getOwnPropertyDescriptor: 1 }
+    : { getOwnPropertyDescriptor: 1, getOwnPropertyDescriptors: 1 };
+  if (!reads[method.name]) return false;
+  var first = argRange(tokens, method.end);
+  if (!first || !argIsBareHost(tokens, first.start, first.end)) return false;
+  if (method.name === 'getOwnPropertyDescriptors') return true;
+  var second = argRange(tokens, first.end);
+  if (!second) return true;
+  var name = propertyNameText(tokens, content, second.start, second.end);
+  return name == null || name === 'console';
+}
+
+function isConsoleHost(tok) {
+  return !!(tok && CONSOLE_HOSTS[tok.v] && (tok.t === 'id' || tok.t === 'kw'));
+}
+
+function fileWritesConsole(tokens, content) {
+  var aliases = collectConsoleAliases(tokens, content);
+  var i;
+  for (i = 0; i < tokens.length; i++) {
+    if (assignmentWritesConsole(tokens, i, aliases, content)) return true;
+    if (updateOrDeleteWritesConsole(tokens, i, aliases, content)) return true;
+    if (patternAssignmentWritesConsole(tokens, i, aliases, content)) return true;
+    if (forHeadWritesConsole(tokens, i, aliases, content)) return true;
+    if (mutatorCallWritesConsole(tokens, i, aliases, content)) return true;
+    if (defineAccessorWritesConsole(tokens, i, aliases, content)) return true;
+  }
+  return false;
+}
+
+function collectConsoleAliases(tokens, content) {
+  var aliases = Object.create(null);
+  var guard = 0;
+  var changed = true;
+  while (changed && guard++ < 32) {
+    changed = false;
+    for (var i = 0; i < tokens.length; i++) {
+      var name = aliasBoundAt(tokens, i, aliases, content);
+      if (name && !aliases[name]) {
+        aliases[name] = true;
+        changed = true;
+      }
+    }
+  }
+  return aliases;
+}
+
+// `const c = console`, `c = window.console`, `c = (0, console)`, `d = c`.
+// A later `c.log = audit` mutates the object the alias still might hold.
+function aliasBoundAt(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok || tok.t !== 'id') return '';
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.' || prev.v === ':')) return '';
+  var eq = tokens[i + 1];
+  if (!eq || eq.v !== '=') return '';
+  if (!rhsIsConsoleObject(tokens, i + 2, aliases, content)) return '';
+  return tok.v;
+}
+
+function rhsIsConsoleObject(tokens, i, aliases, content) {
+  if (!tokens[i]) return false;
+  if (tokens[i].v === '(') {
+    var close = closeGroup(tokens, i);
+    if (close < 0) return false;
+    if (!groupYieldsConsole(tokens, i + 1, close, aliases, content)) return false;
+    return !memberOrCall(tokens[close + 1]);
+  }
+  var end = matchConsoleObject(tokens, i, aliases, content);
+  if (end < 0) return false;
+  if (memberOrCall(tokens[end])) return false;
+  return true;
+}
+
+function groupYieldsConsole(tokens, start, end, aliases, content) {
+  var last = start;
+  var depth = 0;
+  for (var i = start; i < end; i++) {
+    var v = tokens[i].v;
+    if (v === '(' || v === '[' || v === '{') depth++;
+    else if (v === ')' || v === ']' || v === '}') {
+      if (depth === 0) return false;
+      depth--;
+    } else if (v === ',' && depth === 0) last = i + 1;
+  }
+  var objEnd = matchConsoleObject(tokens, last, aliases, content);
+  if (objEnd < 0 || objEnd > end) return false;
+  return !memberOrCall(tokens[objEnd]);
+}
+
+function memberOrCall(tok) {
+  if (!tok) return false;
+  return tok.v === '.' || tok.v === '?.' || tok.v === '[' || tok.v === '(';
+}
+
+// A console object: `console`, an alias, or `globalThis` / `window` / `self` /
+// `global` / `this` `.console` or `['console']`. An unknown computed key on a
+// host counts too (`window[name] = ...` might be `console`).
+function matchConsoleObject(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok) return -1;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return -1;
+  if ((tok.t === 'id' || tok.t === 'kw') && tok.v === 'console') return i + 1;
+  if (tok.t === 'id' && aliases && aliases[tok.v]) return i + 1;
+  if (isConsoleHost(tok)) return matchHostConsole(tokens, i, content);
+  return -1;
+}
+
+function matchHostConsole(tokens, i, content) {
+  var mid = tokens[i + 1];
+  if (!mid) return -1;
+  var prop = tokens[i + 2];
+  if ((mid.v === '.' || mid.v === '?.') && prop && prop.v === 'console' && (prop.t === 'id' || prop.t === 'kw')) {
+    return i + 3;
+  }
+  if (mid.v !== '[') return -1;
+  var close = closeGroup(tokens, i + 1);
+  if (close < 0) return -1;
+  var name = propertyNameText(tokens, content, i + 2, close);
+  if (name === 'console' || name == null) return close + 1;
+  return -1;
+}
+
+// End index (exclusive) of a console object or a property path rooted at one.
+function matchConsoleTarget(tokens, i, aliases, content) {
+  var end = matchConsoleObject(tokens, i, aliases, content);
+  if (end < 0) return -1;
+  var guard = 0;
+  while (end < tokens.length && guard++ < 32) {
+    var tok = tokens[end];
+    if (!tok) break;
+    if ((tok.v === '.' || tok.v === '?.') && tokens[end + 1] && (tokens[end + 1].t === 'id' || tokens[end + 1].t === 'kw' || tokens[end + 1].t === 'str' || tokens[end + 1].t === 'num')) {
+      end += 2;
+      continue;
+    }
+    if (tok.v === '[') {
+      var close = closeGroup(tokens, end);
+      if (close < 0) return end;
+      end = close + 1;
+      continue;
+    }
+    break;
+  }
+  return end;
+}
+
+// Bare `console` / `host.console` rebinds the global. A property path mutates
+// the object. Rebinding an alias (`c = other`) does not.
+function spanMutatesConsole(tokens, start, end, aliases, content) {
+  var objEnd = matchConsoleObject(tokens, start, aliases, content);
+  if (objEnd < 0 || objEnd > end) return false;
+  if (objEnd < end) return true;
+  var tok = tokens[start];
+  if (tok && tok.t === 'id' && aliases && aliases[tok.v] && tok.v !== 'console') return false;
+  return true;
+}
+
+function assignmentWritesConsole(tokens, i, aliases, content) {
+  var end = matchConsoleTarget(tokens, i, aliases, content);
+  if (end <= i) return false;
+  var op = tokens[end];
+  if (!op || !CONSOLE_ASSIGN_OPS[op.v]) return false;
+  if (isDeclaredName(tokens, i, end)) return false;
+  return spanMutatesConsole(tokens, i, end, aliases, content);
+}
+
+function isDeclaredName(tokens, start, end) {
+  if (end !== start + 1) return false;
+  return !!(tokens.declaredName && tokens.declaredName[start]);
+}
+
+function updateOrDeleteWritesConsole(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok) return false;
+  if (tok.v === 'delete') return operandWritesConsole(tokens, i + 1, aliases, content);
+  // `i++` is postfix. Only a prefix update (`++console.log`) writes the operand.
+  if ((tok.v === '++' || tok.v === '--') && isPrefixUpdate(tokens, i)) {
+    return operandWritesConsole(tokens, i + 1, aliases, content);
+  }
+  var targetEnd = matchConsoleTarget(tokens, i, aliases, content);
+  if (targetEnd <= i || isDeclaredName(tokens, i, targetEnd)) return false;
+  var post = tokens[targetEnd];
+  if (!post || (post.v !== '++' && post.v !== '--')) return false;
+  return spanMutatesConsole(tokens, i, targetEnd, aliases, content);
+}
+
+// `++i` / `delete x` take the next expression. `i++` does not: the previous
+// token already ended an operand, so the following `console.log(...)` is a call.
+function isPrefixUpdate(tokens, i) {
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (!prev) return true;
+  if (prev.t === 'id' || prev.t === 'num' || prev.t === 'str' || prev.t === 're') return false;
+  if (prev.v === ')' || prev.v === ']' || prev.v === '}' || prev.v === '++' || prev.v === '--') return false;
+  if (prev.t === 'kw' && (prev.v === 'this' || prev.v === 'super')) return false;
+  return true;
+}
+
+// The operand is a write only when it is the console target itself.
+// `++console.log()` and `delete console.log()` increment or delete the call
+// result; `++(console.log)` and `delete (console.log)` still write the property.
+function operandWritesConsole(tokens, i, aliases, content) {
+  var j = i;
+  var wrapped = 0;
+  while (tokens[j] && tokens[j].v === '(') { wrapped++; j++; }
+  var end = matchConsoleTarget(tokens, j, aliases, content);
+  if (end <= j || isDeclaredName(tokens, j, end)) return false;
+  if (tokens[end] && tokens[end].v === '(') return false;
+  var k = end;
+  while (wrapped > 0 && tokens[k] && tokens[k].v === ')') { wrapped--; k++; }
+  return spanMutatesConsole(tokens, j, end, aliases, content);
+}
+
+function patternAssignmentWritesConsole(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok || (tok.v !== '{' && tok.v !== '[')) return false;
+  if (!isBindingPatternStart(tokens, i)) return false;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  // `const { console }` declares a binding. The shadow walker handles it.
+  if (prev && (prev.v === 'const' || prev.v === 'let' || prev.v === 'var' || prev.v === 'using')) return false;
+  var close = closeGroup(tokens, i);
+  if (close < 0) return false;
+  if (!tokens[close + 1] || tokens[close + 1].v !== '=') return false;
+  return patternWritesConsole(tokens, i, close, aliases, content);
+}
+
+function forHeadWritesConsole(tokens, i, aliases, content) {
+  if (!tokens[i] || tokens[i].t !== 'kw' || tokens[i].v !== 'for') return false;
+  var j = i + 1;
+  if (tokens[j] && tokens[j].t === 'kw' && tokens[j].v === 'await') j++;
+  if (!tokens[j] || tokens[j].v !== '(') return false;
+  j++;
+  if (tokens[j] && (tokens[j].v === 'const' || tokens[j].v === 'let' || tokens[j].v === 'var' || tokens[j].v === 'using')) return false;
+  if (tokens[j] && tokens[j].t === 'kw' && tokens[j].v === 'await' && tokens[j + 1] && tokens[j + 1].v === 'using') return false;
+  var start = j;
+  var depth = 0;
+  while (j < tokens.length) {
+    var v = tokens[j].v;
+    if (v === '(' || v === '{' || v === '[' || v === '${') depth++;
+    else if (v === ')' || v === '}' || v === ']') {
+      if (depth === 0) return false;
+      depth--;
+    } else if (depth === 0 && (v === 'of' || v === 'in' || v === ';')) {
+      if (v === ';') return false;
+      return rangeWritesConsole(tokens, start, j, aliases, content);
+    }
+    j++;
+  }
+  return false;
+}
+
+function rangeWritesConsole(tokens, start, end, aliases, content) {
+  if (start >= end) return false;
+  var v = tokens[start].v;
+  if (v === '{' || v === '[') return patternWritesConsole(tokens, start, end, aliases, content);
+  var targetEnd = matchConsoleTarget(tokens, start, aliases, content);
+  if (targetEnd < 0 || targetEnd > end) return false;
+  return spanMutatesConsole(tokens, start, targetEnd, aliases, content);
+}
+
+function patternWritesConsole(tokens, start, end, aliases, content) {
+  var seen = targetWritesConsole(tokens, start, aliases, content);
+  if (!seen) return false;
+  return seen.writes && seen.i <= end + 1;
+}
+
+function targetWritesConsole(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok) return null;
+  if (tok.v === '{') return objectPatternWrites(tokens, i, aliases, content);
+  if (tok.v === '[') return arrayPatternWrites(tokens, i, aliases, content);
+  if (tok.v === '...') {
+    var rest = targetWritesConsole(tokens, i + 1, aliases, content);
+    if (!rest) return { i: i + 1, writes: false };
+    return rest;
+  }
+  var end = matchConsoleTarget(tokens, i, aliases, content);
+  if (end > i) {
+    var writes = spanMutatesConsole(tokens, i, end, aliases, content);
+    var j = end;
+    if (tokens[j] && tokens[j].v === '=' && tokens[j].v.length === 1) j = skipPatternDefault(tokens, j + 1);
+    return { i: j, writes: writes };
+  }
+  var j2 = i + 1;
+  if (tokens[j2] && tokens[j2].v === '=' && (!tokens[j2 + 1] || tokens[j2].v.length === 1)) j2 = skipPatternDefault(tokens, j2 + 1);
+  return { i: j2, writes: false };
+}
+
+function objectPatternWrites(tokens, start, aliases, content) {
+  var i = start + 1;
+  var writes = false;
+  var guard = 0;
+  while (i < tokens.length && tokens[i].v !== '}' && guard++ < 400) {
+    if (tokens[i].v === ',') { i++; continue; }
+    if (tokens[i].v === '...') {
+      var rest = targetWritesConsole(tokens, i + 1, aliases, content);
+      if (!rest || rest.i <= i) { i++; continue; }
+      writes = writes || rest.writes;
+      i = rest.i;
+      continue;
+    }
+    if (tokens[i].v === '[') {
+      var computed = closeGroup(tokens, i);
+      if (computed < 0) return { i: i + 1, writes: true };
+      i = computed + 1;
+      if (tokens[i] && tokens[i].v === ':') {
+        var computedTarget = targetWritesConsole(tokens, i + 1, aliases, content);
+        if (!computedTarget || computedTarget.i <= i) return { i: i + 1, writes: true };
+        writes = writes || computedTarget.writes;
+        i = computedTarget.i;
+      }
+      continue;
+    }
+    var key = tokens[i];
+    i++;
+    if (tokens[i] && tokens[i].v === ':') {
+      var named = targetWritesConsole(tokens, i + 1, aliases, content);
+      if (!named || named.i <= i) return { i: i + 1, writes: true };
+      writes = writes || named.writes;
+      i = named.i;
+      continue;
+    }
+    if (key && (key.t === 'id' || key.t === 'kw') && key.v === 'console') writes = true;
+    if (tokens[i] && tokens[i].v === '=' && tokens[i].v.length === 1) i = skipPatternDefault(tokens, i + 1);
+  }
+  if (i < tokens.length && tokens[i].v === '}') i++;
+  return { i: i, writes: writes };
+}
+
+function arrayPatternWrites(tokens, start, aliases, content) {
+  var i = start + 1;
+  var writes = false;
+  var guard = 0;
+  while (i < tokens.length && tokens[i].v !== ']' && guard++ < 400) {
+    if (tokens[i].v === ',') { i++; continue; }
+    var before = i;
+    var item = targetWritesConsole(tokens, i, aliases, content);
+    if (!item || item.i <= before) return { i: before + 1, writes: true };
+    writes = writes || item.writes;
+    i = item.i;
+  }
+  if (i < tokens.length && tokens[i].v === ']') i++;
+  return { i: i, writes: writes };
+}
+
+function skipPatternDefault(tokens, i) {
+  var depth = 0;
+  var guard = 0;
+  while (i < tokens.length && guard++ < 400) {
+    var v = tokens[i].v;
+    if (v === '(' || v === '[' || v === '{' || v === '${') depth++;
+    else if (v === ')' || v === ']' || v === '}') {
+      if (depth === 0) return i;
+      depth--;
+    } else if (depth === 0 && v === ',') return i;
+    i++;
+  }
+  return i;
+}
+
+function isBindingPatternStart(tokens, i) {
+  if (i === 0) return true;
+  var prev = tokens[i - 1];
+  if (!prev) return true;
+  if (prev.v === '=' || prev.v === '(' || prev.v === ',' || prev.v === ';' || prev.v === '[' || prev.v === '{' || prev.v === '}' || prev.v === ':') return true;
+  if (prev.t === 'kw') {
+    switch (prev.v) {
+      case 'const': case 'let': case 'var': case 'return': case 'of': case 'in':
+      case 'case': case 'throw': case 'yield': case 'await': case 'void':
+      case 'delete': case 'typeof': case 'export': case 'default':
+        return true;
+      default:
+        return false;
+    }
+  }
+  return false;
+}
+
+// Object.assign / defineProperty / defineProperties / setPrototypeOf and the
+// Reflect equivalents. A host as the target counts: assigning onto
+// `globalThis` can replace `console`. defineProperty on a host counts only
+// when the property name is `console` or cannot be proved otherwise.
+function mutatorCallWritesConsole(tokens, i, aliases, content) {
+  var call = matchMutatorCall(tokens, i, content);
+  if (!call) return false;
+  var first = argRange(tokens, call.paren);
+  if (!first) return false;
+  if (call.mode === 'target') {
+    if (argIsConsoleObject(tokens, first.start, first.end, aliases, content)) return true;
+    if (argIsBareHost(tokens, first.start, first.end)) return true;
+    return false;
+  }
+  if (argIsConsoleObject(tokens, first.start, first.end, aliases, content)) return true;
+  if (!argIsBareHost(tokens, first.start, first.end)) return false;
+  var second = argRange(tokens, first.end);
+  if (!second) return true;
+  var name = propertyNameText(tokens, content, second.start, second.end);
+  if (name == null) return true;
+  return name === 'console';
+}
+
+function matchMutatorCall(tokens, i, content) {
+  var tok = tokens[i];
+  if (!tok || tok.t !== 'id') return null;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return null;
+  var table = tok.v === 'Object' ? OBJECT_MUTATORS : tok.v === 'Reflect' ? REFLECT_MUTATORS : null;
+  if (!table) return null;
+  var method = memberNameAt(tokens, content, i + 1);
+  if (!method || !table[method.name]) return null;
+  if (!tokens[method.end] || tokens[method.end].v !== '(') return null;
+  return { mode: table[method.name], paren: method.end };
+}
+
+var OBJECT_MUTATORS = { assign: 'target', defineProperties: 'target', setPrototypeOf: 'target', defineProperty: 'define' };
+var REFLECT_MUTATORS = { defineProperty: 'define', set: 'define', deleteProperty: 'define', setPrototypeOf: 'target' };
+
+function memberNameAt(tokens, content, i) {
+  var tok = tokens[i];
+  if (!tok) return null;
+  if ((tok.v === '.' || tok.v === '?.') && tokens[i + 1] && (tokens[i + 1].t === 'id' || tokens[i + 1].t === 'kw')) {
+    return { name: tokens[i + 1].v, end: i + 2 };
+  }
+  if (tok.v !== '[') return null;
+  var close = closeGroup(tokens, i);
+  if (close < 0) return null;
+  var name = propertyNameText(tokens, content, i + 1, close);
+  if (!name) return null;
+  return { name: name, end: close + 1 };
+}
+
+function argRange(tokens, from) {
+  // `from` is the `(` or the comma that ends the previous argument.
+  if (!tokens[from]) return null;
+  var i = from + 1;
+  if (!tokens[i] || tokens[i].v === ')') return null;
+  var start = i;
+  var depth = 0;
+  while (i < tokens.length) {
+    var v = tokens[i].v;
+    if (v === '(' || v === '[' || v === '{' || v === '${') depth++;
+    else if (v === ')' || v === ']' || v === '}') {
+      if (depth === 0) return { start: start, end: i };
+      depth--;
+    } else if (v === ',' && depth === 0) return { start: start, end: i };
+    i++;
+  }
+  return { start: start, end: i };
+}
+
+function argIsConsoleObject(tokens, start, end, aliases, content) {
+  var i = start;
+  while (i < end && tokens[i] && tokens[i].v === '(') i++;
+  var objEnd = matchConsoleObject(tokens, i, aliases, content);
+  if (objEnd < 0) return false;
+  while (objEnd < end && tokens[objEnd] && tokens[objEnd].v === ')') objEnd++;
+  if (objEnd < end && tokens[objEnd] && (tokens[objEnd].v === 'as' || tokens[objEnd].v === 'satisfies')) return true;
+  return objEnd === end;
+}
+
+function argIsBareHost(tokens, start, end) {
+  return end === start + 1 && isConsoleHost(tokens[start]);
+}
+
+function propertyNameText(tokens, content, start, end) {
+  if (end === start + 1) return literalText(content, tokens[start]);
+  if (end === start + 2 && tokens[start] && tokens[start].t === 'tmpl') return simpleTemplateText(content, tokens[start], tokens[start + 1]);
+  return null;
+}
+
+function literalText(content, tok) {
+  if (!tok) return null;
+  if (tok.t === 'str') return decodeSimpleString(content.slice(tok.i, tok.end));
+  if (tok.t === 'tmpl') return null;
+  return null;
+}
+
+function simpleTemplateText(content, openTok, closeTok) {
+  if (!openTok || openTok.t !== 'tmpl' || !closeTok) return null;
+  var raw = content.slice(openTok.end, closeTok.i);
+  if (raw.charAt(raw.length - 1) !== '`') return null;
+  raw = raw.slice(0, -1);
+  if (raw.indexOf('${') >= 0 || raw.indexOf('\\') >= 0) return null;
+  return raw;
+}
+
+function decodeSimpleString(raw) {
+  if (!raw || raw.length < 2) return null;
+  var q = raw.charAt(0);
+  if ((q !== '"' && q !== "'") || raw.charAt(raw.length - 1) !== q) return null;
+  var body = raw.slice(1, -1);
+  if (body.indexOf('\\') < 0) return body.indexOf('\n') >= 0 ? null : body;
+  var out = '';
+  for (var i = 0; i < body.length; i++) {
+    var ch = body.charAt(i);
+    if (ch !== '\\') { out += ch; continue; }
+    var n = body.charAt(i + 1);
+    if (n === 'u' && body.charAt(i + 2) === '{') {
+      var j = i + 3;
+      var hex = '';
+      while (j < body.length && hex.length < 6 && isHex(body.charAt(j))) { hex += body.charAt(j); j++; }
+      if (!hex || body.charAt(j) !== '}') return null;
+      var cp = parseInt(hex, 16);
+      if (cp > 0x10FFFF) return null;
+      out += cp <= 0xFFFF ? String.fromCharCode(cp) : identCharFromCodePoint(cp);
+      i = j;
+      continue;
+    }
+    if (n === 'u') {
+      var h4 = body.substr(i + 2, 4);
+      if (!/^[0-9a-fA-F]{4}$/.test(h4)) return null;
+      out += String.fromCharCode(parseInt(h4, 16));
+      i += 5;
+      continue;
+    }
+    return null;
+  }
+  return out;
+}
+
+function identCharFromCodePoint(cp) {
+  if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return '';
+  if (cp <= 0xFFFF) return String.fromCharCode(cp);
+  var cu = cp - 0x10000;
+  return String.fromCharCode(0xD800 + (cu >> 10), 0xDC00 + (cu & 0x3FF));
+}
+
+function isHex(ch) { return /[0-9a-fA-F]/.test(ch || ''); }
+
+function closeGroup(tokens, openIdx) {
+  var open = tokens[openIdx] ? tokens[openIdx].v : '';
+  var close = open === '(' ? ')' : open === '[' ? ']' : open === '{' ? '}' : '';
+  if (!close) return -1;
+  var depth = 0;
+  for (var i = openIdx; i < tokens.length; i++) {
+    var v = tokens[i].v;
+    if (v === open) depth++;
+    else if (v === close) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function isConsoleCall(tokens, ti) {
+  var dot = tokens[ti + 1];
+  var method = tokens[ti + 2];
+  var open = tokens[ti + 3];
+  if (!dot || !method || !open) return false;
+  if (dot.v !== '.' || open.v !== '(') return false;
+  return method.v === 'log' || method.v === 'debug' || method.v === 'info';
+}
+
+function matchParen(tokens, openIdx) {
+  var depth = 0;
+  for (var k = openIdx; k < tokens.length; k++) {
+    var v = tokens[k].v;
+    if (v === '(') depth++;
+    else if (v === ')') {
+      depth--;
+      if (depth === 0) return k;
+    }
+  }
+  return -1;
+}
+
+function classifySite(content, tokens, startIdx, endIdx, kind, filePath, scan) {
+  var startTok = tokens[startIdx];
+  var endTok = tokens[endIdx];
+  var endOffset = consumeStatementEnd(content, endTok.end);
+  // Token lines match the normalized source. Counting newlines from 0 on
+  // every site made a file of N logs take O(N^2) time.
+  var line = startTok.line;
+  var endLine = endTok.line;
+  var snippet = snippetAt(content, startTok.i, endOffset);
+  var boundary = boundaryReason(content, tokens, startIdx, scan);
+  if (boundary) return makeSite(filePath, kind, startTok, line, endLine, 'report-only', boundary, snippet);
+  if (!linesOnlyContainStatement(content, startTok.i, endOffset)) {
+    return makeSite(filePath, kind, startTok, line, endLine, 'report-only', 'sharing a line with other code', snippet);
+  }
+  var consumedSemi = content.slice(endTok.end, endOffset).indexOf(';') >= 0;
+  if (!consumedSemi) {
+    var next = tokens[endIdx + 1];
+    if (next && continuesExpression(next, endTok)) {
+      return makeSite(filePath, kind, startTok, line, endLine, 'report-only', 'part of an expression', snippet);
+    }
+  }
+  var commentReason = attachedCommentReason(content, tokens, startTok.i, endOffset, scan, line, endLine);
+  if (commentReason) return makeSite(filePath, kind, startTok, line, endLine, 'report-only', commentReason, snippet);
+  return makeSite(filePath, kind, startTok, line, endLine, 'appliable', '', snippet);
+}
+
+function makeSite(filePath, kind, startTok, line, endLine, status, reason, snippet) {
+  var id = 'remove-debug-statement:' + filePath + ':' + line + ':' + (startTok ? startTok.col : 1);
+  var summary = status === 'appliable'
+    ? 'Remove the standalone ' + kind + ' statement at line ' + line + ' in ' + filePath + '. This patch removes code.'
+    : 'The ' + kind + ' at line ' + line + ' in ' + filePath + ' is report-only because it is ' + reason + '.';
+  var site = {
+    findingId: id,
+    transformId: 'remove-debug-statement',
+    filePath: filePath,
+    line: line,
+    endLine: endLine,
+    column: startTok ? startTok.col : 1,
+    kind: kind,
+    status: status,
+    reason: reason,
+    summary: summary,
+    snippet: snippet
+  };
+  return site;
+}
+
+function snippetAt(content, start, end) {
+  var text = content.slice(start, end).replace(/\s+/g, ' ').trim();
+  if (text.length > 80) text = text.slice(0, 77) + '...';
+  return text;
+}
+
+function consumeStatementEnd(content, offset) {
+  var i = offset;
+  while (i < content.length && (content[i] === ' ' || content[i] === '\t')) i++;
+  if (content[i] === ';') i++;
+  return i;
+}
+
+function linesOnlyContainStatement(content, start, end) {
+  var lineStart = content.lastIndexOf('\n', start - 1) + 1;
+  var lineEnd = content.indexOf('\n', end);
+  if (lineEnd < 0) lineEnd = content.length;
+  var before = content.slice(lineStart, start);
+  if (!/^\s*$/.test(before)) return false;
+  var after = content.slice(end, lineEnd);
+  // A trailing line comment still means the line has no other code. classifySite
+  // rejects it so the comment is not deleted with the statement.
+  return /^\s*(?:\/\/.*)?$/.test(after);
+}
+
+// Directives that apply to the next line or the next statement. Deleting the
+// statement they point at would move that suppression onto the following code.
+var NEXT_LINE_DIRECTIVE_RE = /@ts-ignore\b|@ts-expect-error\b|eslint-disable-next-line\b|prettier-ignore\b|biome-ignore\b|istanbul\s+ignore\s+next\b|c8\s+ignore\s+next\b|v8\s+ignore\s+next\b|oxlint-disable-next-line\b|stylelint-disable-next-line\b|tslint:disable-next-line\b|coverage\s+ignore\s+next\b/;
+
+// Directives whose deletion changes more than the removed statement.
+var DIRECTIVE_RE = /@ts-ignore\b|@ts-expect-error\b|@ts-nocheck\b|@ts-check\b|eslint-disable\b|eslint-enable\b|eslint-env\b|prettier-ignore\b|biome-ignore\b|istanbul\s+ignore\b|c8\s+ignore\b|v8\s+ignore\b|oxlint-disable\b|stylelint-disable\b|tslint:disable\b|node:coverage\b|coverage\s+ignore\b/;
+
+function attachedCommentReason(content, tokens, start, end, scan, startLine, endLine) {
+  var lineEnd = content.indexOf('\n', end);
+  if (lineEnd < 0) lineEnd = content.length;
+  var after = content.slice(end, lineEnd);
+  if (after.indexOf('//') >= 0 || after.indexOf('/*') >= 0) return 'carrying a trailing comment';
+
+  var comments = scan.comments;
+  var prev = comments.byEnd[startLine - 1];
+  var c, comment, commentEnd, line, list;
+  if (prev) {
+    for (c = 0; c < prev.length; c++) {
+      comment = prev[c];
+      if (NEXT_LINE_DIRECTIVE_RE.test(comment.text)) return 'governed by a directive comment';
+    }
+  }
+  for (line = startLine; line <= endLine; line++) {
+    list = comments.byLine[line];
+    if (!list) continue;
+    for (c = 0; c < list.length; c++) {
+      comment = list[c];
+      commentEnd = commentEndLine(comment);
+      if (comment.line >= startLine && commentEnd <= endLine && DIRECTIVE_RE.test(comment.text)) {
+        return 'governed by a directive comment';
+      }
+    }
+  }
+  return '';
+}
+
+function commentEndLine(comment) {
+  var line = comment.line;
+  var text = comment.text || '';
+  for (var i = 0; i < text.length; i++) if (text.charAt(i) === '\n') line++;
+  return line;
+}
+
+// One forward pass for everything classifySite used to rescan from the
+// start of the file: expression nesting, block braces, the keyword that
+// owns a `)`, and which `{` a `}` closes. Comments are indexed by line so
+// directive checks are not O(sites × comments).
+function prepareStatementScan(tokens) {
+  var n = tokens.length;
+  var blockBrace = new Array(n);
+  var exprAt = new Array(n);
+  var parenKw = new Array(n);
+  var matchOpen = new Array(n);
+  var parenStack = [];
+  var braceStack = [];
+  var exprStack = [];
+  var confused = false;
+  var i;
+  for (i = 0; i < n; i++) {
+    var v = tokens[i].v;
+    if (confused) exprAt[i] = 'confused';
+    else {
+      var inner = exprStack.length ? exprStack[exprStack.length - 1] : null;
+      exprAt[i] = (inner === '(' || inner === '[' || inner === 'expr') ? 'expr' : null;
+    }
+    if (v === '{') {
+      var prev = i > 0 ? tokens[i - 1] : null;
+      var isBlock = false;
+      if (!prev) isBlock = true;
+      else if (prev.v === ';' || prev.v === '}' || prev.v === '=>' || prev.v === ')') isBlock = true;
+      else if (prev.v === '{') isBlock = !!blockBrace[i - 1];
+      else if (prev.t === 'kw' && (prev.v === 'else' || prev.v === 'try' || prev.v === 'finally' || prev.v === 'do' || prev.v === 'static')) isBlock = true;
+      blockBrace[i] = isBlock;
+      braceStack.push(i);
+      exprStack.push(isBlock ? 'block' : 'expr');
+      continue;
+    }
+    if (v === '${') {
+      braceStack.push(i);
+      exprStack.push('expr');
+      continue;
+    }
+    if (v === '(' || v === '[') {
+      if (v === '(') parenStack.push(i);
+      exprStack.push(v);
+      continue;
+    }
+    if (v !== ')' && v !== ']' && v !== '}') continue;
+    if (v === ')') {
+      var openParen = parenStack.length ? parenStack.pop() : -1;
+      if (openParen >= 0) parenKw[i] = keywordBeforeParen(tokens, openParen);
+    }
+    if (v === '}') {
+      var openBrace = braceStack.length ? braceStack.pop() : -1;
+      if (openBrace >= 0) matchOpen[i] = openBrace;
+    }
+    if (!exprStack.length) { confused = true; continue; }
+    var top = exprStack[exprStack.length - 1];
+    if (v === '}' && (top === 'block' || top === 'expr')) { exprStack.pop(); continue; }
+    if ((v === ')' && top === '(') || (v === ']' && top === '[')) { exprStack.pop(); continue; }
+    confused = true;
+    exprStack.pop();
+  }
+  return {
+    blockBrace: blockBrace,
+    exprAt: exprAt,
+    parenKw: parenKw,
+    matchOpen: matchOpen,
+    comments: indexDebugComments(tokens.comments || [])
+  };
+}
+
+function keywordBeforeParen(tokens, openIdx) {
+  var before = openIdx > 0 ? tokens[openIdx - 1] : null;
+  // `for await (...)` puts await immediately before the paren. The statement
+  // is still the body of the for, not a free statement.
+  if (before && before.t === 'kw' && before.v === 'await') {
+    var lead = openIdx > 1 ? tokens[openIdx - 2] : null;
+    if (lead && lead.t === 'kw' && lead.v === 'for') return 'for';
+  }
+  if (before && before.t === 'kw') return before.v;
+  return null;
+}
+
+function indexDebugComments(comments) {
+  var byEnd = Object.create(null);
+  var byLine = Object.create(null);
+  var c, comment, end, line, list;
+  for (c = 0; c < comments.length; c++) {
+    comment = comments[c];
+    end = commentEndLine(comment);
+    list = byEnd[end];
+    if (!list) byEnd[end] = list = [];
+    list.push(comment);
+    for (line = comment.line; line <= end; line++) {
+      list = byLine[line];
+      if (!list) byLine[line] = list = [];
+      list.push(comment);
+    }
+  }
+  return { byEnd: byEnd, byLine: byLine };
+}
+
+function boundaryReason(content, tokens, startIdx, scan) {
+  var prev = startIdx > 0 ? tokens[startIdx - 1] : null;
+  if (!prev) return null;
+  var context = scan.exprAt[startIdx];
+  if (context === 'confused') return 'could not be checked safely';
+  if (context === 'expr') return 'part of an expression';
+  if (prev.v === '=>') return 'inside a one-line arrow without braces';
+  if (prev.t === 'kw' && prev.v === 'else') return 'inside a one-line else without braces';
+  if (prev.t === 'kw' && prev.v === 'do') return 'inside a one-line do without braces';
+  if (prev.v === ')') {
+    var kw = scan.parenKw[startIdx - 1];
+    if (kw === 'if') return 'inside a one-line if without braces';
+    if (kw === 'for' || kw === 'while') return 'inside a one-line loop without braces';
+    if (kw === 'with') return 'inside a one-line with without braces';
+  }
+  if (prev.v === ';' || prev.v === '}') return null;
+  if (prev.v === '{') return scan.blockBrace[startIdx - 1] ? null : 'part of an expression';
+  if (prev.v === '${') return 'part of an expression';
+  if (prev.v === ':') return 'following a label';
+  if (hasNewlineBetween(content, prev, tokens[startIdx]) && canEndStatement(prev)) return null;
+  return 'part of an expression';
+}
+
+function canEndStatement(tok) {
+  if (!tok) return false;
+  if (tok.t === 'id' || tok.t === 'num' || tok.t === 'str' || tok.t === 're') return true;
+  if (tok.t === 'kw') {
+    return tok.v === 'this' || tok.v === 'null' || tok.v === 'true' || tok.v === 'false' ||
+      tok.v === 'return' || tok.v === 'throw' || tok.v === 'break' || tok.v === 'continue' ||
+      tok.v === 'debugger' || tok.v === 'yield';
+  }
+  return tok.v === ')' || tok.v === ']' || tok.v === '}' || tok.v === '++' || tok.v === '--';
+}
+
+function isBlockBrace(tokens, braceIdx) {
+  var prev = braceIdx > 0 ? tokens[braceIdx - 1] : null;
+  if (!prev) return true;
+  if (prev.v === ';' || prev.v === '}') return true;
+  if (prev.v === '{') return isBlockBrace(tokens, braceIdx - 1);
+  if (prev.v === '=>') return true;
+  if (prev.v === ')') return true;
+  if (prev.t === 'kw' && (prev.v === 'else' || prev.v === 'try' || prev.v === 'finally' || prev.v === 'do' || prev.v === 'static')) return true;
+  return false;
+}
+
+function hasNewlineBetween(content, prevTok, tok) {
+  return content.slice(prevTok.end, tok.i).indexOf('\n') >= 0;
+}
+
+function continuesExpression(tok, endTok) {
+  if (!tok) return false;
+  // `foo()\n`bar`` is one tagged-template expression. The opening backtick is
+  // its own token so a template on the next line is not mistaken for a new
+  // statement. `debugger` is not a tag expression, so a following template is
+  // a separate statement.
+  if (tok.t === 'tmpl') {
+    if (endTok && endTok.t === 'kw' && endTok.v === 'debugger') return false;
+    return true;
+  }
+  if (tok.t === 'kw' && (tok.v === 'in' || tok.v === 'instanceof')) return true;
+  // TypeScript `expr \n as T` and `expr \n satisfies T` are one expression.
+  // In plain JS those words are identifiers, so report-only is conservative.
+  if (tok.v === 'as' || tok.v === 'satisfies') return true;
+  if (tok.t !== 'p') return false;
+  return Object.prototype.hasOwnProperty.call(CONTINUE_OPS, tok.v);
+}
+
+var CONTINUE_OPS = {
+  '.': 1, '?.': 1, '(': 1, '[': 1, ',': 1,
+  '+': 1, '-': 1, '*': 1, '/': 1, '%': 1, '**': 1,
+  '++': 1, '--': 1,
+  '&&': 1, '||': 1, '??': 1, '?': 1, ':': 1,
+  '<': 1, '>': 1, '<=': 1, '>=': 1, '==': 1, '===': 1, '!=': 1, '!==': 1,
+  '&': 1, '|': 1, '^': 1, '<<': 1, '>>': 1, '>>>': 1,
+  '=': 1, '+=': 1, '-=': 1, '*=': 1, '/=': 1, '%=': 1,
+  '&=': 1, '|=': 1, '^=': 1, '<<=': 1, '>>=': 1, '>>>=': 1, '**=': 1, '&&=': 1, '||=': 1, '??=': 1
+};
+
+// Tokens that can continue the previous expression when a separating statement
+// disappears. `++` and `--` are absent on purpose: a newline before them is a
+// new prefix update, so ASI splits. Identifiers, strings, and `!` / `~` split too.
+var JOIN_HAZARD_OPS = {
+  '(': 1, '[': 1, ',': 1, '.': 1, '?.': 1, '?': 1, ':': 1,
+  '+': 1, '-': 1, '*': 1, '/': 1, '%': 1, '**': 1,
+  '&': 1, '|': 1, '^': 1, '<<': 1, '>>': 1, '>>>': 1,
+  '<': 1, '>': 1, '<=': 1, '>=': 1, '==': 1, '===': 1, '!=': 1, '!==': 1,
+  '&&': 1, '||': 1, '??': 1,
+  '=': 1, '+=': 1, '-=': 1, '*=': 1, '/=': 1, '%=': 1, '**=': 1,
+  '&=': 1, '|=': 1, '^=': 1, '<<=': 1, '>>=': 1, '>>>=': 1,
+  '&&=': 1, '||=': 1, '??=': 1
+};
+
+function markAsiJoinHazards(content, tokens, metas, scan) {
+  var n = tokens.length;
+  var removed = new Array(n);
+  var i;
+  for (i = 0; i < n; i++) removed[i] = false;
+  for (i = 0; i < metas.length; i++) {
+    var meta = metas[i];
+    if (!meta.site || meta.site.status !== 'appliable') continue;
+    var a;
+    for (a = meta.startIdx; a <= meta.endIdx && a < n; a++) removed[a] = true;
+    meta.semiIdx = consumedSemiIndex(content, tokens, meta.endIdx);
+    if (meta.semiIdx >= 0) removed[meta.semiIdx] = true;
+  }
+  // Nearest surviving token on each side, in one pass. Walking that gap from
+  // every site is quadratic when the file is a run of debug statements.
+  var prevLive = new Array(n);
+  var last = -1;
+  for (i = 0; i < n; i++) {
+    prevLive[i] = last;
+    if (!removed[i]) last = i;
+  }
+  var nextLive = new Array(n);
+  var nxt = n;
+  for (i = n - 1; i >= 0; i--) {
+    nextLive[i] = nxt;
+    if (!removed[i]) nxt = i;
+  }
+  for (i = 0; i < metas.length; i++) {
+    var siteMeta = metas[i];
+    if (!siteMeta.site || siteMeta.site.status !== 'appliable') continue;
+    var prev = prevLive[siteMeta.startIdx];
+    var after = siteMeta.semiIdx >= 0 ? siteMeta.semiIdx : siteMeta.endIdx;
+    var next = nextLive[after];
+    var nextTok = next < n ? tokens[next] : null;
+    if (isJoinHazard(nextTok) && !isHardStatementTerminator(tokens, prev, scan)) {
+      downgradeSite(siteMeta.site, 'separating statements that would join');
+    }
+  }
+}
+
+function consumedSemiIndex(content, tokens, endIdx) {
+  var semi = tokens[endIdx + 1];
+  if (!semi || semi.v !== ';') return -1;
+  var between = content.slice(tokens[endIdx].end, semi.i);
+  if (between.indexOf('\n') >= 0) return -1;
+  if (!/^[\t ]*$/.test(between)) return -1;
+  return endIdx + 1;
+}
+
+function isJoinHazard(tok) {
+  if (!tok) return false;
+  if (tok.t === 'tmpl' || tok.t === 're') return true;
+  if (tok.t === 'kw' && (tok.v === 'in' || tok.v === 'instanceof')) return true;
+  // TypeScript `as` / `satisfies` continue an expression. In plain JS they are
+  // identifiers, so leaving the site report-only is the conservative choice.
+  if (tok.v === 'as' || tok.v === 'satisfies') return true;
+  if (tok.t === 'p' && JOIN_HAZARD_OPS[tok.v]) return true;
+  return false;
+}
+
+// `;` or a `}` that actually ends a statement. An object literal or class
+// expression `}` does not: `x = { a: 1 }\n(bar)()` calls the object.
+function isHardStatementTerminator(tokens, idx, scan) {
+  if (idx < 0) return true;
+  var tok = tokens[idx];
+  if (!tok) return true;
+  if (tok.v === ';') return true;
+  if (tok.v === '}' && braceClosesStatement(tokens, idx, scan)) return true;
+  return false;
+}
+
+function braceClosesStatement(tokens, closeIdx, scan) {
+  var openIdx = scan && typeof scan.matchOpen[closeIdx] === 'number' ? scan.matchOpen[closeIdx] : matchingBraceOpen(tokens, closeIdx);
+  if (openIdx == null || openIdx < 0) return false;
+  if (tokens[openIdx].v === '${') return false;
+  var isBlock = scan && closeIdx >= 0 ? scan.blockBrace[openIdx] : isBlockBrace(tokens, openIdx);
+  if (isBlock) return true;
+  return declarationBrace(tokens, openIdx);
+}
+
+function matchingBraceOpen(tokens, closeIdx) {
+  var depth = 0;
+  for (var k = closeIdx; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === '}') depth++;
+    else if (v === '{' || v === '${') {
+      depth--;
+      if (depth === 0) return k;
+    }
+  }
+  return -1;
+}
+
+// `obj.__defineSetter__('log', fn)` is the pre-defineProperty way to replace a
+// method. On `console` any name matters; on a host only the name `console`.
+function defineAccessorWritesConsole(tokens, i, aliases, content) {
+  var tok = tokens[i];
+  if (!tok) return false;
+  var prev = i > 0 ? tokens[i - 1] : null;
+  if (prev && (prev.v === '.' || prev.v === '?.')) return false;
+  var receiverConsole = false;
+  var baseEnd = -1;
+  if ((tok.t === 'id' || tok.t === 'kw') && tok.v === 'console') {
+    receiverConsole = true;
+    baseEnd = i + 1;
+  } else if (tok.t === 'id' && aliases && aliases[tok.v]) {
+    receiverConsole = true;
+    baseEnd = i + 1;
+  } else if (isConsoleHost(tok)) {
+    var hostConsole = matchHostConsole(tokens, i, content);
+    if (hostConsole > i) {
+      receiverConsole = true;
+      baseEnd = hostConsole;
+    } else {
+      baseEnd = i + 1;
+    }
+  } else return false;
+  var method = memberNameAt(tokens, content, baseEnd);
+  if (!method || (method.name !== '__defineSetter__' && method.name !== '__defineGetter__')) return false;
+  if (!tokens[method.end] || tokens[method.end].v !== '(') return false;
+  if (receiverConsole) return true;
+  var first = argRange(tokens, method.end);
+  if (!first) return true;
+  var name = propertyNameText(tokens, content, first.start, first.end);
+  if (name == null) return true;
+  return name === 'console';
+}
+
+function declarationBrace(tokens, openIdx) {
+  var i = openIdx - 1;
+  var guard = 0;
+  while (i >= 0 && guard++ < 80) {
+    var tok = tokens[i];
+    var v = tok.v;
+    if (v === '>' || v === ')' || v === ']' || v === '>>' || v === '>>>') {
+      i = skipGroupBackward(tokens, i);
+      continue;
+    }
+    if (tok.t === 'kw' && (v === 'class' || v === 'enum')) return keywordStartsDeclaration(tokens, i);
+    if (tok.t === 'id' && (v === 'namespace' || v === 'module' || v === 'interface')) return keywordStartsDeclaration(tokens, i);
+    if (tok.t === 'id' || tok.t === 'str' || tok.t === 'num' ||
+        v === '.' || v === ',' || v === '?' || v === 'extends' || v === 'implements' ||
+        v === 'declare' || v === 'abstract' || v === 'public' || v === 'private' ||
+        v === 'protected' || v === 'readonly' || v === 'type' || v === 'async' ||
+        v === 'export' || v === 'default' || v === 'const') {
+      i--;
+      continue;
+    }
+    if (tok.t === 'kw' && (v === 'export' || v === 'default' || v === 'const' || v === 'async')) {
+      i--;
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
+function keywordStartsDeclaration(tokens, kwIdx) {
+  var prev = kwIdx > 0 ? tokens[kwIdx - 1] : null;
+  if (!prev) return true;
+  var v = prev.v;
+  if (v === ';' || v === '{' || v === '}') return true;
+  if (v === 'export' || v === 'default' || v === 'declare' || v === 'const' || v === 'abstract') return true;
+  return false;
+}
+
+function skipGroupBackward(tokens, closeIdx) {
+  var close = tokens[closeIdx] ? tokens[closeIdx].v : '';
+  var open = close === ')' ? '(' : close === ']' ? '[' : close === '}' ? '{' : close === '>' ? '<' : '';
+  var extra = 0;
+  if (close === '>>') { open = '<'; extra = 1; }
+  else if (close === '>>>') { open = '<'; extra = 2; }
+  if (!open) return closeIdx - 1;
+  var depth = 1 + extra;
+  for (var k = closeIdx - 1; k >= 0; k--) {
+    var v = tokens[k].v;
+    if (v === close && close !== '>>' && close !== '>>>') depth++;
+    else if (v === '>') depth++;
+    else if (v === '>>') depth += 2;
+    else if (v === '>>>') depth += 3;
+    else if (v === open || (open === '{' && v === '${')) {
+      depth--;
+      if (depth === 0) return k - 1;
+    }
+  }
+  return -1;
+}
+
+// Logical lines match the scanner (\r\n, bare \r, \n), but each diff line keeps
+// the bytes git apply sees when it splits the working tree on LF. A CRLF line
+// therefore ends with CR inside the patch; the patch record itself stays LF.
+function sourceLinesForDiff(content) {
+  var text = String(content);
+  var lines = [];
+  var start = 0;
+  var i = 0;
+  var endsWithNewline = false;
+  while (i < text.length) {
+    var ch = text.charAt(i);
+    if (ch === '\r' && text.charAt(i + 1) === '\n') {
+      lines.push(text.slice(start, i) + '\r');
+      i += 2;
+      start = i;
+      endsWithNewline = true;
+      continue;
+    }
+    if (ch === '\n' || ch === '\r') {
+      lines.push(text.slice(start, i));
+      i += 1;
+      start = i;
+      endsWithNewline = true;
+      continue;
+    }
+    i++;
+  }
+  if (start < text.length) {
+    lines.push(text.slice(start));
+    endsWithNewline = false;
+  }
+  return { lines: lines, endsWithNewline: endsWithNewline };
+}
+
+function buildUnifiedDiff(filePath, content, ranges, split) {
+  if (!split) split = sourceLinesForDiff(content);
+  var lines = split.lines;
+  var endsWithNewline = split.endsWithNewline;
+  var CONTEXT = 3;
+  var dels = ranges.map(function(r) {
+    return { start: r.start - 1, end: r.end };
+  }).filter(function(r) {
+    return r.start >= 0 && r.end > r.start;
+  }).map(function(r) {
+    return { start: r.start, end: Math.min(lines.length, r.end) };
+  }).filter(function(r) {
+    return r.end > r.start;
+  }).sort(function(a, b) { return a.start - b.start || a.end - b.end; });
+  var merged = [];
+  dels.forEach(function(r) {
+    if (!merged.length || r.start > merged[merged.length - 1].end) merged.push({ start: r.start, end: r.end });
+    else merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, r.end);
+  });
+  if (!merged.length) return '';
+  var hunks = [];
+  merged.forEach(function(r) {
+    var h = {
+      from: Math.max(0, r.start - CONTEXT),
+      to: Math.min(lines.length, r.end + CONTEXT),
+      dels: [r]
+    };
+    if (!hunks.length || h.from > hunks[hunks.length - 1].to) hunks.push(h);
+    else {
+      var prev = hunks[hunks.length - 1];
+      prev.to = Math.max(prev.to, h.to);
+      prev.dels.push(r);
+    }
+  });
+  var paths = diffPaths(filePath);
+  var out = [];
+  out.push('diff --git ' + paths.gitA + ' ' + paths.gitB);
+  out.push('--- ' + paths.oldP);
+  out.push('+++ ' + paths.newP);
+  var deletedBefore = 0;
+  hunks.forEach(function(h) {
+    var oldStart = h.from + 1;
+    var oldCount = h.to - h.from;
+    var removed = 0;
+    h.dels.forEach(function(d) { removed += d.end - d.start; });
+    var newCount = oldCount - removed;
+    var newStart = newCount === 0 ? 0 : (oldStart - deletedBefore);
+    out.push('@@ -' + oldStart + ',' + oldCount + ' +' + newStart + ',' + newCount + ' @@');
+    var delAt = 0;
+    for (var li = h.from; li < h.to; li++) {
+      while (delAt < h.dels.length && h.dels[delAt].end <= li) delAt++;
+      var inDel = delAt < h.dels.length && li >= h.dels[delAt].start && li < h.dels[delAt].end;
+      out.push((inDel ? '-' : ' ') + lines[li]);
+      if (li === lines.length - 1 && !endsWithNewline) out.push('\\ No newline at end of file');
+    }
+    deletedBefore += removed;
+  });
+  return out.join('\n') + '\n';
+}
+
+function diffPaths(filePath) {
+  var path = String(filePath || 'file').replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!path) path = 'file';
+  var a = quoteGitPath('a/' + path);
+  var b = quoteGitPath('b/' + path);
+  return { gitA: a, gitB: b, oldP: a, newP: b };
+}
+
+// Git's C quote (core.quotePath). Bytes below 0x20 or above 0x7e, plus
+// quote and backslash, are wrapped in double quotes. \a \b \t \n \v \f \r
+// \" \\ use the C names; every other quoted byte is a three-digit octal
+// escape of the UTF-8 value. A space is left bare, matching git.
+function quoteGitPath(path) {
+  var bytes = utf8Bytes(path);
+  var i;
+  var needs = false;
+  for (i = 0; i < bytes.length; i++) {
+    if (gitByteNeedsQuote(bytes[i])) { needs = true; break; }
+  }
+  if (!needs) return path;
+  var out = '"';
+  for (i = 0; i < bytes.length; i++) out += gitQuotedByte(bytes[i]);
+  return out + '"';
+}
+
+function gitByteNeedsQuote(b) {
+  return b === 0x22 || b === 0x5c || b < 0x20 || b >= 0x7f;
+}
+
+function gitQuotedByte(b) {
+  if (b === 0x07) return '\\a';
+  if (b === 0x08) return '\\b';
+  if (b === 0x09) return '\\t';
+  if (b === 0x0a) return '\\n';
+  if (b === 0x0b) return '\\v';
+  if (b === 0x0c) return '\\f';
+  if (b === 0x0d) return '\\r';
+  if (b === 0x22) return '\\"';
+  if (b === 0x5c) return '\\\\';
+  if (b < 0x20 || b >= 0x7f) {
+    var oct = b.toString(8);
+    while (oct.length < 3) oct = '0' + oct;
+    return '\\' + oct;
+  }
+  return String.fromCharCode(b);
+}
+
+function utf8Bytes(text) {
+  var bytes = [];
+  var i;
+  for (i = 0; i < text.length; i++) {
+    var c = text.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < text.length) {
+      var c2 = text.charCodeAt(i + 1);
+      if (c2 >= 0xDC00 && c2 <= 0xDFFF) {
+        c = 0x10000 + ((c - 0xD800) << 10) + (c2 - 0xDC00);
+        i++;
+      }
+    }
+    if (c < 0x80) bytes.push(c);
+    else if (c < 0x800) bytes.push(0xC0 | (c >> 6), 0x80 | (c & 0x3F));
+    else if (c < 0x10000) bytes.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 0x3F), 0x80 | (c & 0x3F));
+    else bytes.push(0xF0 | (c >> 18), 0x80 | ((c >> 12) & 0x3F), 0x80 | ((c >> 6) & 0x3F), 0x80 | (c & 0x3F));
+  }
+  return bytes;
+}
+
+var JS_KEYWORDS = {
+  break:1, case:1, catch:1, class:1, const:1, continue:1, debugger:1, default:1,
+  delete:1, do:1, else:1, export:1, extends:1, finally:1, for:1, function:1,
+  if:1, import:1, in:1, instanceof:1, new:1, return:1, static:1, super:1,
+  switch:1, this:1, throw:1, try:1, typeof:1, var:1, void:1, while:1, with:1,
+  yield:1, await:1, of:1, async:1, let:1, enum:1, null:1, true:1, false:1
+};
+
+var REGEX_AFTER_KEYWORD = {
+  return:1, throw:1, case:1, delete:1, void:1, typeof:1, instanceof:1, in:1, of:1,
+  new:1, yield:1, await:1, else:1, do:1
+};
+
+var MULTI_OPS = ['>>>=','>>=','<<=','&&=','||=','??=','===','!==','>>>','**=','=>','==','!=','<=','>=','&&','||','??','++','--','+=','-=','*=','/=','%=','&=','|=','^=','**','<<','>>','?.','...'];
+
+function tokenizeJs(content) {
+  var tokens = [];
+  tokens.comments = [];
+  var i = 0;
+  var n = content.length;
+  var line = 1;
+  var col = 1;
+  var canRegex = true;
+  var modes = ['code'];
+  var substExit = [];
+  var braceDepth = 0;
+
+  function bump(ch) {
+    if (ch === '\n') { line++; col = 1; }
+    else col++;
+  }
+  function push(tok) {
+    tokens.push(tok);
+    canRegex = regexAllowedAfter(tok);
+  }
+  function regexAllowedAfter(tok) {
+    if (!tok) return true;
+    if (tok.t === 'id' || tok.t === 'num' || tok.t === 'str' || tok.t === 're') return false;
+    if (tok.t === 'kw') return !!REGEX_AFTER_KEYWORD[tok.v];
+    if (tok.v === ')' || tok.v === ']' || tok.v === '++' || tok.v === '--') return false;
+    return true;
+  }
+
+  while (i < n) {
+    var mode = modes[modes.length - 1];
+    var ch = content[i];
+    if (mode === 'tmpl') {
+      if (ch === '\\') {
+        bump(ch); i++;
+        if (i < n) { bump(content[i]); i++; }
+        continue;
+      }
+      if (ch === '`') { bump(ch); i++; modes.pop(); push({ t:'str', v:'', i:i, end:i, line:line, col:col }); continue; }
+      if (ch === '$' && content[i + 1] === '{') {
+        var startLine = line, startCol = col, startI = i;
+        bump('$'); bump('{'); i += 2;
+        modes.pop();
+        braceDepth++;
+        substExit.push(braceDepth);
+        push({ t:'p', v:'${', i:startI, end:i, line:startLine, col:startCol });
+        continue;
+      }
+      bump(ch); i++;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n' || ch === '\f' || ch === '\v') { bump(ch); i++; continue; }
+    if (ch === '#' && i === 0 && content[1] === '!') {
+      while (i < n && content[i] !== '\n') { bump(content[i]); i++; }
+      continue;
+    }
+    if (ch === '/' && content[i + 1] === '/') {
+      var lineStart = i, lineLine = line;
+      while (i < n && content[i] !== '\n') { bump(content[i]); i++; }
+      tokens.comments.push({ i: lineStart, end: i, line: lineLine, text: content.slice(lineStart, i) });
+      continue;
+    }
+    if (ch === '/' && content[i + 1] === '*') {
+      var blockStart = i, blockLine = line;
+      bump(ch); bump('*'); i += 2;
+      while (i < n && !(content[i] === '*' && content[i + 1] === '/')) { bump(content[i]); i++; }
+      if (i < n) { bump('*'); bump('/'); i += 2; }
+      tokens.comments.push({ i: blockStart, end: i, line: blockLine, text: content.slice(blockStart, i) });
+      continue;
+    }
+    if (ch === '/' && canRegex) {
+      var savedI = i, savedLine = line, savedCol = col;
+      if (readRegex()) continue;
+      i = savedI; line = savedLine; col = savedCol;
+    }
+    if (ch === '\'' || ch === '"') {
+      var q = ch, startI = i, startLine = line, startCol = col;
+      bump(ch); i++;
+      while (i < n) {
+        var c = content[i];
+        if (c === '\\') { bump(c); i++; if (i < n) { bump(content[i]); i++; } continue; }
+        bump(c); i++;
+        if (c === q || c === '\n') break;
+      }
+      push({ t:'str', v:'', i:startI, end:i, line:startLine, col:startCol });
+      continue;
+    }
+    if (ch === '`') {
+      var tmplStart = i, tmplLine = line, tmplCol = col;
+      bump(ch); i++;
+      modes.push('tmpl');
+      push({ t:'tmpl', v:'`', i:tmplStart, end:i, line:tmplLine, col:tmplCol });
+      continue;
+    }
+    if (isDigit(ch) || (ch === '.' && isDigit(content[i + 1]))) {
+      var nStart = i, nLine = line, nCol = col;
+      consumeNumber();
+      push({ t:'num', v:content.slice(nStart, i), i:nStart, end:i, line:nLine, col:nCol });
+      continue;
+    }
+    if (isIdentStart(ch) || (ch === '\\' && content[i + 1] === 'u')) {
+      var wStart = i, wLine = line, wCol = col;
+      var decoded = readIdentifier();
+      if (i === wStart) {
+        // Malformed lead-in. The raw backslash path below flags the file.
+      } else {
+        var escapedKeyword = decoded.sawEscape && Object.prototype.hasOwnProperty.call(JS_KEYWORDS, decoded.word);
+        if (decoded.bad || escapedKeyword) tokens.unsafeIdentEscape = true;
+        // Unescaped names keep the historical keyword test, including inherited
+        // properties such as constructor. Escaped names use own properties only,
+        // and an escaped keyword is a syntax error handled via the flag above.
+        var asKeyword = escapedKeyword || (!decoded.sawEscape && !!JS_KEYWORDS[decoded.word]);
+        push({ t: asKeyword ? 'kw' : 'id', v: decoded.word, i: wStart, end: i, line: wLine, col: wCol });
+        continue;
+      }
+    }
+    if (ch === '\\') tokens.unsafeIdentEscape = true;
+    var opStart = i, opLine = line, opCol = col;
+    var op = readOperator();
+    for (var oi = 0; oi < op.length; oi++) bump(op.charAt(oi));
+    i += op.length;
+    if (op === '{') braceDepth++;
+    if (op === '}') {
+      braceDepth--;
+      if (substExit.length && braceDepth === substExit[substExit.length - 1] - 1) {
+        substExit.pop();
+        modes.push('tmpl');
+      }
+    }
+    push({ t:'p', v:op, i:opStart, end:i, line:opLine, col:opCol });
+  }
+  return tokens;
+
+  // Decode \uXXXX and \u{...} so `const \u0063onsole` is the binding `console`.
+  // A bad escape or an escaped reserved word is a syntax error; the caller flags
+  // the file and leaves every console call report-only.
+  function readIdentifier() {
+    var word = '';
+    var sawEscape = false;
+    var bad = false;
+    var first = true;
+    while (i < n) {
+      if (content[i] === '\\') {
+        var esc = readIdentEscapeAt(i);
+        if (!esc) { bad = true; break; }
+        var ech = identCharFromCodePoint(esc.cp);
+        var escOk = !!ech && (first ? isIdentStart(ech) : isIdentCont(ech));
+        var escEnd = esc.end;
+        while (i < escEnd) { bump(content[i]); i++; }
+        if (!escOk) { bad = true; break; }
+        word += ech;
+        sawEscape = true;
+        first = false;
+        continue;
+      }
+      var idCh = content[i];
+      if (!(first ? isIdentStart(idCh) : isIdentCont(idCh))) break;
+      word += idCh;
+      bump(idCh);
+      i++;
+      first = false;
+    }
+    return { word: word, sawEscape: sawEscape, bad: bad };
+  }
+  function readIdentEscapeAt(pos) {
+    if (content[pos] !== '\\' || content[pos + 1] !== 'u') return null;
+    if (content[pos + 2] === '{') {
+      var j = pos + 3;
+      var hex = '';
+      while (j < n && hex.length < 6 && /[0-9a-fA-F]/.test(content[j])) {
+        hex += content[j];
+        j++;
+      }
+      if (!hex || (hex.length === 6 && /[0-9a-fA-F]/.test(content[j] || '')) || content[j] !== '}') return null;
+      var cp = parseInt(hex, 16);
+      if (cp > 0x10FFFF) return null;
+      return { cp: cp, end: j + 1 };
+    }
+    var hex4 = content.substr(pos + 2, 4);
+    if (!/^[0-9a-fA-F]{4}$/.test(hex4)) return null;
+    return { cp: parseInt(hex4, 16), end: pos + 6 };
+  }
+  function identCharFromCodePoint(cp) {
+    if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return '';
+    if (cp <= 0xFFFF) return String.fromCharCode(cp);
+    var cu = cp - 0x10000;
+    return String.fromCharCode(0xD800 + (cu >> 10), 0xDC00 + (cu & 0x3FF));
+  }
+  function readRegex() {
+    bump('/'); i++;
+    var inClass = false;
+    while (i < n) {
+      var c = content[i];
+      if (c === '\n') return false;
+      if (c === '\\') {
+        bump(c); i++;
+        if (i < n) { bump(content[i]); i++; }
+        continue;
+      }
+      if (inClass) {
+        if (c === ']') inClass = false;
+        bump(c); i++;
+        continue;
+      }
+      if (c === '[') { inClass = true; bump(c); i++; continue; }
+      if (c === '/') {
+        bump(c); i++;
+        while (i < n && /[a-zA-Z]/.test(content[i])) { bump(content[i]); i++; }
+        push({ t:'re', v:content.slice(savedI, i), i:savedI, end:i, line:savedLine, col:savedCol });
+        return true;
+      }
+      bump(c); i++;
+    }
+    return false;
+  }
+  function consumeNumber() {
+    if (content[i] === '0' && /[xXoObB]/.test(content[i + 1] || '')) {
+      bump(content[i]); bump(content[i + 1]); i += 2;
+      while (i < n && /[0-9a-fA-F_]/.test(content[i])) { bump(content[i]); i++; }
+    } else {
+      while (i < n && /[0-9_]/.test(content[i])) { bump(content[i]); i++; }
+      if (content[i] === '.' && isDigit(content[i + 1])) {
+        bump('.'); i++;
+        while (i < n && /[0-9_]/.test(content[i])) { bump(content[i]); i++; }
+      }
+      if ((content[i] === 'e' || content[i] === 'E') && /[0-9]/.test(content[i + 1] === '+' || content[i + 1] === '-' ? content[i + 2] : content[i + 1])) {
+        bump(content[i]); i++;
+        if (content[i] === '+' || content[i] === '-') { bump(content[i]); i++; }
+        while (i < n && /[0-9_]/.test(content[i])) { bump(content[i]); i++; }
+      }
+    }
+    if (content[i] === 'n') { bump('n'); i++; }
+  }
+  function readOperator() {
+    var rest = content.substr(i, 4);
+    for (var k = 0; k < MULTI_OPS.length; k++) {
+      if (rest.indexOf(MULTI_OPS[k]) === 0) return MULTI_OPS[k];
+    }
+    return content.charAt(i);
+  }
+}
+
+function isDigit(ch) { return ch >= '0' && ch <= '9'; }
+function isIdentStart(ch) { return /[A-Za-z_$]/.test(ch || '') || (ch && ch.charCodeAt(0) > 127); }
+function isIdentCont(ch) { return /[A-Za-z0-9_$]/.test(ch || '') || (ch && ch.charCodeAt(0) > 127); }
+
+
+function formatSecurityIssueExport(issue, suggestions){
+    var row={severity:issue.severity,title:issue.title,description:issue.desc,file:issue.file,path:issue.path,line:issue.line,code:issue.code};
+    var patch=suggestions&&suggestions.filePatches&&issue?suggestions.filePatches[issue.path]:'';
+    if(issue&&issue.title==='Debug Statements'&&patch)row.patch=patch;
+    return row;
+}
+
+Parser.collectRemoveDebugStatementSuggestions=collectRemoveDebugStatementSuggestions;
+Parser.formatSecurityIssueExport=formatSecurityIssueExport;
+})();
+
 async function buildAnalysisData(options){
     var analyzed=options.analyzed||[];
     var allFns=options.allFns||[];
@@ -5424,6 +8334,7 @@ async function buildAnalysisData(options){
 
     progress('Finalizing (6/6)...');
     await yieldFn();
+    var refactorSuggestions=Parser.collectRemoveDebugStatementSuggestions(analyzed);
     analyzed.forEach(function(f){f.content=null;});
 
     var folders=[...new Set(analyzed.map(function(f){return f.folder;}))].sort();
@@ -5463,6 +8374,7 @@ async function buildAnalysisData(options){
         issues:issues,
         patterns:patterns,
         securityIssues:securityIssues,
+        refactorSuggestions:refactorSuggestions,
         duplicates:duplicates,
         layerViolations:layerViolations,
         architectureDiagram:architectureDiagram,
@@ -9155,7 +12067,27 @@ function compactAnalysisForCache(data){
         });
         copy.fnStats=stats;
     }
+    if(copy.refactorSuggestions&&typeof copy.refactorSuggestions==='object'){
+        copy.refactorSuggestions=stripSourceBearingRefactorSuggestions(copy.refactorSuggestions);
+    }
     return copy;
+}
+
+function stripSourceBearingRefactorSuggestions(pack){
+    if(!pack||typeof pack!=='object'||Array.isArray(pack))return pack;
+    var next=Object.assign({},pack);
+    delete next.combinedPatch;
+    delete next.filePatches;
+    if(Array.isArray(next.sites)){
+        next.sites=next.sites.map(function(site){
+            if(!site||typeof site!=='object')return site;
+            var copy=Object.assign({},site);
+            delete copy.snippet;
+            delete copy.patch;
+            return copy;
+        });
+    }
+    return next;
 }
 
 function openAnalysisCacheDb(){
@@ -13544,7 +16476,11 @@ function App(){
             });
         });
     }
-    function exportJSON(){if(!data)return;var blob=new Blob([JSON.stringify({stats:data.stats,files:data.files.map(function(f){return{path:f.path,fns:f.functions.length,layer:f.layer,lines:f.lines,dependencies:f.dependencies||[]};}),connections:data.connections,issues:data.issues,patterns:data.patterns,security:data.securityIssues,architectureDiagram:data.architectureDiagram},null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='codeflow-analysis.json';a.click();URL.revokeObjectURL(url);}
+    function downloadTextFile(filename,text,mime){if(!text)return;var blob=new Blob([text],{type:mime||'text/plain'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);}
+    function patchDownloadName(filePath){var base=String(filePath||'analysis').replace(/[^A-Za-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'');if(!base)base='analysis';return 'codeflow-remove-debug-'+base+'.patch';}
+    function renderPatchPreview(patch){if(!patch)return null;var lines=patch.split('\n');if(lines.length&&lines[lines.length-1]==='')lines.pop();return React.createElement('pre',{className:'patch-preview'},lines.map(function(line,idx){var cls='patch-line-ctx';if(line.indexOf('diff --git ')===0||line.indexOf('--- ')===0||line.indexOf('+++ ')===0||line.indexOf('@@')===0||line.charAt(0)==='\\')cls='patch-line-meta';else if(line.charAt(0)==='-')cls='patch-line-del';return React.createElement('div',{key:idx,className:cls},line.length?line:' ');}));}
+    function renderDebugPatchSites(filePath){var pack=data&&data.refactorSuggestions;if(!pack||!pack.sites||!pack.sites.length)return null;var sites=pack.sites.filter(function(site){return !filePath||site.filePath===filePath;});if(!sites.length)return null;var fileKeys=[];var grouped={};sites.forEach(function(site){if(!grouped[site.filePath]){grouped[site.filePath]=[];fileKeys.push(site.filePath);}grouped[site.filePath].push(site);});var appliable=sites.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{className:'debug-patch-panel'},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:12,fontWeight:600}},'Debug statement patches'),!filePath&&pack.combinedPatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile('codeflow-remove-debug-statement.patch',pack.combinedPatch,'text/x-diff');}},'Download all .patch'):null),React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginBottom:8,lineHeight:1.4}},appliable+' safe removal'+(appliable===1?'':'s')+' · '+(sites.length-appliable)+' report-only. Codeflow does not modify your files. Apply a downloaded patch from the repo root with git apply. A single-statement patch targets the original file; the combined patch removes every safe statement together.'),fileKeys.map(function(path){var group=grouped[path];var filePatch=pack.filePatches&&pack.filePatches[path];var safeCount=group.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{key:path,style:{marginBottom:12}},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:10,fontFamily:'monospace',color:'var(--t1)',wordBreak:'break-all'}},path),filePatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(path),filePatch,'text/x-diff');}},'Download file .patch'):null),safeCount>1?React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:6}},'Remove '+safeCount+' standalone debug statements in '+path+'. This patch removes code.'):null,group.map(function(site){return React.createElement('div',{key:site.findingId,className:'debug-patch-card'},React.createElement('div',{style:{fontSize:10,color:'var(--t1)',marginBottom:4,lineHeight:1.4}},site.summary),site.status==='report-only'?React.createElement('div',{className:'debug-patch-reason'},'Report only: '+site.reason):null,site.snippet?React.createElement('div',{className:'security-code'},site.snippet):null,site.status==='appliable'?renderPatchPreview(site.patch):null,site.status==='appliable'&&site.patch?React.createElement('button',{className:'view-file-btn',style:{marginTop:8},onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(site.filePath+'-L'+site.line),site.patch,'text/x-diff');}},'Download .patch'):null);}));}));}
+    function exportJSON(){if(!data)return;var blob=new Blob([JSON.stringify({stats:data.stats,files:data.files.map(function(f){return{path:f.path,fns:f.functions.length,layer:f.layer,lines:f.lines,dependencies:f.dependencies||[]};}),connections:data.connections,issues:data.issues,patterns:data.patterns,security:data.securityIssues,architectureDiagram:data.architectureDiagram,refactorSuggestions:data.refactorSuggestions||null},null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='codeflow-analysis.json';a.click();URL.revokeObjectURL(url);}
     function getAnalysisSourceLabel(){
         if(localSourceKind==='folder')return(repoInfo&&repoInfo.name)||'Local Folder';
         if(localSourceKind==='zip')return repoInfo&&repoInfo.name?repoInfo.name:'ZIP Archive';
@@ -13612,7 +16548,8 @@ function App(){
             }),
             architectureIssues:data.issues.map(function(i){return{type:i.type,title:i.title,description:i.desc,affectedFiles:i.items?i.items.map(function(x){return x.file||x.name;}):[],affectedItems:i.items||[]};}),
             patterns:data.patterns.map(function(p){return{name:p.name,description:p.desc,isAntiPattern:p.isAnti||false,severity:p.severity||'info',icon:p.icon||'',files:p.files.map(function(f){return f.path||f.name;}),fileDetails:p.files||[],metrics:p.metrics||{}};}),
-            securityIssues:data.securityIssues.map(function(s){return{severity:s.severity,title:s.title,description:s.desc,file:s.file,path:s.path,line:s.line,code:s.code};}),
+            securityIssues:data.securityIssues.map(function(s){return Parser.formatSecurityIssueExport(s,data.refactorSuggestions);}),
+            refactorSuggestions:(data.refactorSuggestions&&data.refactorSuggestions.sites)||[],
             duplicates:data.duplicates||[],
             layerViolations:data.layerViolations||[],
             suggestions:data.suggestions||[],
@@ -14903,6 +17840,7 @@ function App(){
                         ),
                         rightTab==='security'&&React.createElement(React.Fragment,null,
                             React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},React.createElement(Icon,{name:'security',size:'m'}),' Security Analysis'),
+                            renderDebugPatchSites(null),
                             data.securityIssues.length===0?React.createElement('div',{style:{textAlign:'center',padding:20}},React.createElement(Icon,{name:'security',size:'xxl',className:'empty-icon'}),React.createElement('div',{style:{color:'var(--green)',fontWeight:600}},'No security issues found!'),React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginTop:8}},'Your code passed all security checks')):
                             React.createElement(React.Fragment,null,
                                 React.createElement('div',{style:{display:'flex',gap:8,marginBottom:12}},
@@ -14917,6 +17855,7 @@ function App(){
                                         React.createElement('span',{className:'security-title'},issue.title)
                                     ),
                                     React.createElement('div',{className:'security-desc'},issue.desc),
+                                    issue.title==='Debug Statements'&&data.refactorSuggestions&&data.refactorSuggestions.filePatches&&data.refactorSuggestions.filePatches[issue.path]&&React.createElement('div',{style:{fontSize:9,color:'var(--green)',marginTop:4}},'Patch available'),
                                     React.createElement('div',{style:{fontSize:9,color:'var(--acc)',marginTop:6}},'Click for details →'),
                                     issue.code&&React.createElement('div',{className:'security-code'},issue.code)
                                 );})
@@ -15266,8 +18205,10 @@ function App(){
                             drillDown.data.title==='SQL Injection Risk'?'Use parameterized queries or prepared statements. Never concatenate user input directly into SQL strings.':
                             drillDown.data.title==='XSS Vulnerability'?'Sanitize user input before rendering. Use textContent instead of innerHTML, or use a sanitization library like DOMPurify.':
                             drillDown.data.title==='Dynamic Code Execution'?'Avoid eval() entirely. Use JSON.parse() for JSON, or Function constructor only with trusted input.':
+                            drillDown.data.title==='Debug Statements'?'Download a .patch and apply it yourself from the repo root with git apply. Codeflow never modifies your files. Only a standalone console.log, console.debug, console.info, or debugger statement is included.':
                             'Review the flagged code and apply security best practices.'
-                        )
+                        ),
+                        drillDown.data.title==='Debug Statements'&&renderDebugPatchSites(drillDown.data.path)
                     ),
                     // Duplicate drill-down
                     drillDown.type==='duplicate'&&React.createElement(React.Fragment,null,
