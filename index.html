@@ -5246,6 +5246,24 @@ function isJsOrTsPath(path) {
   return /\.(?:[cm]js|[cm]ts|jsx?|tsx?)$/i.test(path || '');
 }
 
+// `.mjs` / `.mts` are modules, so they are strict even with no import.
+function isAlwaysStrictModulePath(path) {
+  return /\.m[jt]s$/i.test(path || '');
+}
+
+function hasModuleSyntax(tokens) {
+  for (var i = 0; i < tokens.length; i++) {
+    var tok = tokens[i];
+    if (tok.t === 'kw' && tok.v === 'export') return true;
+    if (tok.t !== 'kw' || tok.v !== 'import') continue;
+    var next = tokens[i + 1];
+    // `import()` is a dynamic import and can appear in a script.
+    if (next && next.v === '(') continue;
+    return true;
+  }
+  return false;
+}
+
 function nonJsDebugFinding(content) {
   var matches = String(content).match(/console\.(log|debug|info)\(/g);
   return !!(matches && matches.length > 3);
@@ -5262,7 +5280,7 @@ function hasBareCarriageReturn(content) {
 function findDebugSites(content, filePath) {
   var normalized = String(content).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   var tokens = tokenizeJs(normalized);
-  var consoleShadowed = consoleShadowPredicate(tokens);
+  var consoleShadowed = consoleShadowPredicate(tokens, filePath, normalized);
   var sites = [];
   for (var ti = 0; ti < tokens.length; ti++) {
     var tok = tokens[ti];
@@ -5300,42 +5318,77 @@ function consoleReferenceReason(tokens, ti, consoleShadowed) {
   var prev = ti > 0 ? tokens[ti - 1] : null;
   if (prev && (prev.v === '.' || prev.v === '?.')) return 'not the global console';
   try {
-    if (consoleShadowed(ti)) return 'shadowed by a local console binding';
+    return consoleShadowed(ti) || '';
   } catch (err) {
     return 'shadowed by a local console binding';
   }
-  return '';
 }
 
-function consoleShadowPredicate(tokens) {
+function consoleShadowPredicate(tokens, filePath, content) {
   try {
-    return consoleShadowAt(tokens);
+    return consoleShadowAt(tokens, filePath, content);
   } catch (err) {
-    return function() { return true; };
+    return function() { return 'shadowed by a local console binding'; };
   }
 }
 
 // True when a local `console` binding (parameter, import, declaration, catch,
 // class name, namespace, module, enum, export-default name, or `with` object)
 // is in scope. Identifier escapes are decoded before this runs. Member calls
-// are rejected separately. A failure to resolve the binding is treated as
-// shadowed so the patch stays report-only.
-function consoleShadowAt(tokens) {
+// are rejected separately. A direct `eval(...)` in a sloppy function, or any
+// other call that can inject a `console` binding (`(0, eval)`, `eval?.()`,
+// `new Function`), keeps the affected calls report-only. A failure to resolve
+// the binding is treated as shadowed so the patch stays report-only.
+function consoleShadowAt(tokens, filePath, content) {
   var n = tokens.length;
   var scopes = [];
   var stack = [];
 
   function peek(i) { return i >= 0 && i < n ? tokens[i] : null; }
+  var fileDynamic = false;
+
   function pushScope(functionLike, start, kind) {
+    var parent = stack.length ? stack[stack.length - 1] : -1;
     scopes.push({
-      parent: stack.length ? stack[stack.length - 1] : -1,
+      parent: parent,
       binds: false,
       functionLike: !!functionLike,
       start: start,
       end: n,
-      kind: kind || ''
+      kind: kind || '',
+      strict: parent >= 0 ? !!scopes[parent].strict : false,
+      directEval: false
     });
     stack.push(scopes.length - 1);
+  }
+
+  // A Use Strict Directive is the exact source `"use strict"` or `'use strict'`,
+  // alone as an expression statement in the prologue. Escapes do not count.
+  function strictDirectiveAt(i) {
+    var guard = 0;
+    while (i < n && guard++ < 64) {
+      var tok = peek(i);
+      if (!tok || tok.t !== 'str') return false;
+      var exact = isExactUseStrict(tok);
+      var next = peek(i + 1);
+      if (next && next.v === ';') {
+        if (exact) return true;
+        i += 2;
+        continue;
+      }
+      if (!next || next.v === '}' || next.line > tok.line) {
+        if (exact) return true;
+        if (!next || next.v === '}') return false;
+        i++;
+        continue;
+      }
+      return false;
+    }
+    return false;
+  }
+  function isExactUseStrict(tok) {
+    var raw = String(content || '').slice(tok.i, tok.end);
+    return raw === '"use strict"' || raw === "'use strict'";
   }
   function popScope(end) {
     if (stack.length <= 1) return;
@@ -5356,6 +5409,9 @@ function consoleShadowAt(tokens) {
   }
 
   pushScope(true, 0, 'script');
+  if (isAlwaysStrictModulePath(filePath) || hasModuleSyntax(tokens) || strictDirectiveAt(0)) {
+    scopes[0].strict = true;
+  }
 
   function skipType(i) {
     if (!peek(i) || peek(i).v !== ':') return i;
@@ -5555,7 +5611,10 @@ function consoleShadowAt(tokens) {
   }
 
   function arrowBody(i) {
-    if (peek(i) && peek(i).v === '{') return block(i);
+    if (peek(i) && peek(i).v === '{') {
+      if (strictDirectiveAt(i + 1)) scopes[stack[stack.length - 1]].strict = true;
+      return block(i);
+    }
     return expression(i, { stopComma: true });
   }
 
@@ -5603,8 +5662,10 @@ function consoleShadowAt(tokens) {
       if (fname === 'console') markLet();
       i = params(i);
       if (peek(i) && peek(i).v === ':') i = skipType(i);
-      if (peek(i) && peek(i).v === '{') i = block(i);
-      else if (peek(i) && peek(i).v === ';') i++;
+      if (peek(i) && peek(i).v === '{') {
+        if (strictDirectiveAt(i + 1)) scopes[stack[stack.length - 1]].strict = true;
+        i = block(i);
+      } else if (peek(i) && peek(i).v === ';') i++;
       popScope(i);
       return i;
     }
@@ -5631,6 +5692,8 @@ function consoleShadowAt(tokens) {
     }
     if (peek(i) && peek(i).v === '{') {
       pushScope(false, i, 'class');
+      // Class bodies, methods, fields, and static blocks are always strict.
+      scopes[stack[stack.length - 1]].strict = true;
       if (name === 'console') markLet();
       i = classBody(i);
       popScope(i);
@@ -6018,13 +6081,145 @@ function consoleShadowAt(tokens) {
     index = next > index ? next : index + 1;
   }
 
+  // Direct eval is resolved from tokens, not from how far the walker got, so a
+  // `for (...)` header or an object method still counts. When the enclosing
+  // scope cannot be proved strict, the nearest sloppy function (or the script)
+  // stays report-only. Indirect eval and the Function constructor can replace
+  // the global console, so the whole file stays report-only.
+  scanDynamicScope();
+
   return function(tokenIndex) {
+    if (fileDynamic) return 'in a file where dynamic code may shadow console';
+    var binding = '';
+    var evalReason = '';
     for (var s = 0; s < scopes.length; s++) {
       var scope = scopes[s];
-      if (scope.binds && tokenIndex >= scope.start && tokenIndex < scope.end) return true;
+      if (tokenIndex < scope.start || tokenIndex >= scope.end) continue;
+      if (scope.binds) binding = 'shadowed by a local console binding';
+      if (scope.directEval) evalReason = 'in a scope where direct eval may shadow console';
+    }
+    return binding || evalReason;
+  };
+
+  function scanDynamicScope() {
+    for (var i = 0; i < n; i++) {
+      var tok = tokens[i];
+      if (tok.t === 'id' && tok.v === 'Function' && isFunctionConstructor(i)) {
+        fileDynamic = true;
+        continue;
+      }
+      if (!(tok.t === 'id' && tok.v === 'eval')) continue;
+      var use = classifyEvalUse(i);
+      if (use === 'direct') poisonDirectEval(i);
+      else if (use === 'global') fileDynamic = true;
+    }
+  }
+
+  // `new Function(...)` and a call named Function. A `function Function`
+  // declaration is not the constructor. A method named Function is treated
+  // as a call anyway: report-only is safer than guessing object-literal shape.
+  function isFunctionConstructor(i) {
+    var prev = i > 0 ? tokens[i - 1] : null;
+    if (prev && prev.t === 'kw' && prev.v === 'function') return false;
+    if (prev && prev.v === '*') {
+      var lead = tokens[i - 2];
+      if (lead && lead.t === 'kw' && lead.v === 'function') return false;
+    }
+    if (prev && prev.t === 'kw' && prev.v === 'new') return true;
+    var next = peek(i + 1);
+    if (next && next.v === '(') return true;
+    if (next && next.v === '?.' && peek(i + 2) && peek(i + 2).v === '(') return true;
+    return false;
+  }
+
+  function poisonDirectEval(tokenIndex) {
+    var s = innermostScope(tokenIndex);
+    while (s >= 0) {
+      if (scopes[s].strict) return;
+      if (scopes[s].functionLike) {
+        scopes[s].directEval = true;
+        return;
+      }
+      s = scopes[s].parent;
+    }
+  }
+
+  function innermostScope(tokenIndex) {
+    var best = 0;
+    var bestStart = -1;
+    for (var s = 0; s < scopes.length; s++) {
+      var scope = scopes[s];
+      if (tokenIndex >= scope.start && tokenIndex < scope.end && scope.start >= bestStart) {
+        best = s;
+        bestStart = scope.start;
+      }
+    }
+    return best;
+  }
+
+  function classifyEvalUse(i) {
+    var prev = i > 0 ? tokens[i - 1] : null;
+    var next = peek(i + 1);
+    if (prev && (prev.v === '.' || prev.v === '?.')) {
+      if (next && (next.v === '(' || (next.v === '?.' && peek(i + 2) && peek(i + 2).v === '('))) return 'global';
+      // `(obj.eval)(code)` is still an indirect eval call.
+      if (isParenthesizedEvalCall(i)) return 'global';
+      return '';
+    }
+    if (next && next.v === '(') return 'direct';
+    // `eval?.()` and `eval.call` / `eval.apply` / `eval.bind` are indirect.
+    if (next && next.v === '?.' && peek(i + 2) && peek(i + 2).v === '(') return 'global';
+    if (next && next.v === '.') {
+      var prop = peek(i + 2);
+      if (prop && (prop.v === 'call' || prop.v === 'apply' || prop.v === 'bind')) return 'global';
+    }
+    if (isParenthesizedEvalCall(i)) return onlyWrappedEval(i) ? 'direct' : 'global';
+    return '';
+  }
+
+  function onlyWrappedEval(i) {
+    var a = i - 1;
+    while (a >= 0 && tokens[a].v === '(') a--;
+    if (a === i - 1) return false;
+    var b = i + 1;
+    while (b < n && tokens[b].v === ')') b++;
+    return !!(tokens[b] && tokens[b].v === '(');
+  }
+
+  // True when some parenthesized group that contains this `eval` is itself
+  // called: `(eval)(`, `(0, eval)(`, and `((0, eval))(`.
+  function isParenthesizedEvalCall(i) {
+    var starts = [];
+    var depth = 0;
+    for (var j = 0; j <= i; j++) {
+      if (tokens[j].v === '(') {
+        depth++;
+        starts[depth] = j;
+      } else if (tokens[j].v === ')') {
+        if (depth > 0) depth--;
+      }
+    }
+    for (var d = depth; d >= 1; d--) {
+      var open = starts[d];
+      if (open == null) continue;
+      var dd = 0;
+      for (var k = open; k < n; k++) {
+        if (tokens[k].v === '(') dd++;
+        else if (tokens[k].v === ')') {
+          dd--;
+          if (dd === 0) {
+            if (tokens[k + 1] && tokens[k + 1].v === '(') {
+              var before = tokens[open - 1];
+              if (before && (before.v === '.' || before.v === '?.')) return false;
+              return true;
+            }
+            break;
+          }
+        }
+      }
     }
     return false;
-  };
+  }
 }
 
 function isConsoleCall(tokens, ti) {
@@ -6068,6 +6263,8 @@ function classifySite(content, tokens, startIdx, endIdx, kind, filePath) {
       return makeSite(filePath, kind, startTok, line, endLine, 'report-only', 'part of an expression', snippet);
     }
   }
+  var commentReason = attachedCommentReason(content, tokens, startTok.i, endOffset);
+  if (commentReason) return makeSite(filePath, kind, startTok, line, endLine, 'report-only', commentReason, snippet);
   return makeSite(filePath, kind, startTok, line, endLine, 'appliable', '', snippet);
 }
 
@@ -6119,7 +6316,46 @@ function linesOnlyContainStatement(content, start, end) {
   var before = content.slice(lineStart, start);
   if (!/^\s*$/.test(before)) return false;
   var after = content.slice(end, lineEnd);
+  // A trailing line comment still means the line has no other code. classifySite
+  // rejects it so the comment is not deleted with the statement.
   return /^\s*(?:\/\/.*)?$/.test(after);
+}
+
+// Directives that apply to the next line or the next statement. Deleting the
+// statement they point at would move that suppression onto the following code.
+var NEXT_LINE_DIRECTIVE_RE = /@ts-ignore\b|@ts-expect-error\b|eslint-disable-next-line\b|prettier-ignore\b|biome-ignore\b|istanbul\s+ignore\s+next\b|c8\s+ignore\s+next\b|v8\s+ignore\s+next\b|oxlint-disable-next-line\b|stylelint-disable-next-line\b|tslint:disable-next-line\b|coverage\s+ignore\s+next\b/;
+
+// Directives whose deletion changes more than the removed statement.
+var DIRECTIVE_RE = /@ts-ignore\b|@ts-expect-error\b|@ts-nocheck\b|@ts-check\b|eslint-disable\b|eslint-enable\b|eslint-env\b|prettier-ignore\b|biome-ignore\b|istanbul\s+ignore\b|c8\s+ignore\b|v8\s+ignore\b|oxlint-disable\b|stylelint-disable\b|tslint:disable\b|node:coverage\b|coverage\s+ignore\b/;
+
+function attachedCommentReason(content, tokens, start, end) {
+  var lineEnd = content.indexOf('\n', end);
+  if (lineEnd < 0) lineEnd = content.length;
+  var after = content.slice(end, lineEnd);
+  if (after.indexOf('//') >= 0 || after.indexOf('/*') >= 0) return 'carrying a trailing comment';
+
+  var startLine = lineNumberAt(content, start);
+  var endLine = lineNumberAt(content, Math.max(start, end - 1));
+  var comments = tokens.comments || [];
+  var c;
+  for (c = 0; c < comments.length; c++) {
+    var comment = comments[c];
+    var commentEnd = commentEndLine(comment);
+    if (commentEnd === startLine - 1 && NEXT_LINE_DIRECTIVE_RE.test(comment.text)) {
+      return 'governed by a directive comment';
+    }
+    if (comment.line >= startLine && commentEnd <= endLine && DIRECTIVE_RE.test(comment.text)) {
+      return 'governed by a directive comment';
+    }
+  }
+  return '';
+}
+
+function commentEndLine(comment) {
+  var line = comment.line;
+  var text = comment.text || '';
+  for (var i = 0; i < text.length; i++) if (text.charAt(i) === '\n') line++;
+  return line;
 }
 
 function boundaryReason(content, tokens, startIdx) {
@@ -6367,6 +6603,7 @@ var MULTI_OPS = ['>>>=','>>=','<<=','&&=','||=','??=','===','!==','>>>','**=','=
 
 function tokenizeJs(content) {
   var tokens = [];
+  tokens.comments = [];
   var i = 0;
   var n = content.length;
   var line = 1;
@@ -6420,13 +6657,17 @@ function tokenizeJs(content) {
       continue;
     }
     if (ch === '/' && content[i + 1] === '/') {
+      var lineStart = i, lineLine = line;
       while (i < n && content[i] !== '\n') { bump(content[i]); i++; }
+      tokens.comments.push({ i: lineStart, end: i, line: lineLine, text: content.slice(lineStart, i) });
       continue;
     }
     if (ch === '/' && content[i + 1] === '*') {
+      var blockStart = i, blockLine = line;
       bump(ch); bump('*'); i += 2;
       while (i < n && !(content[i] === '*' && content[i + 1] === '/')) { bump(content[i]); i++; }
       if (i < n) { bump('*'); bump('/'); i += 2; }
+      tokens.comments.push({ i: blockStart, end: i, line: blockLine, text: content.slice(blockStart, i) });
       continue;
     }
     if (ch === '/' && canRegex) {

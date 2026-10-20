@@ -775,6 +775,260 @@ test('escaped console bindings stay report-only', async () => {
   assert.doesNotMatch(applied['src/other.ts'], /console\.log\(5\)/);
 });
 
+function lineOf(source, exact) {
+  const idx = source.split('\n').findIndex((line) => line === exact);
+  if (idx < 0) throw new Error('missing line: ' + exact);
+  return idx + 1;
+}
+
+test('trailing comments and directive comments stay report-only', async () => {
+  const source = [
+    'function run(x) {',
+    '  console.log(x);',
+    '  console.log(x); // @ts-ignore',
+    '  const broken: number = "no";',
+    '  console.debug(x); // eslint-disable-next-line no-console',
+    '  debugger; // @ts-expect-error',
+    '  console.info(x); // prettier-ignore',
+    '  console.log(x); // biome-ignore lint: debug',
+    '  console.log(x); // istanbul ignore next',
+    '  console.log(x); /* eslint-disable-next-line */',
+    '  // @ts-ignore',
+    '  console.log(x);',
+    '  /* eslint-disable-next-line no-console */',
+    '  console.debug(x);',
+    '  /* c8 ignore next */',
+    '  console.info(x);',
+    '  // @ts-nocheck',
+    '  console.log(x);',
+    '  // note only',
+    '  console.log(x);',
+    '  // @ts-ignore',
+    '',
+    '  console.log(x);',
+    '  console.log(',
+    '    x // value',
+    '  );',
+    '  console.log(',
+    '    // @ts-nocheck',
+    '    x',
+    '  );',
+    '  console.log(x);',
+    '  // @ts-ignore',
+    '  keep(x);',
+    '  return x;',
+    '}',
+    '',
+  ].join('\n');
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/directives.ts', content: source },
+  ]);
+  const byLine = Object.fromEntries(suggestions.sites.map((site) => [site.line, site]));
+  const at = (exact) => byLine[lineOf(source, exact)];
+
+  assert.equal(at('  console.log(x);').status, 'appliable');
+  assert.equal(at('  console.log(x); // @ts-ignore').status, 'report-only');
+  assert.equal(at('  console.log(x); // @ts-ignore').reason, 'carrying a trailing comment');
+  assert.equal(at('  console.log(x); // @ts-ignore').patch, undefined);
+  assert.equal(at('  console.debug(x); // eslint-disable-next-line no-console').reason, 'carrying a trailing comment');
+  assert.equal(at('  debugger; // @ts-expect-error').reason, 'carrying a trailing comment');
+  assert.equal(at('  console.info(x); // prettier-ignore').reason, 'carrying a trailing comment');
+  assert.equal(at('  console.log(x); // biome-ignore lint: debug').reason, 'carrying a trailing comment');
+  assert.equal(at('  console.log(x); // istanbul ignore next').reason, 'carrying a trailing comment');
+  assert.equal(at('  console.log(x); /* eslint-disable-next-line */').status, 'report-only');
+  assert.equal(at('  console.log(x); /* eslint-disable-next-line */').patch, undefined);
+
+  const preceded = source.split('\n');
+  const ignoreNext = preceded.findIndex((line, index) => line === '  console.log(x);' && preceded[index - 1] === '  // @ts-ignore');
+  assert.equal(byLine[ignoreNext + 1].status, 'report-only');
+  assert.equal(byLine[ignoreNext + 1].reason, 'governed by a directive comment');
+  assert.equal(byLine[ignoreNext + 1].patch, undefined);
+  const eslintNext = preceded.findIndex((line, index) => line === '  console.debug(x);' && preceded[index - 1] === '  /* eslint-disable-next-line no-console */');
+  assert.equal(byLine[eslintNext + 1].reason, 'governed by a directive comment');
+  const c8Next = preceded.findIndex((line, index) => line === '  console.info(x);' && preceded[index - 1] === '  /* c8 ignore next */');
+  assert.equal(byLine[c8Next + 1].reason, 'governed by a directive comment');
+
+  const nocheck = preceded.findIndex((line, index) => line === '  console.log(x);' && preceded[index - 1] === '  // @ts-nocheck');
+  assert.equal(byLine[nocheck + 1].status, 'appliable');
+  const note = preceded.findIndex((line, index) => line === '  console.log(x);' && preceded[index - 1] === '  // note only');
+  assert.equal(byLine[note + 1].status, 'appliable');
+  const blank = preceded.findIndex((line, index) => line === '  console.log(x);' && preceded[index - 1] === '' && preceded[index - 2] === '  // @ts-ignore');
+  assert.equal(byLine[blank + 1].status, 'appliable');
+  assert.equal(at('  console.log(').status, 'appliable');
+  assert.equal(byLine[lineOf(source, '    // @ts-nocheck')], undefined);
+  const nocheckCall = preceded.findIndex((line, index) => line === '  console.log(' && preceded[index + 1] === '    // @ts-nocheck');
+  assert.equal(byLine[nocheckCall + 1].status, 'report-only');
+  assert.equal(byLine[nocheckCall + 1].reason, 'governed by a directive comment');
+
+  const removed = suggestions.combinedPatch.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---'));
+  assert.ok(removed.some((line) => line === '-  console.log(x);'));
+  assert.ok(!removed.some((line) => line.includes('@ts-ignore')));
+  assert.ok(!removed.some((line) => line.includes('eslint-disable')));
+  assert.ok(!removed.some((line) => line.includes('@ts-nocheck')));
+  assert.ok(!removed.some((line) => line.includes('debugger;')));
+
+  const applied = await applyPatch([{ path: 'src/directives.ts', content: source }], suggestions.combinedPatch);
+  assert.match(applied['src/directives.ts'], /console\.log\(x\); \/\/ @ts-ignore/);
+  assert.match(applied['src/directives.ts'], /eslint-disable-next-line no-console/);
+  assert.match(applied['src/directives.ts'], /debugger; \/\/ @ts-expect-error/);
+  assert.match(applied['src/directives.ts'], /\/\* c8 ignore next \*\//);
+  assert.match(applied['src/directives.ts'], /console\.log\(\n {4}\/\/ @ts-nocheck\n {4}x\n {2}\);/);
+  assert.doesNotMatch(applied['src/directives.ts'], /\/\/ note only\n {2}console\.log\(x\);/);
+  assert.match(applied['src/directives.ts'], /\/\/ @ts-ignore\n {2}keep\(x\);/);
+});
+
+test('direct eval and other dynamic scope injection stay report-only', async () => {
+  const source = [
+    'function sloppy(record) {',
+    '  eval("var console = audit");',
+    '  console.log(record);',
+    '}',
+    'function clean(record) {',
+    '  console.log(record);',
+    '}',
+    'function parent(record) {',
+    '  eval("var console = audit");',
+    '  function child() {',
+    '    console.debug(record);',
+    '  }',
+    '  const arrow = () => console.info(record);',
+    '}',
+    'function paren(record) {',
+    '  (eval)("var console = audit");',
+    '  console.info(record);',
+    '}',
+    'function wrapped(record) {',
+    '  ((eval))("var console = audit");',
+    '  console.log(record);',
+    '}',
+    'function arrowHost(record) {',
+    '  console.log(record);',
+    '  const run = () => {',
+    '    eval("var console = audit");',
+    '    console.debug(record);',
+    '  };',
+    '}',
+    'function strictFn(record) {',
+    '  "use strict";',
+    '  eval("var console = audit");',
+    '  console.log(record);',
+    '}',
+    'function notDirective(record) {',
+    '  ;',
+    '  "use strict";',
+    '  eval("var console = audit");',
+    '  console.info(record);',
+    '}',
+    'function defaults(record, value = eval("var console = audit")) {',
+    '  console.log(record);',
+    '}',
+    'function header(record) {',
+    '  for (eval("var console = audit"); false; ) {}',
+    '  console.debug(record);',
+    '}',
+    'class Box {',
+    '  run(record) {',
+    '    eval("var console = audit");',
+    '    console.log(record);',
+    '  }',
+    '  static {',
+    '    eval("var console = audit");',
+    '    console.debug(record);',
+    '  }',
+    '}',
+    'console.log("top");',
+    '',
+  ].join('\n');
+  const suggestions = Parser.collectRemoveDebugStatementSuggestions([
+    { path: 'src/eval.js', content: source },
+  ]);
+  const byLine = Object.fromEntries(suggestions.sites.map((site) => [site.line, site]));
+  const at = (exact) => byLine[lineOf(source, exact)];
+
+  assert.equal(at('  console.log(record);').status, 'report-only');
+  assert.equal(at('  console.log(record);').reason, 'in a scope where direct eval may shadow console');
+  assert.equal(at('  console.log(record);').patch, undefined);
+  assert.equal(at('  console.log(record);').filePath, 'src/eval.js');
+  const lines = source.split('\n');
+  const clean = lines.findIndex((line, index) => line === '  console.log(record);' && lines[index - 1] === 'function clean(record) {');
+  assert.equal(byLine[clean + 1].status, 'appliable');
+  const childLine = lines.findIndex((line, index) => line === '    console.debug(record);' && lines[index - 2] === '  eval("var console = audit");');
+  assert.equal(byLine[childLine + 1].status, 'report-only');
+  assert.equal(byLine[childLine + 1].reason, 'in a scope where direct eval may shadow console');
+  const arrowSees = lines.findIndex((line) => line === '  const arrow = () => console.info(record);');
+  assert.equal(byLine[arrowSees + 1].status, 'report-only');
+  assert.equal(byLine[arrowSees + 1].reason, 'in a scope where direct eval may shadow console');
+  assert.equal(byLine[arrowSees + 1].patch, undefined);
+  const parenLine = lines.findIndex((line, index) => line === '  console.info(record);' && lines[index - 2] === 'function paren(record) {');
+  assert.equal(byLine[parenLine + 1].reason, 'in a scope where direct eval may shadow console');
+  const wrappedLine = lines.findIndex((line, index) => line === '  console.log(record);' && lines[index - 2] === 'function wrapped(record) {');
+  assert.equal(byLine[wrappedLine + 1].reason, 'in a scope where direct eval may shadow console');
+  const arrowHost = lines.findIndex((line, index) => line === '  console.log(record);' && lines[index - 1] === 'function arrowHost(record) {');
+  assert.equal(byLine[arrowHost + 1].status, 'appliable');
+  const arrowInnerLine = lines.findIndex((line, index) => line === '    console.debug(record);' && lines[index - 1] === '    eval("var console = audit");');
+  assert.equal(byLine[arrowInnerLine + 1].reason, 'in a scope where direct eval may shadow console');
+  const strictLine = lines.findIndex((line, index) => line === '  console.log(record);' && lines[index - 2] === '  "use strict";');
+  assert.equal(byLine[strictLine + 1].status, 'appliable');
+  const notDirective = lines.findIndex((line, index) => line === '  console.info(record);' && lines[index - 4] === 'function notDirective(record) {');
+  assert.equal(byLine[notDirective + 1].reason, 'in a scope where direct eval may shadow console');
+  const defaultsLine = lines.findIndex((line, index) => line === '  console.log(record);' && lines[index - 1].startsWith('function defaults'));
+  assert.equal(byLine[defaultsLine + 1].reason, 'in a scope where direct eval may shadow console');
+  const headerLine = lines.findIndex((line, index) => line === '  console.debug(record);' && lines[index - 1].startsWith('  for (eval'));
+  assert.equal(byLine[headerLine + 1].reason, 'in a scope where direct eval may shadow console');
+  const classLine = lines.findIndex((line, index) => line === '    console.log(record);' && lines[index - 2] === '  run(record) {');
+  assert.equal(byLine[classLine + 1].status, 'appliable');
+  const staticLine = lines.findIndex((line, index) => line === '    console.debug(record);' && lines[index - 2] === '  static {');
+  assert.equal(byLine[staticLine + 1].status, 'appliable');
+  assert.equal(at('console.log("top");').status, 'appliable');
+
+  const removed = suggestions.combinedPatch.split('\n').filter((line) => line.startsWith('-') && !line.startsWith('---'));
+  assert.ok(removed.some((line) => line === '-  console.log(record);'));
+  assert.ok(!removed.some((line) => line.includes('eval(')));
+  const applied = await applyPatch([{ path: 'src/eval.js', content: source }], suggestions.combinedPatch);
+  assert.match(applied['src/eval.js'], /function sloppy\(record\) \{\n {2}eval\("var console = audit"\);\n {2}console\.log\(record\);/);
+  assert.doesNotMatch(applied['src/eval.js'], /function clean\(record\) \{\n {2}console\.log\(record\);/);
+  assert.doesNotMatch(applied['src/eval.js'], /console\.log\("top"\)/);
+
+  const dynamic = [
+    'function f(record) {\n  eval?.("var console = audit");\n  console.log(record);\n}\nconsole.log(1);\n',
+    'function f(record) {\n  (0, eval)("var console = audit");\n  console.log(record);\n}\nconsole.log(1);\n',
+    'function f(record) {\n  ((0, eval))("var console = audit");\n  console.log(record);\n}\nconsole.log(1);\n',
+    'function f(record) {\n  window.eval("var console = audit");\n  console.log(record);\n}\nconsole.log(1);\n',
+    'function f(record) {\n  (window.eval)("var console = audit");\n  console.log(record);\n}\nconsole.log(1);\n',
+    'function f(record) {\n  eval.call(null, "var console = audit");\n  console.log(record);\n}\nconsole.log(1);\n',
+    'function f(record) {\n  new Function("console = audit");\n  console.log(record);\n}\nconsole.log(1);\n',
+    'function f(record) {\n  Function("console = audit");\n  console.log(record);\n}\nconsole.log(1);\n',
+    'function f(record) {\n  \\u0065val("var console = audit");\n  console.log(record);\n}\n',
+  ];
+  for (const content of dynamic) {
+    const result = Parser.collectRemoveDebugStatementSuggestions([{ path: 'src/dynamic.js', content }]);
+    assert.equal(result.combinedPatch, '', content);
+    assert.ok(result.sites.length >= 1, content);
+    const escaped = content.includes('\\u0065val');
+    assert.ok(result.sites.every((site) => site.status === 'report-only' && site.reason === (escaped
+      ? 'in a scope where direct eval may shadow console'
+      : 'in a file where dynamic code may shadow console')), content + '\n' + JSON.stringify(result.sites.map((site) => [site.line, site.reason])));
+  }
+
+  const stillGlobal = [
+    ['"use strict";\neval("var console = audit");\nconsole.log(record);\n', 'src/strict.js'],
+    ['export function f(record) {\n  eval("var console = audit");\n  console.log(record);\n}\n', 'src/mod.js'],
+    ['eval("var console = audit");\nconsole.log(record);\n', 'src/app.mjs'],
+    ['// eval("var console = audit")\nconsole.log(record);\n', 'src/note.js'],
+    ['const s = "eval(\'var console = audit\')";\nconsole.log(s);\n', 'src/string.js'],
+    ['import("x");\nfunction f(record) {\n  console.log(record);\n}\n', 'src/dyn-import.js'],
+  ];
+  for (const [content, path] of stillGlobal) {
+    const result = Parser.collectRemoveDebugStatementSuggestions([{ path, content }]);
+    assert.ok(result.sites.some((site) => site.status === 'appliable'), content + '\n' + JSON.stringify(result.sites.map((site) => [site.line, site.status, site.reason])));
+  }
+
+  const topSloppy = 'eval("var console = audit");\nconsole.log(record);\nfunction later() {\n  console.debug(record);\n}\n';
+  const top = Parser.collectRemoveDebugStatementSuggestions([{ path: 'src/top.js', content: topSloppy }]);
+  assert.equal(top.combinedPatch, '');
+  assert.ok(top.sites.every((site) => site.status === 'report-only' && site.reason === 'in a scope where direct eval may shadow console'));
+});
+
 test('index.html does not gain a write path for debug patches', () => {
   assert.equal(htmlSource.includes('createWritable'), false);
   assert.equal(htmlSource.includes('showSaveFilePicker'), false);
