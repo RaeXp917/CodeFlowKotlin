@@ -991,6 +991,156 @@ function yieldToBrowser(){
 // ---------------------------------------------------------------------------
 
 // ===== CODEFLOW_ANALYZER_START =====
+// Language-aware literal masking for security detection. Comments and string/
+// char literals are replaced with spaces (newlines preserved) so the masked
+// copy keeps the exact length and line numbering of the original. Detection
+// regexes run on the masked copy, so matches inside comments, KDoc/Javadoc,
+// and string literals never fire, while reported line numbers and snippets are
+// taken from the original source. Shared by the main thread, the inline worker,
+// and the card action because this lives inside the analyzer block.
+function maskKotlinJavaLiterals(src){
+    var n=src.length;
+    var out=new Array(n);
+    for(var k=0;k<n;k++)out[k]=src[k];
+    function blank(a,b){for(var k=a;k<b&&k<n;k++){if(out[k]!=='\n')out[k]=' ';}}
+    var i=0;
+    while(i<n){
+        var c=src[i],d=src[i+1];
+        if(c==='/'&&d==='/'){var j=i+2;while(j<n&&src[j]!=='\n')j++;blank(i,j);i=j;continue;}
+        if(c==='/'&&d==='*'){
+            // Kotlin allows nested block comments; Java does not. Counting depth
+            // handles both safely.
+            var depth=1,j2=i+2;
+            while(j2<n&&depth>0){
+                if(src[j2]==='/'&&src[j2+1]==='*'){depth++;j2+=2;continue;}
+                if(src[j2]==='*'&&src[j2+1]==='/'){depth--;j2+=2;continue;}
+                j2++;
+            }
+            blank(i,j2);i=j2;continue;
+        }
+        if(c==='"'&&src[i+1]==='"'&&src[i+2]==='"'){
+            // Kotlin raw string: no escapes, terminated by the next triple quote.
+            var j3=i+3;
+            while(j3<n&&!(src[j3]==='"'&&src[j3+1]==='"'&&src[j3+2]==='"'))j3++;
+            j3=(j3<n)?j3+3:n;
+            blank(i,j3);i=j3;continue;
+        }
+        if(c==='"'){
+            var j4=i+1;
+            while(j4<n){if(src[j4]==='\\'){j4+=2;continue;}if(src[j4]==='"'){j4++;break;}if(src[j4]==='\n')break;j4++;}
+            blank(i,j4);i=j4;continue;
+        }
+        if(c==="'"){
+            var j5=i+1;
+            while(j5<n){if(src[j5]==='\\'){j5+=2;continue;}if(src[j5]==="'"){j5++;break;}if(src[j5]==='\n')break;j5++;}
+            blank(i,j5);i=j5;continue;
+        }
+        i++;
+    }
+    return out.join('');
+}
+function maskVbaLiterals(src){
+    var n=src.length;
+    var out=new Array(n);
+    for(var k=0;k<n;k++)out[k]=src[k];
+    function blank(a,b){for(var k=a;k<b&&k<n;k++){if(out[k]!=='\n')out[k]=' ';}}
+    var i=0;
+    while(i<n){
+        var c=src[i];
+        if(c==="'"){var j=i+1;while(j<n&&src[j]!=='\n')j++;blank(i,j);i=j;continue;}
+        if((c==='R'||c==='r')&&/^rem(\s|$)/i.test(src.slice(i,i+4))){
+            var p=i-1;while(p>=0&&(src[p]===' '||src[p]==='\t'))p--;
+            if(p<0||src[p]==='\n'||src[p]===':'){var jr=i+3;while(jr<n&&src[jr]!=='\n')jr++;blank(i,jr);i=jr;continue;}
+        }
+        if(c==='"'){
+            var jq=i+1;
+            while(jq<n){if(src[jq]==='"'){if(src[jq+1]==='"'){jq+=2;continue;}jq++;break;}if(src[jq]==='\n')break;jq++;}
+            blank(i,jq);i=jq;continue;
+        }
+        i++;
+    }
+    return out.join('');
+}
+// Index of the ')' matching the '(' at openIdx, or -1. Operates on masked
+// source so parentheses inside strings/comments are already neutralized.
+function kjMatchParen(s,openIdx){
+    var depth=0;
+    for(var k=openIdx;k<s.length;k++){
+        if(s[k]==='(')depth++;
+        else if(s[k]===')'){depth--;if(depth===0)return k;}
+    }
+    return -1;
+}
+// From a position just past a ProcessBuilder constructor's ')', walk a chain of
+// .method(...) calls and report whether .start( is reached (e.g.
+// new ProcessBuilder(cmd).redirectErrorStream(true).start()).
+function kjIsChainedStart(s,pos){
+    var k=pos;
+    while(k<s.length){
+        while(k<s.length&&/\s/.test(s[k]))k++;
+        if(s[k]!=='.')return false;
+        k++;
+        while(k<s.length&&/\s/.test(s[k]))k++;
+        var nameStart=k;
+        while(k<s.length&&/[A-Za-z0-9_]/.test(s[k]))k++;
+        var name=s.slice(nameStart,k);
+        while(k<s.length&&/\s/.test(s[k]))k++;
+        if(s[k]!=='(')return false;
+        if(name==='start')return true;
+        var close=kjMatchParen(s,k);
+        if(close<0)return false;
+        k=close+1;
+    }
+    return false;
+}
+// The identifier a ProcessBuilder constructor is assigned to, if the preceding
+// text is a declaration or assignment (val pb =, ProcessBuilder pb =, pb =).
+function kjAssignedIdentifier(s,ctorStart){
+    var before=s.slice(0,ctorStart);
+    var m=before.match(/(?:^|[\s;{(])(?:val|var|final\s+[\w.<>\[\]]+|[\w.<>\[\]]+)\s+([A-Za-z_]\w*)\s*(?::[^=]+)?=\s*$/);
+    if(m)return m[1];
+    m=before.match(/(?:^|[\s;{(])([A-Za-z_]\w*)\s*=\s*$/);
+    if(m)return m[1];
+    return null;
+}
+// Detect genuine Kotlin/Java process-execution APIs in already-masked source.
+// Returns [{line, code, api}] with 1-based line numbers and the original source
+// line as the triggering snippet.
+function detectKotlinJavaProcessExec(masked,original){
+    var findings=[];
+    function lineAt(idx){return original.slice(0,idx).split('\n').length;}
+    function snippet(idx){
+        var start=original.lastIndexOf('\n',idx-1)+1;
+        var end=original.indexOf('\n',idx);
+        if(end<0)end=original.length;
+        return original.slice(start,end).trim().substring(0,120);
+    }
+    var seen={};
+    function add(idx,api){
+        var key=idx+':'+api;
+        if(seen[key])return;
+        seen[key]=true;
+        findings.push({index:idx,api:api});
+    }
+    var rtRe=/Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(/g;
+    var m;
+    while((m=rtRe.exec(masked))!==null)add(m.index,'runtime-exec');
+    var pbRe=/(?:\bnew\s+)?\bProcessBuilder\s*\(/g;
+    while((m=pbRe.exec(masked))!==null){
+        var openParen=m.index+m[0].length-1;
+        var close=kjMatchParen(masked,openParen);
+        if(close<0)continue;
+        var started=kjIsChainedStart(masked,close+1);
+        if(!started){
+            var id=kjAssignedIdentifier(masked,m.index);
+            if(id&&new RegExp('\\b'+id+'\\s*\\.\\s*start\\s*\\(').test(masked))started=true;
+        }
+        if(started)add(m.index,'process-builder');
+    }
+    return findings
+        .sort(function(a,b){return a.index-b.index;})
+        .map(function(f){return{line:lineAt(f.index),code:snippet(f.index),api:f.api};});
+}
 const Parser={
     // Tree-sitter parsers are loaded lazily from vendored WASM and used when a language has
     // a stable grammar path. Regex remains an explicit fallback, not a silent lie.
@@ -1809,6 +1959,21 @@ const Parser={
             if(!isNonProductionPath(f.path)&&execMatch){
                 issues.push({severity:'medium',title:'Command Execution',file:f.name,path:f.path,desc:'Shell command execution detected. Ensure input is sanitized to prevent injection.',code:''});
             }
+            // Kotlin/Java process execution: Runtime.getRuntime().exec(...) and
+            // ProcessBuilder(...).start(). Detection runs on a comment/string-
+            // masked copy so comments, KDoc/Javadoc, identifiers like ShellHeader,
+            // and ordinary string literals never match.
+            var lowerName=(f.name||'').toLowerCase();
+            var isKotlinJava=lowerName.endsWith('.kt')||lowerName.endsWith('.kts')||lowerName.endsWith('.java');
+            if(f.isCode&&isKotlinJava&&!isNonProductionPath(f.path)){
+                var kjMasked=maskKotlinJavaLiterals(scanContent);
+                detectKotlinJavaProcessExec(kjMasked,scanContent).forEach(function(ef){
+                    var desc=ef.api==='runtime-exec'
+                        ?'Runtime.getRuntime().exec() runs an operating-system command. Validate every argument, never pass untrusted input, and prefer an explicit argument array over a single command string.'
+                        :'ProcessBuilder(...).start() launches an operating-system process. Pass a fixed argument list, avoid shell interpreters such as "sh -c", and never concatenate untrusted input into the command.';
+                    issues.push({severity:'high',title:'Command Execution',file:f.name,path:f.path,line:ef.line,desc:desc,code:ef.code});
+                });
+            }
             if(scanContent.match(/console\.(log|debug|info)\(/)){
                 var consoleCount=(scanContent.match(/console\.(log|debug|info)\(/g)||[]).length;
                 if(consoleCount>3){
@@ -1820,8 +1985,18 @@ const Parser={
             if(scanContent.match(/SendKeys\s*\(/i)){
                 issues.push({severity:'high',title:'SendKeys Usage',file:f.name,path:f.path,desc:'SendKeys can be exploited for code injection. Avoid using SendKeys.',code:''});
             }
-            if(!isNonProductionPath(f.path)&&scanContent.match(/Shell\s*\(/i)){
-                issues.push({severity:'high',title:'Shell Command Execution',file:f.name,path:f.path,desc:'Shell() executes system commands. Ensure input is validated.',code:''});
+            // Shell() is a VBA/VBScript language API, so this rule is scoped to
+            // VBA sources. It previously ran on every file and matched harmless
+            // tokens such as a Kotlin comment "// ... the header shell (...)".
+            // Detection runs on a VBA comment/string-masked copy.
+            var isVbaFile=/\.(vba|vbs|bas|cls|frm)$/i.test(f.name||'');
+            if(isVbaFile&&!isNonProductionPath(f.path)){
+                var vbaMasked=maskVbaLiterals(scanContent);
+                var shellMatch=/\bShell\s*\(/i.exec(vbaMasked);
+                if(shellMatch){
+                    var shellLine=vbaMasked.slice(0,shellMatch.index).split('\n').length;
+                    issues.push({severity:'high',title:'Shell Command Execution',file:f.name,path:f.path,line:shellLine,desc:'VBA Shell() executes system commands. Validate input and never pass untrusted data.',code:(lines[shellLine-1]||'').trim().substring(0,120)});
+                }
             }
             if(scanContent.match(/CreateObject\s*\(\s*["']WScript\.Shell["']/i)){
                 issues.push({severity:'high',title:'WScript.Shell Creation',file:f.name,path:f.path,desc:'Creating WScript.Shell object allows command execution. Use with caution.',code:''});

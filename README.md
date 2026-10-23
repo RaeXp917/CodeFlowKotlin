@@ -49,10 +49,21 @@ Automatic detection of:
 - SQL injection vulnerabilities
 - Dangerous `eval()` usage
 - Debug statements in production code
+- Command/process execution:
+  - JavaScript/TypeScript `child_process` exec/spawn
+  - Python `eval`/`exec`, `os.system`/`os.popen`, `subprocess(..., shell=True)`
+  - Kotlin/Java `Runtime.getRuntime().exec(...)` and `ProcessBuilder(...).start()` — including a builder stored in a variable and started on a later line
+  - VBA `Shell()`, `WScript.Shell`, `SendKeys`, `Application.Run`
+
+The command/process-execution and `Shell()` checks are **language-aware**: each language's rule runs only on that language's files, and detection is performed on a copy of the source with comments, KDoc/Javadoc, and string/char literals masked out (line numbers preserved). A Kotlin comment such as `// ... the header shell (...)`, a KDoc mention of `Shell()`, an identifier like `ShellHeader`, or a command-shaped string literal therefore does not produce a finding, while a genuine call does — reported with its one-based line number and the triggering source line.
+
+**Known limitations:** masking is lexical, not a full parse (the Kotlin/Java Tree-sitter grammars are vendored but not loaded in the synchronous scan path). ProcessBuilder identity tracking covers chained `.start()` and a builder assigned to a local variable and started later in the same file; builders passed across functions or returned and started elsewhere are not followed. Detection is intraprocedural and does not perform taint analysis, so it flags the execution site, not whether the argument is actually attacker-controlled.
 
 For JavaScript and TypeScript, a standalone `console.log`, `console.debug`, `console.info`, or `debugger` statement can be downloaded as a unified diff (`.patch`) and applied from the repo root with `git apply`. The JSON report adds a `patch` field on that debug-statement finding when a safe removal exists. Statements inside an expression, or in a one-line `if` or arrow without braces, stay report-only. Codeflow never writes to your files.
 
-Test files, fixtures, `docs/`, and common tooling directories (`.github/`, `.claude/`, `scripts/`) are excluded from the XSS/shell-execution checks, since findings there don't reflect the shipped product's attack surface. The hardcoded-secret check exempts only tests, fixtures, and docs: CI workflows, hooks, and deploy scripts are executable code, so a real credential there is still a real leak.
+Test files, fixtures, `docs/`, and common tooling directories (`.github/`, `.claude/`, `scripts/`) are excluded from the XSS/shell-execution and command-execution checks, since findings there don't reflect the shipped product's attack surface. The hardcoded-secret check exempts only tests, fixtures, and docs: CI workflows, hooks, and deploy scripts are executable code, so a real credential there is still a real leak.
+
+**Running the security regression tests:** `npm test` runs the full suite; the security rules are covered by `tests/security-precision.test.mjs` (precision/recall, including the Kotlin/Java command-execution and VBA `Shell()` cases) and `tests/security-selfscan.test.mjs` (self-scan exemption). Run just those with `node --test tests/security-precision.test.mjs tests/security-selfscan.test.mjs`.
 
 ### Pattern Detection
 Automatically identifies:

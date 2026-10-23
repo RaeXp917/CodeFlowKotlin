@@ -342,3 +342,150 @@ test('Duplicate code: structural duplicates are still detected across non-produc
 
   assert.notEqual(codeDup, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// Kotlin/Java process-execution detection and the VBA-scoped Shell() rule.
+// Regression coverage for the analyzer accuracy fix: the Shell() rule used to
+// run on every language and matched harmless Kotlin comments/identifiers, while
+// genuine Runtime.getRuntime().exec(...) and ProcessBuilder(...).start() went
+// undetected. Detection runs on a comment/string-masked copy of the source.
+// ---------------------------------------------------------------------------
+
+function commandExecIssues(data) {
+  return data.securityIssues.filter((i) => i.title === 'Command Execution');
+}
+
+test('Shell() rule no longer fires on Kotlin UI comments, KDoc, or identifiers', async () => {
+  const data = await analyzeSyntheticFiles([
+    {
+      path: 'app/ui/HeaderShell.kt',
+      content: 'class HeaderShell {\n    // Delegates the header shell (background, rounded-square icon)\n    fun render() {}\n}\n',
+    },
+    {
+      path: 'app/ui/Doc.kt',
+      content: '/**\n * Builds the Shell() facade used by the toolbar.\n */\nfun build() {}\n',
+    },
+    {
+      path: 'app/ui/Widgets.kt',
+      content: 'val header = ShellHeader(title)\nfun getShell(): String { return "shell" }\n',
+    },
+    {
+      path: 'app/ui/Strings.java',
+      content: 'class Strings {\n  String help = "run the shell (bash) or Runtime.getRuntime().exec";\n}\n',
+    },
+  ]);
+
+  const flaggedPaths = data.securityIssues
+    .filter((i) => i.title === 'Shell Command Execution' || i.title === 'Command Execution')
+    .map((i) => i.path);
+
+  assert.equal(flaggedPaths.includes('app/ui/HeaderShell.kt'), false);
+  assert.equal(flaggedPaths.includes('app/ui/Doc.kt'), false);
+  assert.equal(flaggedPaths.includes('app/ui/Widgets.kt'), false);
+  assert.equal(flaggedPaths.includes('app/ui/Strings.java'), false);
+});
+
+test('VBA Shell() rule still flags a real call and skips comments/strings', async () => {
+  const data = await analyzeSyntheticFiles([
+    {
+      path: 'macros/Launch.bas',
+      content: 'Sub Run()\n    \' open the shell (background)\n    Shell("cmd.exe /c dir")\nEnd Sub\n',
+    },
+    {
+      path: 'macros/Note.bas',
+      content: 'Sub Note()\n    \' describe the shell (helper)\n    MsgBox "Shell (demo only)"\nEnd Sub\n',
+    },
+  ]);
+
+  const shellIssues = data.securityIssues.filter((i) => i.title === 'Shell Command Execution');
+  const launch = shellIssues.find((i) => i.path === 'macros/Launch.bas');
+
+  assert.notEqual(launch, undefined);
+  assert.equal(launch.line, 3);
+  assert.equal(launch.code, 'Shell("cmd.exe /c dir")');
+  assert.equal(shellIssues.some((i) => i.path === 'macros/Note.bas'), false);
+});
+
+test('Kotlin Runtime.getRuntime().exec() is detected with accurate line and snippet', async () => {
+  const data = await analyzeSyntheticFiles([
+    { path: 'app/Exec.kt', content: 'fun run(command: String) {\n    Runtime.getRuntime().exec(command)\n}\n' },
+  ]);
+  const issue = commandExecIssues(data).find((i) => i.path === 'app/Exec.kt');
+
+  assert.notEqual(issue, undefined);
+  assert.equal(issue.severity, 'high');
+  assert.equal(issue.line, 2);
+  assert.equal(issue.code, 'Runtime.getRuntime().exec(command)');
+});
+
+test('Java ProcessBuilder(...).start() chained call is detected', async () => {
+  const data = await analyzeSyntheticFiles([
+    {
+      path: 'app/Builder.java',
+      content: 'class Builder {\n  void run(String command) {\n    new ProcessBuilder("sh", "-c", command).start();\n  }\n}\n',
+    },
+  ]);
+  const issue = commandExecIssues(data).find((i) => i.path === 'app/Builder.java');
+
+  assert.notEqual(issue, undefined);
+  assert.equal(issue.severity, 'high');
+  assert.equal(issue.line, 3);
+  assert.equal(issue.code, 'new ProcessBuilder("sh", "-c", command).start();');
+});
+
+test('Kotlin .kts ProcessBuilder created and started in separate statements is detected', async () => {
+  const data = await analyzeSyntheticFiles([
+    {
+      path: 'app/Runner.kts',
+      content: 'fun run(cmd: String) {\n    val pb = ProcessBuilder("ls", cmd)\n    pb.redirectErrorStream(true)\n    pb.start()\n}\n',
+    },
+  ]);
+  const issue = commandExecIssues(data).find((i) => i.path === 'app/Runner.kts');
+
+  assert.notEqual(issue, undefined);
+  assert.equal(issue.line, 2);
+  assert.equal(issue.code, 'val pb = ProcessBuilder("ls", cmd)');
+});
+
+test('ProcessBuilder constructed but never started is not flagged (false positive guard)', async () => {
+  const data = await analyzeSyntheticFiles([
+    {
+      path: 'app/Factory.kt',
+      content: 'fun make(cmd: String): ProcessBuilder {\n    return ProcessBuilder("ls", cmd)\n}\n',
+    },
+  ]);
+
+  assert.equal(commandExecIssues(data).some((i) => i.path === 'app/Factory.kt'), false);
+});
+
+test('Multiple Kotlin/Java exec findings in one file are all reported with distinct lines', async () => {
+  const data = await analyzeSyntheticFiles([
+    {
+      path: 'app/Multi.java',
+      content: 'class Multi {\n  void a(String c){ Runtime.getRuntime().exec(c); }\n  void b(String c){ new ProcessBuilder(c).start(); }\n}\n',
+    },
+  ]);
+  const issues = commandExecIssues(data).filter((i) => i.path === 'app/Multi.java');
+
+  assert.equal(issues.length, 2);
+  assert.equal(issues.map((i) => i.line).sort((a, b) => a - b).join(','), '2,3');
+});
+
+test('Same filename in different folders produces independent exec findings', async () => {
+  const data = await analyzeSyntheticFiles([
+    { path: 'app/alpha/Exec.kt', content: 'fun a(c: String) {\n    Runtime.getRuntime().exec(c)\n}\n' },
+    { path: 'app/beta/Exec.kt', content: '// Exec.kt in beta: no real execution here\nfun b() {}\n' },
+  ]);
+  const flaggedPaths = commandExecIssues(data).map((i) => i.path);
+
+  assert.equal(flaggedPaths.includes('app/alpha/Exec.kt'), true);
+  assert.equal(flaggedPaths.includes('app/beta/Exec.kt'), false);
+});
+
+test('Kotlin exec in a non-production path is excluded like other rules', async () => {
+  const data = await analyzeSyntheticFiles([
+    { path: 'src/test/ExecTest.kt', content: 'fun t(c: String) {\n    Runtime.getRuntime().exec(c)\n}\n' },
+  ]);
+
+  assert.equal(commandExecIssues(data).some((i) => i.path === 'src/test/ExecTest.kt'), false);
+});
