@@ -1,91 +1,122 @@
-/* CodeFlowKotlin UI extension: adds ONE dropdown; never changes existing views. */
+/* CodeFlowKotlin UI extension: renders the local Project dropdown into the
+   React-provided mount slot(s). It adds only this dropdown and never changes
+   any existing view. The mount is independent of GitHub authentication, which
+   no longer exists in the topbar. */
 (function () {
   'use strict';
-  const ID = 'codeflow-kotlin-project-select';
-  let model = null;
-  let changing = false;
-  let errorText = '';
+  // Marks a select this script owns, so mounting is idempotent per slot and the
+  // dropdown never duplicates across React re-renders.
+  var OWNED = 'data-codeflow-project-select';
+  var model = null;
+  var changing = false;
+
+  function ownedSelects() {
+    if (!document.querySelectorAll) return [];
+    return Array.prototype.slice.call(document.querySelectorAll('select[' + OWNED + ']'));
+  }
 
   function statusError(message) {
-    errorText = message;
     console.error('[CodeFlowKotlin]', message);
-    const dropdown = document.getElementById(ID);
-    if (dropdown) {
-      dropdown.title = message;
-      dropdown.style.borderColor = 'var(--red)';
-    }
-    window.alert('CodeFlowKotlin: ' + message);
+    ownedSelects().forEach(function (sel) {
+      sel.title = message;
+      if (sel.style) sel.style.borderColor = 'var(--red)';
+    });
+    if (typeof window !== 'undefined' && window.alert) window.alert('CodeFlowKotlin: ' + message);
   }
 
-  async function pickProject(event) {
-    const project = event.target.value;
-    if (!project || changing) return;
+  function pickProject(event) {
+    var project = event.target.value;
+    if (!project || changing) return Promise.resolve();
     changing = true;
     event.target.disabled = true;
-    try {
-      const response = await fetch('/__codeflow/select-project', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project }),
-      });
+    return fetch('/__codeflow/select-project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project }),
+    }).then(function (response) {
       if (!response.ok) throw new Error('Could not switch to ' + project);
       // Hard reload resets existing CodeFlow analysis, cards, filters and watchers
-      // to precisely the newly selected project. No other view is altered.
+      // to exactly the newly selected project. No other view is altered.
       window.location.assign('/?cli=1');
-    } catch (error) {
+    }).catch(function (error) {
       changing = false;
-      statusError(error.message || 'Project switch failed');
+      statusError((error && error.message) || 'Project switch failed');
       event.target.disabled = false;
       event.target.value = model && model.selected ? model.selected : '';
-    }
+    });
   }
 
-  function mount() {
-    if (!model || document.getElementById(ID)) return;
-    // Add a second dropdown immediately after the existing Auth select.
-    const auth = document.querySelector('.topbar .repo-input-group select.auth-select');
-    if (!auth || !auth.parentElement) return;
-    const sel = document.createElement('select');
-    sel.id = ID;
-    sel.className = 'auth-select'; // reuse original theme, height, typography
-    sel.setAttribute('aria-label', 'Local Android Studio project');
-    sel.title = 'Projects in ' + model.root;
-    sel.style.maxWidth = '220px';
-    sel.style.minWidth = '128px';
-    sel.style.flex = '0 1 190px';
-    const opt = document.createElement('option');
-    opt.value = '';
-    opt.textContent = 'Project: Select';
-    sel.appendChild(opt);
-    for (const project of model.projects) {
-      const item = document.createElement('option');
-      item.value = project;
-      item.textContent = project;
+  function buildSelect() {
+    var sel = document.createElement('select');
+    sel.className = 'project-select'; // reuse the existing topbar select styling
+    sel.setAttribute(OWNED, '1');
+    sel.setAttribute('aria-label', 'Local project');
+    sel.title = 'Projects in ' + ((model && model.root) || '');
+    sel.style.maxWidth = '240px';
+    sel.style.minWidth = '140px';
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Project: Select';
+    sel.appendChild(placeholder);
+    var projects = (model && model.projects) || [];
+    for (var i = 0; i < projects.length; i++) {
+      var item = document.createElement('option');
+      item.value = projects[i];
+      item.textContent = projects[i];
       sel.appendChild(item);
     }
-    sel.value = model.selected || '';
+    sel.value = (model && model.selected) || '';
     sel.addEventListener('change', pickProject);
-    auth.insertAdjacentElement('afterend', sel);
+    return sel;
   }
 
-  async function init() {
-    try {
-      const response = await fetch('/__codeflow/projects', { cache: 'no-store' });
-      if (!response.ok) throw new Error('Could not load local projects');
-      model = await response.json();
-      mount();
-      // Existing CodeFlow is React-based. If it re-mounts the header, put the
-      // same dropdown back, without touching any React view or component.
-      const root = document.getElementById('root') || document.body;
-      let scheduled = false;
-      const observer = new MutationObserver(function () {
-        if (scheduled || document.getElementById(ID)) return;
-        scheduled = true;
-        queueMicrotask(function () { scheduled = false; mount(); });
-      });
-      observer.observe(root, { childList: true, subtree: true });
-    } catch (error) { statusError(error.message || 'Project dropdown failed'); }
+  // Mount one dropdown into every slot that does not already own one. Returns the
+  // number of dropdowns added (0 when everything is already mounted).
+  function mountAll() {
+    if (!model || !document.querySelectorAll) return 0;
+    var slots = document.querySelectorAll('.project-selector-slot');
+    var added = 0;
+    for (var i = 0; i < slots.length; i++) {
+      var slot = slots[i];
+      if (slot.querySelector && slot.querySelector('select[' + OWNED + ']')) continue;
+      slot.appendChild(buildSelect());
+      added++;
+    }
+    return added;
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
-  else init();
+
+  function setModel(m) { model = m; }
+
+  function init() {
+    fetch('/__codeflow/projects', { cache: 'no-store' })
+      .then(function (response) {
+        if (!response.ok) throw new Error('Could not load local projects');
+        return response.json();
+      })
+      .then(function (data) {
+        setModel(data);
+        mountAll();
+        // CodeFlow is React-based; if it re-renders the topbar, put the dropdown
+        // back into any slot that lost it — without touching any React view.
+        var root = document.getElementById('root') || document.body;
+        if (!root || typeof MutationObserver === 'undefined') return;
+        var scheduled = false;
+        var observer = new MutationObserver(function () {
+          if (scheduled) return;
+          scheduled = true;
+          queueMicrotask(function () { scheduled = false; mountAll(); });
+        });
+        observer.observe(root, { childList: true, subtree: true });
+      })
+      .catch(function (error) { statusError((error && error.message) || 'Project dropdown failed'); });
+  }
+
+  // Test hook: expose the pure pieces so they can be exercised without a browser.
+  var g = typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this);
+  if (g) g.CodeFlowProjectSelector = { buildSelect: buildSelect, mountAll: mountAll, setModel: setModel, pickProject: pickProject };
+
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+    else init();
+  }
 })();

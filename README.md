@@ -128,13 +128,12 @@ See [card/](./card/) for setup, or jump to the [style gallery](#card-style-galle
 
 **Your code stays on your machine.** CodeFlow:
 
-- Runs 100% in the browser
-- Makes API calls directly from your browser to GitHub
-- Never stores your code or tokens
-- Works with private repos (just add your token locally)
+- Analyzes your selected local project in the browser (in CLI mode a local-only server on `127.0.0.1` serves the app and reads just that project)
+- Never uploads your local project source anywhere
+- Requires **no GitHub login** — no Personal Access Token, no GitHub App
+- Makes optional public GitHub API calls directly from your browser (never via a proxy); local source is never sent to GitHub
+- Stores project configuration and the analysis cache locally so your selection persists across restarts
 - No analytics or tracking
-
-Your GitHub token (if used) is only stored in your browser's memory and is cleared when you close the tab.
 
 ---
 
@@ -176,16 +175,19 @@ You can now analyze code directly from your local machine without uploading to G
 
 ## Usage
 
-### Public Repositories
-```
-Just paste: facebook/react
-Or full URL: https://github.com/facebook/react
-```
+### Local projects (primary)
+Pick a project from the **Project dropdown** in the topbar. It lists the local
+projects discovered by the CLI/project server and switches analysis to the one
+selected project. Switching projects clears the previous project's analysis.
 
-### Private Repositories
-1. Create a [GitHub Personal Access Token](https://github.com/settings/tokens) with `repo` scope
-2. Paste it in the Token field
-3. Analyze your private repos
+### Public repositories (optional)
+Use the **Open GitHub URL** field to analyze a public repository anonymously:
+```
+Shorthand: facebook/react
+Full URL:  https://github.com/facebook/react
+```
+No login is required. Anonymous requests are subject to GitHub's public rate
+limit (~60/hour per IP); use a local project or ZIP for unlimited analysis.
 
 ### Local Files
 Click the "Open Folder" button to analyze code from your computer:
@@ -318,36 +320,28 @@ falls back safely to Tree Map.
 
 ---
 
-## API Limits
+## Source selection
 
-GitHub API has rate limits:
-- **Without token:** 60 requests/hour
-- **With Personal Access Token:** 5,000 requests/hour
-- **With GitHub App:** 5,000 requests/hour per installation
+CodeFlow is **local-first**. The primary control in the topbar is the **Project
+dropdown**, which lists the local projects discovered by the CLI/project server
+and switches analysis to a single selected project. Analysis is always scoped to
+one project at a time.
 
-### Authentication Methods
+GitHub analysis is an **optional, secondary** source. The topbar's **Open GitHub
+URL** field (placeholder `https://github.com/owner/repo`, shorthand `owner/repo`
+still accepted) analyzes a public repository directly from your browser.
 
-#### Personal Access Token (PAT)
-1. Create a [GitHub Personal Access Token](https://github.com/settings/tokens) with `repo` scope
-2. Paste it in the Token field
-3. Analyze your private repos
+> There is **no GitHub login**. CodeFlow does not collect or require a Personal
+> Access Token or GitHub App, and never uploads your local project source. Local
+> project source is never associated with a GitHub repository automatically.
 
-#### GitHub App Authentication
-For teams and organizations, GitHub App provides better security and higher rate limits:
+### GitHub API limits (optional public analysis)
 
-1. Create a [GitHub App](https://github.com/settings/apps) with repository permissions
-2. Install the app on your organization or personal account
-3. Generate an installation access token
-4. Paste the token in the Token field
-
-**Benefits of GitHub App:**
-- Fine-grained permissions control
-- Revocable access per installation
-- Higher rate limits (5,000 requests/hour)
-- Audit logging and security monitoring
-- No need to share personal credentials
-
-For larger repositories or team usage, we recommend using GitHub App authentication.
+Anonymous public GitHub requests are rate-limited by GitHub to roughly **60
+requests/hour per IP address**. There is no in-app way to raise this, by design.
+If you hit the limit, CodeFlow tells you and points you to the fully local
+alternatives: **Open Folder** (or the Project dropdown) and **Open ZIP**, neither
+of which is rate-limited.
 
 ---
 
@@ -422,8 +416,8 @@ node --test tests/*.test.mjs tests/*.smoke.js
 **Q: Can I use it offline?**
 > Yes. Clone the complete repository, open `index.html`, then use the local file analysis feature. All required browser and parser assets are checked in, so even a cold first load works without internet. GitHub URL analysis still requires access to GitHub's API.
 
-**Q: Why is analysis slow?**
-> We make individual API calls for each file to get content. With a token, you get higher rate limits and faster analysis.
+**Q: Why is GitHub analysis slow?**
+> For public GitHub analysis we make individual API calls for each file to get its content, and anonymous requests are rate-limited (~60/hour per IP). For large codebases, analyze a local project (Project dropdown / Open Folder) or Open ZIP instead — local analysis is faster and not rate-limited.
 
 **Q: How accurate is the dependency analysis?**
 > It's heuristic: unique functions are matched by name, while duplicate function names are scoped by file and explicit imports before edges are created. It may still miss dynamic imports or renamed runtime references, so it's designed for a quick overview, not 100% accuracy.

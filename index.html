@@ -55,7 +55,8 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .repo-input-group>*{min-width:0}
 .repo-input{flex:1;padding:6px 12px;background:var(--bg0);border:1px solid var(--border);border-radius:6px;color:var(--t0);font-family:inherit;font-size:11px;min-width:0}
 .repo-input-group>.repo-input:first-child{min-width:220px}
-.repo-input-group>.top-btn,.repo-input-group>.refresh-btn,.repo-input-group>.reset-btn,.auth-select,.private-key-btn{flex-shrink:0}
+.repo-input-group>.top-btn,.repo-input-group>.refresh-btn,.repo-input-group>.reset-btn,.project-select{flex-shrink:0}
+.project-selector-slot{display:contents}
 .repo-input:focus{outline:none;border-color:var(--acc)}
 .topbar-actions{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
 .top-btn{padding:6px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--t1);font-family:inherit;font-size:10px;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;min-height:32px;touch-action:manipulation}
@@ -596,19 +597,10 @@ svg.color-blocks text.node-label{display:none}
 @media(max-width:980px){
 .code-canvas-hud{top:56px;left:10px;width:140px}
 }
-.auth-select{padding:6px 10px;background:var(--bg0);border:1px solid var(--border);border-radius:6px;color:var(--t0);font-family:inherit;font-size:10px;cursor:pointer;min-width:100px;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b8b95' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;padding-right:28px}
-.auth-select:focus{outline:none;border-color:var(--acc)}
-.auth-select:hover{border-color:var(--acc)}
-.auth-select option{background:var(--bg1);color:var(--t0);padding:8px}
-.auth-inputs{display:flex;gap:6px;align-items:center;flex-shrink:0}
-.auth-inputs .repo-input{transition:all 0.2s ease}
-.private-key-btn{padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--t1);font-family:inherit;font-size:10px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:4px}
-.private-key-btn:hover{background:var(--bg4);border-color:var(--acc);color:var(--acc)}
-.private-key-btn.has-key{background:var(--accbg);border-color:var(--acc);color:var(--acc)}
-.key-modal{max-width:550px}
-.key-modal .form-input{min-height:200px;font-family:'JetBrains Mono',monospace;font-size:10px;resize:vertical}
-.key-info{font-size:10px;color:var(--t2);margin-bottom:12px;padding:10px;background:var(--bg0);border-radius:6px;line-height:1.5}
-.key-info code{background:var(--bg3);padding:2px 5px;border-radius:3px;color:var(--acc)}
+.project-select{padding:6px 10px;background:var(--bg0);border:1px solid var(--border);border-radius:6px;color:var(--t0);font-family:inherit;font-size:10px;cursor:pointer;min-width:100px;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b8b95' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;padding-right:28px}
+.project-select:focus{outline:none;border-color:var(--acc)}
+.project-select:hover{border-color:var(--acc)}
+.project-select option{background:var(--bg1);color:var(--t0);padding:8px}
 .exclude-note{font-size:10px;color:var(--t2);line-height:1.6;margin-bottom:12px}
 .exclude-note code{background:var(--bg0);padding:2px 5px;border-radius:4px;color:var(--acc)}
 .exclude-chip-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
@@ -635,11 +627,8 @@ body{height:100dvh;min-height:100dvh}
 .logo-text{font-size:15px}
 .repo-input-group{order:2;flex:1 1 100%;max-width:none;flex-wrap:wrap}
 .repo-input-group>.repo-input:first-child{flex:1 1 100%}
-.repo-input,.auth-select,.private-key-btn,.top-btn,.refresh-btn,.reset-btn,.view-file-btn{min-height:40px;font-size:11px}
-.auth-select{flex:1 1 150px}
-.auth-inputs{display:flex;gap:8px;align-items:stretch;flex:1 1 100%;flex-wrap:wrap}
-.auth-inputs .repo-input{flex:1 1 180px}
-.private-key-btn{flex:1 1 160px;justify-content:center}
+.repo-input,.project-select,.top-btn,.refresh-btn,.reset-btn,.view-file-btn{min-height:40px;font-size:11px}
+.project-select{flex:1 1 150px}
 .repo-input-group .top-btn,.repo-input-group .refresh-btn,.repo-input-group .reset-btn{flex:1 1 calc(50% - 4px);justify-content:center}
 .mobile-panel-actions{display:flex;order:3;gap:8px;flex:1 1 100%}
 .mobile-panel-actions .top-btn{flex:1 1 0;justify-content:center}
@@ -725,11 +714,8 @@ body{height:100dvh;min-height:100dvh}
 .mobile-secondary-row{display:flex;align-items:stretch;gap:6px;width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;padding-bottom:2px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .mobile-secondary-row::-webkit-scrollbar{display:none}
 .mobile-secondary-row>*{flex:0 0 auto}
-.mobile-secondary-row .auth-select,.mobile-secondary-row .private-key-btn,.mobile-secondary-row .top-btn,.mobile-secondary-row .refresh-btn,.mobile-secondary-row .reset-btn{min-height:34px;height:34px;border-radius:8px;font-size:10px;padding:0 10px;margin-left:0;justify-content:center}
-.mobile-secondary-row .auth-select{width:116px}
-.mobile-secondary-row .auth-inputs{display:flex;align-items:stretch;gap:6px;flex:0 0 auto}
-.mobile-secondary-row .auth-inputs .repo-input{height:34px;min-height:34px;width:170px;flex:0 0 170px;font-size:10px}
-.mobile-secondary-row .private-key-btn{min-width:118px}
+.mobile-secondary-row .project-select,.mobile-secondary-row .top-btn,.mobile-secondary-row .refresh-btn,.mobile-secondary-row .reset-btn{min-height:34px;height:34px;border-radius:8px;font-size:10px;padding:0 10px;margin-left:0;justify-content:center}
+.mobile-secondary-row .project-select{width:150px}
 .mobile-bottom-nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;position:fixed;left:0;right:0;bottom:0;z-index:150;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:var(--bg1);border-top:1px solid var(--border)}
 .mobile-bottom-nav .top-btn{min-height:42px;justify-content:center;border-radius:8px;padding:0 8px;font-size:10px}
 .mobile-bottom-nav .top-btn.active{background:var(--accbg);border-color:var(--acc);color:var(--acc)}
@@ -765,7 +751,7 @@ body{height:100dvh;min-height:100dvh}
 @media (max-width:420px){
 .mobile-action-stack{gap:4px}
 .mobile-icon-btn{width:32px;height:32px;min-height:32px}
-.mobile-secondary-row .auth-select{width:106px}
+.mobile-secondary-row .project-select{width:140px}
 .mobile-secondary-row .top-btn,.mobile-secondary-row .refresh-btn,.mobile-secondary-row .reset-btn{padding:0 9px}
 .canvas-toolbar{bottom:70px}
 .color-by{bottom:116px}
@@ -3993,79 +3979,8 @@ function decodeBase64Utf8(content){
 
 var GitHub={
     token:'',
-    appId:null,
-    privateKey:null,
-    installationToken:null,
-    installationTokenExpiry:null,
     rateLimit:{remaining:60,limit:60,reset:0},
     requestTimeoutMs:15000,
-    
-    // Generate JWT for GitHub App authentication
-    generateJWT:function(){
-        if(!this.appId||!this.privateKey)return null;
-        try{
-            var now=Math.floor(Date.now()/1000);
-            var payload={
-                iat:now-60,// Issued at (60 seconds in past to account for clock drift)
-                exp:now+600,// Expires in 10 minutes (max allowed)
-                iss:this.appId
-            };
-            var header={alg:'RS256',typ:'JWT'};
-            var sHeader=JSON.stringify(header);
-            var sPayload=JSON.stringify(payload);
-            var jwt=KJUR.jws.JWS.sign('RS256',sHeader,sPayload,this.privateKey);
-            return jwt;
-        }catch(e){
-            console.error('JWT generation failed:',e);
-            return null;
-        }
-    },
-    
-    getRepoInstallation:function(owner,repo){
-        var jwt=this.generateJWT();
-        if(!jwt)return Promise.reject(new Error('Failed to generate JWT'));
-        return this.request(buildGitHubApiUrl(['repos',owner,repo,'installation']),{
-            headers:{
-                'Accept':'application/vnd.github.v3+json',
-                'Authorization':'Bearer '+jwt
-            }
-        },{401:'Invalid App credentials',404:'This GitHub App is not installed on the selected repository'});
-    },
-    
-    // Get installation access token
-    getInstallationToken:function(installationId){
-        var self=this;
-        var jwt=this.generateJWT();
-        if(!jwt)return Promise.reject(new Error('Failed to generate JWT'));
-        return this.request(buildGitHubApiUrl(['app','installations',String(installationId),'access_tokens']),{
-            method:'POST',
-            headers:{
-                'Accept':'application/vnd.github.v3+json',
-                'Authorization':'Bearer '+jwt
-            }
-        },{401:'Invalid App credentials',404:'Installation not found'}).then(function(data){
-            self.installationToken=data.token;
-            self.installationTokenExpiry=new Date(data.expires_at).getTime();
-            self.token=data.token;// Use installation token for API calls
-            return data.token;
-        });
-    },
-    
-    // Authenticate with GitHub App for a specific repo
-    authenticateApp:function(owner,repo){
-        var self=this;
-        // Check if we have a valid installation token
-        if(this.installationToken&&this.installationTokenExpiry&&Date.now()<this.installationTokenExpiry-60000){
-            this.token=this.installationToken;
-            return Promise.resolve(this.installationToken);
-        }
-        return this.getRepoInstallation(owner,repo).then(function(installation){
-            if(!installation||!installation.id){
-                throw new Error('No installation found for this repository');
-            }
-            return self.getInstallationToken(installation.id);
-        });
-    },
     
     request:function(url,options,errorMap){
         var self=this;
@@ -4087,13 +4002,13 @@ var GitHub={
                     errorMap&&errorMap[r.status]
                         ? errorMap[r.status]
                         : r.status===401
-                            ? 'Invalid token'
+                            ? 'GitHub request was not authorized'
                             : r.status===403
-                                ? 'Rate limited - add a GitHub token for 5000 req/hour'
+                                ? 'Rate limited - public GitHub allows about 60 requests/hour per IP. Open a local Folder or ZIP instead.'
                                 : r.status===404
                                     ? 'Repository not found'
                                     : r.status===429
-                                        ? 'Rate limited (429) - add a GitHub token'
+                                        ? 'Rate limited (429) - try again later, or open a local Folder or ZIP.'
                                         : 'Error '+r.status
                 );
             }
@@ -13039,11 +12954,6 @@ function HealthRing(props){
 function App(){
     var _a=useState(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'),theme=_a[0],setTheme=_a[1];
     var _b=useState(''),repoUrl=_b[0],setRepoUrl=_b[1];
-    var _c=useState(''),token=_c[0],setToken=_c[1];
-    var _authMethod=useState('none'),authMethod=_authMethod[0],setAuthMethod=_authMethod[1];// 'none', 'pat', 'github_app'
-    var _appId=useState(''),appId=_appId[0],setAppId=_appId[1];
-    var _privateKey=useState(''),privateKey=_privateKey[0],setPrivateKey=_privateKey[1];
-    var _showKeyModal=useState(false),showKeyModal=_showKeyModal[0],setShowKeyModal=_showKeyModal[1];
     var _d=useState(false),loading=_d[0],setLoading=_d[1];
     var _e=useState(''),progress=_e[0],setProgress=_e[1];
     var _f=useState(null),error=_f[0],setError=_f[1];
@@ -13835,16 +13745,7 @@ function App(){
             return;
         }
         var currentExcludePatterns=activeExcludePatterns;
-        
-        // Validate authentication inputs
-        if(authMethod==='pat'&&!token){
-            setError('Please enter a Personal Access Token');return;
-        }
-        if(authMethod==='github_app'){
-            if(!appId){setError('Please enter the GitHub App ID');return;}
-            if(!privateKey){setError('Please set the GitHub App private key');return;}
-        }
-        
+
         resetAnalysisState();
         setLocalDirHandle(null);
         setLocalSourceKind(null);
@@ -13852,45 +13753,21 @@ function App(){
         zipFileRef.current=null;
         setLoading(true);
         setProgress('Initializing...');
-        
-        // Configure GitHub authentication based on method
-        GitHub.token=null;
-        GitHub.appId=null;
-        GitHub.privateKey=null;
-        GitHub.installationToken=null;
-        
-        if(authMethod==='pat'){
-            GitHub.token=token;
-        }else if(authMethod==='github_app'){
-            GitHub.appId=appId;
-            GitHub.privateKey=privateKey;
-        }
-        
+
+        // Public GitHub analysis is anonymous: no credentials are collected or sent.
+        GitHub.token='';
+
         setRepoInfo(p);
 
-        // Authentication promise - resolve immediately for no auth/PAT, authenticate for GitHub App
-        var authPromise;
-        if(authMethod==='github_app'){
-            setProgress('Authenticating with GitHub App...');
-            authPromise=GitHub.authenticateApp(p.owner,p.repo).catch(function(err){
-                throw new Error('GitHub App authentication failed: '+err.message);
-            });
-        }else{
-            authPromise=Promise.resolve();
-        }
-        
-        authPromise.then(function(){
-            setProgress('Loading language parsers...');
-            return Parser.initTreeSitter().catch(function(){return null;});
-        }).then(function(){
+        setProgress('Loading language parsers...');
+        Parser.initTreeSitter().catch(function(){return null;}).then(function(){
             setProgress('Checking rate limit...');
             return GitHub.getRateLimit();
         }).then(function(rl){
-            var hasAuth=!!GitHub.token||authMethod==='github_app';
             var estimatedRequests=50;// Conservative estimate for a small-medium repo
 
-            // Warn if rate limit is very low and no authentication
-            if(!hasAuth&&rl.remaining<estimatedRequests){
+            // Warn if the anonymous public rate limit is very low.
+            if(rl.remaining<estimatedRequests){
                 var resetTime=new Date(rl.reset*1000).toLocaleTimeString();
                 return requestConfirm({
                     tone:'warning',
@@ -13899,11 +13776,8 @@ function App(){
                     message:
                         'Remaining requests: '+rl.remaining+'/'+rl.limit+'\n'+
                         'Resets at: '+resetTime+'\n\n'+
-                        'The folder picker is faster when the API is rate-limited. Open Folder and analyze locally, or download a ZIP and use Open ZIP.\n\n'+
-                        'Without authentication, you only get 60 requests per hour.\n'+
-                        'Adding a token or GitHub App raises that to 5,000 requests per hour.\n\n'+
-                        'Token (PAT): GitHub Settings -> Developer Settings -> Personal access tokens\n'+
-                        'GitHub App: use App ID + Private Key for organization access\n\n'+
+                        'Public GitHub requests are temporarily limited (about 60 per hour, shared by IP address).\n'+
+                        'Open Folder to analyze a local project, or download a ZIP and use Open ZIP — both are fully local and not rate-limited.\n\n'+
                         'Continue anyway with the remaining requests?',
                     confirmLabel:'Continue anyway'
                 }).then(function(proceed){
@@ -14012,8 +13886,7 @@ function App(){
                     message:
                         'This repository has '+files.length+' files.\n\n'+
                         'Analyzing larger repositories can take longer and may hit GitHub API rate limits.\n\n'+
-                        'The folder picker is faster when the API is rate-limited. You can also download a ZIP and use Open ZIP.\n\n'+
-                        'Tip: add a token or GitHub App for higher limits.',
+                        'The folder picker is faster when the API is rate-limited. You can also download a ZIP and use Open ZIP — both are fully local.',
                     confirmLabel:'Analyze repository'
                 }).then(function(proceed){
                     if(!proceed){
@@ -17737,27 +17610,13 @@ function App(){
                 ),
                 React.createElement('div',{className:'mobile-source-controls'},
                     React.createElement('div',{className:'mobile-primary-row'},
-                        React.createElement('input',{className:'repo-input','aria-label':'Repository URL',placeholder:'owner/repo or GitHub URL',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
+                        React.createElement('input',{className:'repo-input github-url-input','aria-label':'Open GitHub URL (optional)',placeholder:'https://github.com/owner/repo',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
                         React.createElement('button',{id:'mobile-analyze-btn',className:'top-btn primary mobile-analyze-btn','aria-label':'Analyze repository',title:'Analyze',onClick:analyze,disabled:loading||!repoUrl,type:'button'},
                             React.createElement(Icon,{name:loading?'activity':'search',size:'m'})
                         )
                     ),
                     React.createElement('div',{className:'mobile-secondary-row'},
-                        React.createElement('select',{className:'auth-select','aria-label':'Authentication Method',value:authMethod,onChange:function(e){setAuthMethod(e.target.value);}},
-                            React.createElement('option',{value:'none'},'No Auth'),
-                            React.createElement('option',{value:'pat'},'Token'),
-                            React.createElement('option',{value:'github_app'},'App')
-                        ),
-                        React.createElement('div',{className:'auth-inputs'},
-                            authMethod==='pat'&&React.createElement('input',{className:'repo-input',type:'password','aria-label':'GitHub Token',placeholder:'Personal Access Token',value:token,onChange:function(e){setToken(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
-                            authMethod==='github_app'&&React.createElement(React.Fragment,null,
-                                React.createElement('input',{className:'repo-input','aria-label':'App ID',placeholder:'App ID',value:appId,onChange:function(e){setAppId(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
-                                React.createElement('button',{className:'private-key-btn'+(privateKey?' has-key':''),'aria-label':'Set Private Key',onClick:function(){setShowKeyModal(true);},type:'button'},
-                                    React.createElement(Icon,{name:privateKey?'key':'shield',size:'m'}),
-                                    privateKey?'Key':'Private Key'
-                                )
-                            )
-                        ),
+                        React.createElement('div',{className:'project-selector-slot','data-codeflow-project-slot':'mobile'}),
                         React.createElement('button',{className:'top-btn','aria-label':'Edit exclude patterns',onClick:function(){openExcludeModal();},disabled:loading,type:'button',style:customExcludeCount?{borderColor:'var(--acc)',color:'var(--acc)'}:null},
                             React.createElement(Icon,{name:'ban',size:'m'}),
                             'Excludes',
@@ -17791,22 +17650,8 @@ function App(){
                 React.createElement('span',{className:'logo-text'},'CODEFLOW')
             ),
             React.createElement('div',{className:'repo-input-group'},
-                React.createElement('input',{className:'repo-input','aria-label':'Repository URL',placeholder:'owner/repo or GitHub URL',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
-                React.createElement('select',{className:'auth-select','aria-label':'Authentication Method',value:authMethod,onChange:function(e){setAuthMethod(e.target.value);}},
-                    React.createElement('option',{value:'none'},'No Auth'),
-                    React.createElement('option',{value:'pat'},'Token (PAT)'),
-                    React.createElement('option',{value:'github_app'},'GitHub App')
-                ),
-                React.createElement('div',{className:'auth-inputs'},
-                    authMethod==='pat'&&React.createElement('input',{className:'repo-input',type:'password','aria-label':'GitHub Token',placeholder:'Personal Access Token',value:token,onChange:function(e){setToken(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();},style:{minWidth:140}}),
-                    authMethod==='github_app'&&React.createElement(React.Fragment,null,
-                        React.createElement('input',{className:'repo-input','aria-label':'App ID',placeholder:'App ID',value:appId,onChange:function(e){setAppId(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();},style:{width:80}}),
-                        React.createElement('button',{className:'private-key-btn'+(privateKey?' has-key':''),'aria-label':'Set Private Key',onClick:function(){setShowKeyModal(true);},type:'button'},
-                            React.createElement(Icon,{name:privateKey?'key':'shield',size:'m'}),
-                            privateKey?'Key Set':'Private Key'
-                        )
-                    )
-                ),
+                React.createElement('div',{className:'project-selector-slot','data-codeflow-project-slot':'desktop'}),
+                React.createElement('input',{className:'repo-input github-url-input','aria-label':'Open GitHub URL (optional)',placeholder:'https://github.com/owner/repo',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
                 React.createElement('button',{className:'top-btn','aria-label':'Edit exclude patterns',title:'Edit exclude patterns'+(customExcludeCount>0?' ('+customExcludeCount+')':''),onClick:function(){openExcludeModal();},disabled:loading,style:customExcludeCount?{borderColor:'var(--acc)',color:'var(--acc)'}:null},
                     React.createElement(Icon,{name:'ban',size:'m'}),
                     !data&&'Excludes',
@@ -18639,53 +18484,27 @@ function App(){
                 React.createElement('div',{className:'modal-body'},
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'globe',size:'l'})),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'100% Browser-Based'),React.createElement('div',{className:'privacy-text'},'CodeFlow runs entirely in your browser. No backend servers, no data collection.'))
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Local-First Analysis'),React.createElement('div',{className:'privacy-text'},'CodeFlow analyzes your selected local project in your browser. In CLI mode a local-only server on 127.0.0.1 serves the app and reads just that project. Your source code is never uploaded.'))
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'key',size:'l'})),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Your Token Stays Local'),React.createElement('div',{className:'privacy-text'},'Your GitHub token is stored only in your browser\'s memory. It\'s never saved, logged, or transmitted anywhere except directly to GitHub\'s API.'))
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'No GitHub Login'),React.createElement('div',{className:'privacy-text'},'No GitHub authentication, token or GitHub App is required or collected. Public GitHub repositories can be analyzed anonymously, subject to GitHub\'s public API rate limits.'))
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'share',size:'l'})),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Direct API Calls'),React.createElement('div',{className:'privacy-text'},'All GitHub API calls go directly from your browser to api.github.com. We have no proxy, no middleware, no way to intercept your data.'))
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Optional, Direct GitHub Calls'),React.createElement('div',{className:'privacy-text'},'When you open a public GitHub URL, requests go directly from your browser to api.github.com with no proxy. Your local project source is never sent to GitHub.'))
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'ban',size:'l'})),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Nothing Persisted'),React.createElement('div',{className:'privacy-text'},'Close the tab and everything is gone. No cookies, no local storage, no tracking. The application code remains inspectable in index.html.'))
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Locally Stored Settings'),React.createElement('div',{className:'privacy-text'},'Your project configuration and the analysis cache are stored locally on your machine so your selection persists across restarts. They are never sent to a remote server.'))
                     ),
                     React.createElement('div',{style:{marginTop:16,padding:12,background:'var(--accbg)',borderRadius:8,fontSize:10,color:'var(--t1)'}},
                         React.createElement(Icon,{name:'spark',size:'s'}),
-                        ' Tip: Create a ',
-                        React.createElement('a',{href:'https://github.com/settings/tokens',target:'_blank',rel:'noopener',style:{color:'var(--acc)'}},'Personal Access Token'),
-                        ' with only "public_repo" scope for extra peace of mind when analyzing public repositories.'
+                        ' Analyzing a public GitHub repository uses anonymous requests, which GitHub rate-limits (about 60 per hour per IP). Use Open Folder or Open ZIP for unlimited, fully local analysis.'
                     )
                 ),
                 React.createElement('div',{className:'modal-footer'},
                     React.createElement('button',{className:'top-btn primary',onClick:function(){setShowPrivacy(false);}},'Got it!')
-                )
-            )
-        ),
-        showKeyModal&&React.createElement('div',{className:'modal-overlay',onClick:function(){setShowKeyModal(false);}},
-            React.createElement('div',{className:'modal key-modal',onClick:function(e){e.stopPropagation();}},
-                React.createElement('div',{className:'modal-header'},React.createElement('div',{className:'modal-title'},iconLabel('key','GitHub App Private Key','m')),React.createElement('button',{className:'modal-close',onClick:function(){setShowKeyModal(false);}},'×')),
-                React.createElement('div',{className:'modal-body'},
-                    React.createElement('div',{className:'key-info'},
-                        'Paste the private key from your GitHub App. This key is stored only in memory and never leaves your browser.',
-                        React.createElement('br'),React.createElement('br'),
-                        'To get a private key:',React.createElement('br'),
-                        '1. Go to GitHub → Settings → Developer settings → GitHub Apps',React.createElement('br'),
-                        '2. Select your app → Generate a private key',React.createElement('br'),
-                        '3. Open the downloaded ',React.createElement('code',null,'.pem'),' file and paste its contents below'
-                    ),
-                    React.createElement('div',{className:'form-group'},
-                        React.createElement('label',{className:'form-label'},'Private Key (PEM format)'),
-                        React.createElement('textarea',{className:'form-input',placeholder:'-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----',value:privateKey,onChange:function(e){setPrivateKey(e.target.value);},rows:10})
-                    )
-                ),
-                React.createElement('div',{className:'modal-footer'},
-                    privateKey&&React.createElement('button',{className:'top-btn',onClick:function(){setPrivateKey('');},style:{marginRight:'auto'}},'Clear Key'),
-                    React.createElement('button',{className:'top-btn',onClick:function(){setShowKeyModal(false);}},'Cancel'),
-                    React.createElement('button',{className:'top-btn primary',onClick:function(){setShowKeyModal(false);}},'Save')
                 )
             )
         ),
