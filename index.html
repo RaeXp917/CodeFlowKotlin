@@ -13619,6 +13619,7 @@ function App(){
 
     function probeCodeflowCli(){
         fetch('/__codeflow/status').then(function(res){return res.ok?res.json():null;}).then(function(status){
+            if(status&&status.missing&&!data){showNotification('The last selected project is missing or was moved. Pick a project in the Project dropdown.','warning');}
             if(!status||!status.ok)return;
             setCliStatus(status);
             if(!window.location.search||window.location.search.indexOf('repo=')<0){
@@ -13658,7 +13659,7 @@ function App(){
             if((!status||!status.ok)&&!force)return;
         }
         if(wantedRoot&&!cliRecordMatchesStatus({sourceKey:wantedRoot},status)){
-            showNotification('Restart the CLI in that folder to re-analyze it.','warning');
+            showNotification('That project is no longer the selected project. Pick it again in the Project dropdown to re-analyze.','warning');
             return false;
         }
         if(status&&status.ok)setCliStatus(status);
@@ -13680,10 +13681,12 @@ function App(){
         try{
             await Parser.initTreeSitter().catch(function(){return null;});
             var listRes=await fetch('/__codeflow/files');
-            if(!listRes.ok)throw new Error('CLI file list failed');
+            if(listRes.status===409){setLoading(false);cliAnalyzingRef.current=false;return;}// No project selected: stay on the neutral empty state.
+            if(listRes.status===410)throw new Error('The selected project folder is missing or was moved. Select another project in the Project dropdown.');
+            if(!listRes.ok)throw new Error('Could not read the selected project’s files.');
             var list=await listRes.json();
             var files=filterAnalyzableLocalFiles(list&&list.files?list.files:[],activeExcludePatterns);
-            if(!files.length)throw new Error(activeExcludePatterns.length?'No code files found in the watched folder after applying exclude patterns':'No code files found in the watched folder');
+            if(!files.length)throw new Error(activeExcludePatterns.length?'No supported source files found in the selected project after applying exclude patterns.':'No supported source files found in the selected project.');
             var analyzed=[];
             var allFns=[];
             for(var i=0;i<files.length;i++){
@@ -13742,7 +13745,7 @@ function App(){
             cliWatchDuringRef.current=[];
             cliWatchReadRef.current=Object.create(null);
             cliWatchSnapRevRef.current=Object.create(null);
-            setError('CLI analysis failed: '+(err.message||err));
+            setError(err&&err.message?err.message:String(err));
             setLoading(false);
         }
     }
@@ -14088,7 +14091,7 @@ function App(){
             var wantedRoot=source&&source.sourceType==='cli'?source.sourceKey:'';
             if(wantedRoot&&cliStatus&&cliStatus.ok&&!cliRecordMatchesStatus(source,cliStatus)){
                 applyCachedAnalysis(source);
-                showNotification('Restart the CLI in that folder to re-analyze it.','warning');
+                showNotification('That project is no longer the selected project. Pick it again in the Project dropdown to re-analyze.','warning');
                 return;
             }
             Promise.resolve(analyzeFromCli(true,cliStatus,wantedRoot||null)).then(function(ok){

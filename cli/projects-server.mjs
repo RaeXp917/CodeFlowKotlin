@@ -28,6 +28,11 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const SKIP_PROJECT_NAMES = new Set(['.git', 'node_modules', 'build', 'dist', 'out', '.gradle', '.idea', '.cache', '.vscode']);
 
 const makeKey = (p) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+// A selected project can be deleted/moved while the server runs, so the live
+// selection is re-validated against disk before it is reported or enumerated.
+async function dirExists(p) {
+  try { return !!p && (await fs.stat(p)).isDirectory(); } catch { return false; }
+}
 const mime = (p) => ({
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -202,13 +207,16 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
         } catch { return json(res, 400, { error: 'Unknown project' }); }
       }
       if (pathname === '/__codeflow/status') {
+        const live = await dirExists(currentRoot);
         return json(res, 200, {
-          ok: !!currentRoot, root: currentRoot, name: currentProject,
-          watch: !!(watcher && watcher.watching),
+          ok: live, root: currentRoot, name: currentProject,
+          watch: !!(watcher && watcher.watching) && live,
+          missing: !!currentProject && !live,
         });
       }
       if (pathname === '/__codeflow/files') {
-        if (!currentRoot) return json(res, 409, { error: 'Select a project' });
+        if (!currentProject || !currentRoot) return json(res, 409, { error: 'No project selected', code: 'no-project' });
+        if (!(await dirExists(currentRoot))) return json(res, 410, { error: 'Project folder is missing', code: 'project-missing' });
         return json(res, 200, { files: await listWatchFiles(currentRoot) });
       }
       if (pathname === '/__codeflow/file') {
