@@ -356,14 +356,7 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .pr-file-folder{font-size:9px;color:var(--t3)}
 .pr-file-badges{display:flex;gap:4px}
 .pr-mini-badge{font-size:8px;padding:2px 5px;border-radius:3px}
-.treemap-container,.graph3d-container{width:100%;height:100%;position:relative}
-.treemap-cell{position:absolute;overflow:hidden;border:1px solid var(--bg0);transition:all 0.2s;cursor:pointer}
-.treemap-cell:hover{z-index:10;transform:scale(1.02);box-shadow:0 4px 12px rgba(0,0,0,0.3)}
-.treemap-label{position:absolute;bottom:4px;left:4px;right:4px;font-size:9px;font-weight:500;color:white;text-shadow:0 1px 2px rgba(0,0,0,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.matrix-container{overflow:auto}
-.matrix-cell{width:14px;height:14px;border:1px solid var(--bg0);transition:all 0.15s}
-.matrix-cell:hover{transform:scale(1.5);z-index:10}
-.matrix-label{font-size:8px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.graph3d-container{width:100%;height:100%;position:relative}
 .arc-container{width:100%;height:100%}
 .arc-node{cursor:pointer;transition:all 0.2s}
 .arc-node:hover{transform:scale(1.3)}
@@ -384,24 +377,6 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .treemap-tooltip{position:absolute;padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:6px;font-size:10px;pointer-events:none;z-index:100;max-width:200px}
 .treemap-tooltip-title{font-weight:600;color:var(--t0);margin-bottom:4px}
 .treemap-tooltip-stat{color:var(--t2);display:flex;justify-content:space-between;gap:12px}
-.matrix-row{display:flex;align-items:center}
-.matrix-label-row{writing-mode:vertical-lr;transform:rotate(180deg);font-size:8px;color:var(--t2);padding:2px 4px;max-width:80px;overflow:hidden;text-overflow:ellipsis}
-.matrix-label-col{font-size:8px;color:var(--t2);padding:4px 4px;width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.heatmap-legend{position:absolute;bottom:60px;right:20px;background:var(--bg1);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:9px}
-.heatmap-gradient{width:100px;height:8px;border-radius:4px;margin:6px 0;background:linear-gradient(90deg,var(--bg3),var(--acc))}
-.architecture-view{width:100%;height:100%;overflow:hidden;background:var(--bg0);display:flex;flex-direction:column}
-.architecture-shell{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;background:transparent;border:none;border-radius:0;padding:0}
-.architecture-summary-bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-.architecture-chip{padding:6px 10px;background:var(--bg0);border:1px solid var(--border);border-radius:6px;font-size:10px;color:var(--t2)}
-.architecture-chip strong{color:var(--acc)}
-.mermaid-render{flex:1;width:100%;min-height:0;position:relative;overflow:hidden;background:var(--bg0);cursor:grab;touch-action:none}
-.mermaid-render.dragging{cursor:grabbing}
-.architecture-pan{position:absolute;left:0;top:0;display:block;transform-origin:0 0;will-change:transform}
-.architecture-pan svg{display:block;max-width:none;overflow:visible}
-.architecture-source{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t1);background:var(--bg0);border:1px solid var(--border);border-radius:8px;padding:12px;white-space:pre;overflow:auto}
-.architecture-list{display:flex;flex-direction:column;gap:6px}
-.architecture-list-item{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--t2);min-width:0}
-.architecture-list-item span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pr-impact-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .pr-impact-card{background:var(--bg0);border:1px solid var(--border);border-radius:10px;padding:14px;overflow:hidden}
 .pr-impact-card-title{font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:6px}
@@ -736,8 +711,6 @@ body{height:100dvh;min-height:100dvh}
 .canvas-toolbar{top:auto;bottom:72px;left:10px;right:auto;gap:6px;overflow-x:visible;padding:4px;background:var(--bg1);border:1px solid var(--border);border-radius:10px}
 .tool-btn{width:38px;height:38px;font-size:14px;flex:0 0 auto}
 .graph-config{top:52px;left:10px;right:10px;width:auto;max-width:none}
-.architecture-view{padding:0}
-.architecture-shell{min-width:0;padding:0}
 .color-by{top:auto;bottom:118px;right:10px}
 .legend{top:auto;bottom:72px;right:10px;max-width:calc(100vw - 20px)}
 .legend.with-color-by{top:auto;bottom:72px}
@@ -10456,8 +10429,8 @@ function vizUsesForceLinkParticles(vizType){
 }
 // Supported visualization types after Cluster removal. Any stale/unknown value
 // (e.g. a previously saved 'disjoint') normalizes to the Tree Map default.
-var SUPPORTED_VIZ_TYPES=['graph','code','graph3d','treemap','matrix','dendro','sankey','bundle','architecture'];
-var DEFAULT_VIZ_TYPE='treemap';
+var SUPPORTED_VIZ_TYPES=['graph','code','graph3d','dendro','sankey','bundle'];
+var DEFAULT_VIZ_TYPE='code';
 function isSupportedVizType(vizType){
     return SUPPORTED_VIZ_TYPES.indexOf(vizType)!==-1;
 }
@@ -12994,10 +12967,6 @@ function App(){
     var _am=useState(window.innerWidth),viewportWidth=_am[0],setViewportWidth=_am[1];
     var _an=useState(null),mobilePanel=_an[0],setMobilePanel=_an[1];
     var _ao=useState(48),topbarHeight=_ao[0],setTopbarHeight=_ao[1];
-    var _arch=useState({scale:1,x:0,y:0}),architectureViewport=_arch[0],setArchitectureViewport=_arch[1];
-    var _archDrag=useState(false),architectureDragging=_archDrag[0],setArchitectureDragging=_archDrag[1];
-    var _archTests=useState(false),architectureIncludeTests=_archTests[0],setArchitectureIncludeTests=_archTests[1];
-    var _archBuild=useState(false),architectureIncludeBuildOutput=_archBuild[0],setArchitectureIncludeBuildOutput=_archBuild[1];
     var _recents=useState([]),recentAnalyses=_recents[0],setRecentAnalyses=_recents[1];
     var _cachedId=useState(null),cachedFromId=_cachedId[0],setCachedFromId=_cachedId[1];
     var _activeSym=useState(null),activeSymbol=_activeSym[0],setActiveSymbol=_activeSym[1];
@@ -13011,13 +12980,9 @@ function App(){
     var graph3dInstanceRef=useRef(null);
     var topbarRef=useRef(null);
     var filePreviewRef=useRef(null);
-    var treemapRef=useRef(null);
-    var matrixRef=useRef(null);
     var dendroRef=useRef(null);
     var sankeyRef=useRef(null);
     var bundleRef=useRef(null);
-    var architectureRenderRef=useRef(null);
-    var architectureDragRef=useRef(null);
     var zoomRef=useRef(null);
     var simRef=useRef(null);
     var nodesRef=useRef(null);
@@ -13109,74 +13074,7 @@ function App(){
 
     useEffect(function(){
         document.body.className=theme==='light'?'light':'';
-        if(window.mermaid){
-            window.mermaid.initialize({
-                startOnLoad:false,
-                securityLevel:'strict',
-                theme:theme==='light'?'default':'dark',
-                flowchart:{htmlLabels:true,curve:'basis'}
-            });
-        }
     },[theme]);
-
-    useEffect(function(){
-        if(graphConfig.vizType!=='architecture')return;
-        var container=architectureRenderRef.current;
-        if(!container)return;
-        var diagram=data&&data.architectureDiagram;
-        var mermaidText=diagram?generateMermaidBlockDiagram(diagram,architectureIncludeTests,architectureIncludeBuildOutput):'';
-        if(!mermaidText){
-            container.innerHTML='<div class="empty-state"><div class="empty-title">No architecture diagram</div><div class="empty-desc">Analyze a repository to generate a block diagram.</div></div>';
-            return;
-        }
-        if(!window.mermaid){
-            container.innerHTML='<div class="empty-state"><div class="empty-title">Mermaid unavailable</div><div class="empty-desc">The Mermaid renderer did not load. You can still export the raw Mermaid source.</div></div>';
-            return;
-        }
-        var cancelled=false;
-        var renderId='codeflow-architecture-'+Date.now();
-        container.innerHTML='<div class="loading"><div class="spinner"></div><div class="loading-text">Rendering block diagram...</div></div>';
-        try{
-            window.mermaid.initialize({
-                startOnLoad:false,
-                securityLevel:'strict',
-                theme:theme==='light'?'default':'dark',
-                flowchart:{htmlLabels:true,curve:'basis'}
-            });
-            window.mermaid.render(renderId,mermaidText).then(function(result){
-                if(cancelled||!architectureRenderRef.current)return;
-                architectureRenderRef.current.innerHTML='<div class="architecture-pan">'+result.svg+'</div>';
-                var svg=architectureRenderRef.current.querySelector('.architecture-pan svg');
-                if(!svg){
-                    architectureRenderRef.current.innerHTML='<div class="empty-state"><div class="empty-title">Mermaid render failed</div><div class="empty-desc">The renderer returned no SVG for this diagram.</div></div>';
-                    return;
-                }
-                normalizeArchitectureSvg(svg);
-                requestAnimationFrame(function(){
-                    if(!cancelled)fitArchitectureViewport();
-                });
-            }).catch(function(err){
-                if(cancelled||!architectureRenderRef.current)return;
-                architectureRenderRef.current.innerHTML='<div class="empty-state"><div class="empty-title">Mermaid render failed</div><div class="empty-desc">'+escapeHtml(err&&err.message?err.message:String(err))+'</div></div>';
-            });
-        }catch(err){
-            container.innerHTML='<div class="empty-state"><div class="empty-title">Mermaid render failed</div><div class="empty-desc">'+escapeHtml(err&&err.message?err.message:String(err))+'</div></div>';
-        }
-        return function(){cancelled=true;};
-    },[data,graphConfig.vizType,theme,architectureIncludeTests,architectureIncludeBuildOutput]);
-
-    useEffect(function(){
-        var container=architectureRenderRef.current;
-        var pan=container?container.querySelector('.architecture-pan'):null;
-        if(!pan)return;
-        pan.style.transform='translate('+architectureViewport.x+'px,'+architectureViewport.y+'px) scale('+architectureViewport.scale+')';
-    },[architectureViewport,data,graphConfig.vizType,theme]);
-
-    useEffect(function(){
-        if(graphConfig.vizType!=='architecture')return;
-        var frame=requestAnimationFrame(function(){fitArchitectureViewport();});
-        return function(){cancelAnimationFrame(frame);};
-    },[viewportWidth,sidebarWidth,rightPanelWidth,graphConfig.vizType]);
 
     useEffect(function(){
         var el=folderInputRef.current;
@@ -13418,7 +13316,7 @@ function App(){
         }else{
             setLocalSourceKind(record.localSourceKind||record.sourceType);
         }
-        setGraphConfig(function(cfg){return Object.assign({},cfg,{vizType:normalizeVizType(cfg.vizType==='architecture'?DEFAULT_VIZ_TYPE:cfg.vizType)});});
+        setGraphConfig(function(cfg){return Object.assign({},cfg,{vizType:normalizeVizType(cfg.vizType)});});
         showNotification('Loaded cached analysis. Re-analyze to refresh.','success');
     }
 
@@ -15985,137 +15883,6 @@ function App(){
         };
     },[data,colorMap,colorMode,theme,folderFilter,graphConfig.vizType,selected,blastRadius,graphConfig.linkDist,graphConfig.spacing,graphConfig.showLabels,graphConfig.curvedLinks,graphConfig.autoRotate]);
 
-    // Treemap visualization - Interactive with zoom, pan, selection, blast radius
-    useEffect(function(){
-        if(!data||!treemapRef.current||graphConfig.vizType!=='treemap')return;
-        var container=d3.select(treemapRef.current);
-        container.selectAll('*').remove();
-        var w=treemapRef.current.clientWidth||800,h=treemapRef.current.clientHeight||600;
-        var svg=container.append('svg').attr('width',w).attr('height',h).style('cursor','grab');
-        var g=svg.append('g');
-        var zoom=d3.zoom().scaleExtent([0.3,4]).on('zoom',function(e){g.attr('transform',e.transform);svg.style('cursor',e.transform.k>1?'grab':'default');});
-        svg.call(zoom);
-        var hier={name:'root',children:[]};
-        var folderMap={};
-        var filteredFiles=folderFilter?data.files.filter(function(f){return f.folder===folderFilter||f.folder.startsWith(folderFilter+'/');}):data.files;
-        filteredFiles.forEach(function(f){
-            var folder=f.folder||'root';
-            if(!folderMap[folder])folderMap[folder]={name:folder,children:[]};
-            folderMap[folder].children.push({name:f.name,value:f.lines||1,path:f.path,layer:f.layer,fns:f.functions.length,folder:folder});
-        });
-        hier.children=Object.values(folderMap);
-        var root=d3.hierarchy(hier).sum(function(d){return d.value||0;}).sort(function(a,b){return b.value-a.value;});
-        d3.treemap().size([w-20,h-20]).padding(3).round(true)(root);
-        var pathToLeaf={};
-        root.leaves().forEach(function(leaf){if(leaf.data.path)pathToLeaf[leaf.data.path]=leaf;});
-        var cells=g.selectAll('g.treemap-cell-g').data(root.leaves()).join('g').attr('class','treemap-cell-g')
-            .attr('transform',function(d){return'translate('+d.x0+','+d.y0+')';});
-        cells.append('rect').attr('class','treemap-rect').attr('width',function(d){return Math.max(0,d.x1-d.x0);}).attr('height',function(d){return Math.max(0,d.y1-d.y0);})
-            .attr('fill',function(d){return colorMap[d.parent.data.name]||COLORS[hier.children.indexOf(d.parent.data)%COLORS.length];})
-            .attr('opacity',0.85).attr('rx',3).attr('stroke','var(--bg0)').attr('stroke-width',1).style('cursor','pointer');
-        cells.filter(function(d){return d.x1-d.x0>45&&d.y1-d.y0>22;}).append('text').attr('class','treemap-text')
-            .attr('x',4).attr('y',14).attr('fill','white').attr('font-size','10px').attr('font-weight','500').style('text-shadow','0 1px 2px rgba(0,0,0,0.5)').style('pointer-events','none')
-            .text(function(d){var n=d.data.name.replace(/\.[^.]+$/,'');var maxLen=Math.floor((d.x1-d.x0-8)/6);return n.length>maxLen?n.slice(0,maxLen-1)+'…':n;});
-        cells.filter(function(d){return d.x1-d.x0>60&&d.y1-d.y0>35;}).append('text').attr('class','treemap-subtext')
-            .attr('x',4).attr('y',26).attr('fill','rgba(255,255,255,0.7)').attr('font-size','8px').style('pointer-events','none')
-            .text(function(d){return d.data.value+' lines';});
-        var tooltip=container.append('div').attr('class','treemap-tooltip').style('display','none').style('position','absolute');
-        cells.on('mouseenter',function(e,d){
-            tooltip.html(renderTooltipHtml(d.data.name,[
-                {label:'Lines',value:d.data.value},
-                {label:'Functions',value:d.data.fns||0},
-                {label:'Layer',value:d.data.layer||'—'},
-                {label:'Folder',value:d.data.folder||'root'}
-            ]))
-                .style('display','block').style('left',(e.offsetX+15)+'px').style('top',(e.offsetY+15)+'px');
-            d3.select(this).select('rect').transition().duration(150).attr('opacity',1).attr('stroke','var(--acc)').attr('stroke-width',2);
-        }).on('mousemove',function(e){tooltip.style('left',(e.offsetX+15)+'px').style('top',(e.offsetY+15)+'px');})
-        .on('mouseleave',function(e,d){
-            tooltip.style('display','none');
-            var sel=selected?selected.path:null;
-            var isSelected=d.data.path===sel;
-            var isAffected=blastRadius&&blastRadius.affected.includes(d.data.path);
-            d3.select(this).select('rect').transition().duration(150).attr('opacity',isSelected?1:isAffected?0.95:0.85).attr('stroke',isSelected?'#ff5f5f':isAffected?'var(--orange)':'var(--bg0)').attr('stroke-width',isSelected||isAffected?2:1);
-        }).on('click',function(e,d){
-            e.stopPropagation();
-            if(d.data.path&&selectFileRef.current){
-                selectFileRef.current(d.data.path);
-                setTimeout(function(){
-                    var blast=blastRadius;
-                    cells.select('rect').transition().duration(300)
-                        .attr('opacity',function(n){return n.data.path===d.data.path?1:(blast&&blast.affected.includes(n.data.path))?0.95:0.4;})
-                        .attr('fill',function(n){return n.data.path===d.data.path?'#ff5f5f':(blast&&blast.affected.includes(n.data.path))?'#ff9f43':colorMap[n.parent.data.name]||COLORS[0];})
-                        .attr('stroke',function(n){return n.data.path===d.data.path?'#ff5f5f':(blast&&blast.affected.includes(n.data.path))?'var(--orange)':'var(--bg0)';})
-                        .attr('stroke-width',function(n){return n.data.path===d.data.path||blast&&blast.affected.includes(n.data.path)?2:1;});
-                },100);
-            }
-        });
-        svg.on('click',function(){
-            setSelected(null);setBlastRadius(null);
-            cells.select('rect').transition().duration(300).attr('opacity',0.85).attr('fill',function(d){return colorMap[d.parent.data.name]||COLORS[0];}).attr('stroke','var(--bg0)').attr('stroke-width',1);
-        });
-        svg.on('dblclick.zoom',function(e){e.preventDefault();svg.transition().duration(300).call(zoom.scaleTo,1);});
-    },[data,graphConfig.vizType,colorMap,folderFilter,selected,blastRadius]);
-
-    // Dependency Matrix visualization - Interactive with zoom, highlighting, selection
-    useEffect(function(){
-        if(!data||!matrixRef.current||graphConfig.vizType!=='matrix')return;
-        var container=d3.select(matrixRef.current);
-        container.selectAll('*').remove();
-        var w=matrixRef.current.clientWidth||800,h=matrixRef.current.clientHeight||600;
-        var svg=container.append('svg').attr('width',w).attr('height',h);
-        var g=svg.append('g').attr('transform','translate(100,80)');
-        var zoom=d3.zoom().scaleExtent([0.5,3]).on('zoom',function(e){g.attr('transform','translate('+(100+e.transform.x)+','+(80+e.transform.y)+') scale('+e.transform.k+')');});
-        svg.call(zoom);
-        var filteredFiles=folderFilter?data.files.filter(function(f){return f.folder===folderFilter||f.folder.startsWith(folderFilter+'/');}):data.files;
-        var files=filteredFiles.slice(0,40);
-        var n=files.length;
-        var cellSize=Math.min(18,Math.max(10,(Math.min(w-120,h-100))/n));
-        var matrix=[];var fileIdx={};
-        files.forEach(function(f,i){fileIdx[f.path]=i;matrix[i]=[];for(var j=0;j<n;j++)matrix[i][j]=0;});
-        data.connections.forEach(function(c){
-            var src=typeof c.source==='object'?c.source.id:c.source;
-            var tgt=typeof c.target==='object'?c.target.id:c.target;
-            if(fileIdx[src]!==undefined&&fileIdx[tgt]!==undefined)matrix[fileIdx[src]][fileIdx[tgt]]+=c.count||1;
-        });
-        var maxVal=1;matrix.forEach(function(row){row.forEach(function(v){if(v>maxVal)maxVal=v;});});
-        var colLabels=g.selectAll('text.col-label').data(files).join('text').attr('class','col-label')
-            .attr('x',function(d,i){return i*cellSize+cellSize/2;}).attr('y',-8).attr('text-anchor','start').attr('transform',function(d,i){return'rotate(-45,'+(i*cellSize+cellSize/2)+','+-8+')';})
-            .attr('fill','var(--t2)').attr('font-size','9px').text(function(d){var n=d.name.replace(/\.[^.]+$/,'');return n.length>10?n.slice(0,8)+'…':n;}).style('cursor','pointer')
-            .on('click',function(e,d){if(selectFileRef.current)selectFileRef.current(d.path);});
-        var rowLabels=g.selectAll('text.row-label').data(files).join('text').attr('class','row-label')
-            .attr('x',-8).attr('y',function(d,i){return i*cellSize+cellSize/2+3;}).attr('text-anchor','end')
-            .attr('fill','var(--t2)').attr('font-size','9px').text(function(d){var n=d.name.replace(/\.[^.]+$/,'');return n.length>10?n.slice(0,8)+'…':n;}).style('cursor','pointer')
-            .on('click',function(e,d){if(selectFileRef.current)selectFileRef.current(d.path);});
-        var cellData=[];
-        files.forEach(function(f,i){files.forEach(function(g,j){cellData.push({row:i,col:j,value:matrix[i][j],source:f,target:g});});});
-        var tooltip=container.append('div').attr('class','treemap-tooltip').style('display','none').style('position','absolute');
-        var cells=g.selectAll('rect.matrix-cell-rect').data(cellData).join('rect').attr('class','matrix-cell-rect')
-            .attr('x',function(d){return d.col*cellSize;}).attr('y',function(d){return d.row*cellSize;})
-            .attr('width',cellSize-1).attr('height',cellSize-1).attr('rx',2)
-            .attr('fill',function(d){return d.value>0?'rgba(0,255,157,'+Math.max(0.15,d.value/maxVal)+')':'var(--bg2)';})
-            .attr('stroke','var(--bg0)').attr('stroke-width',0.5).style('cursor','pointer');
-        cells.on('mouseenter',function(e,d){
-            tooltip.html(renderTooltipHtml(d.source.name+' → '+d.target.name,[
-                {label:'Connections',value:d.value}
-            ]))
-                .style('display','block').style('left',(e.offsetX+15)+'px').style('top',(e.offsetY+15)+'px');
-            g.selectAll('rect.matrix-cell-rect').attr('opacity',function(c){return c.row===d.row||c.col===d.col?1:0.3;});
-            colLabels.attr('fill',function(f,i){return i===d.col?'var(--acc)':'var(--t2)';}).attr('font-weight',function(f,i){return i===d.col?'600':'400';});
-            rowLabels.attr('fill',function(f,i){return i===d.row?'var(--acc)':'var(--t2)';}).attr('font-weight',function(f,i){return i===d.row?'600':'400';});
-            d3.select(this).attr('stroke','var(--acc)').attr('stroke-width',2);
-        }).on('mousemove',function(e){tooltip.style('left',(e.offsetX+15)+'px').style('top',(e.offsetY+15)+'px');})
-        .on('mouseleave',function(){
-            tooltip.style('display','none');
-            cells.attr('opacity',1);
-            colLabels.attr('fill','var(--t2)').attr('font-weight','400');
-            rowLabels.attr('fill','var(--t2)').attr('font-weight','400');
-            d3.select(this).attr('stroke','var(--bg0)').attr('stroke-width',0.5);
-        }).on('click',function(e,d){e.stopPropagation();if(selectFileRef.current)selectFileRef.current(d.source.path);});
-        var legend=container.append('div').attr('class','heatmap-legend').style('position','absolute').style('bottom','60px').style('right','20px');
-        legend.html('<div style="font-size:9px;color:var(--t2)">Connection Strength</div><div class="heatmap-gradient"></div><div style="display:flex;justify-content:space-between;font-size:8px;color:var(--t3)"><span>0</span><span>'+maxVal+'</span></div>');
-    },[data,graphConfig.vizType,folderFilter]);
-
     // Cluster Dendrogram - Hierarchical tree visualization
     useEffect(function(){
         if(!data||!dendroRef.current||graphConfig.vizType!=='dendro')return;
@@ -16526,146 +16293,6 @@ function App(){
             showNotification('Copy failed.','error');
         }
         document.body.removeChild(textarea);
-    }
-    function copyMermaid(){
-        var diagram=data&&data.architectureDiagram;
-        var text=diagram?generateMermaidBlockDiagram(diagram,architectureIncludeTests,architectureIncludeBuildOutput):'';
-        copyText(text,'Mermaid diagram copied.');
-    }
-    function normalizeArchitectureSvg(svg){
-        if(!svg)return{width:0,height:0};
-        var width=0;
-        var height=0;
-        var viewBox=svg.getAttribute('viewBox')||'';
-        var viewBoxParts=viewBox.trim().split(/\s+/).map(function(part){return Number(part);});
-        if(viewBoxParts.length===4&&viewBoxParts.every(function(value){return isFinite(value);})){
-            width=viewBoxParts[2];
-            height=viewBoxParts[3];
-        }
-        if(!width||!height){
-            try{
-                var bbox=svg.getBBox();
-                if(bbox&&bbox.width&&bbox.height){
-                    width=bbox.width;
-                    height=bbox.height;
-                    svg.setAttribute('viewBox',[bbox.x,bbox.y,bbox.width,bbox.height].join(' '));
-                }
-            }catch(err){}
-        }
-        if(!width||!height){
-            var rect=svg.getBoundingClientRect();
-            width=rect.width||900;
-            height=rect.height||600;
-        }
-        width=Math.max(320,Math.ceil(width));
-        height=Math.max(240,Math.ceil(height));
-        svg.setAttribute('width',String(width));
-        svg.setAttribute('height',String(height));
-        svg.setAttribute('data-codeflow-width',String(width));
-        svg.setAttribute('data-codeflow-height',String(height));
-        svg.style.width=width+'px';
-        svg.style.height=height+'px';
-        svg.style.maxWidth='none';
-        return{width:width,height:height};
-    }
-    function fitArchitectureViewport(){
-        var container=architectureRenderRef.current;
-        var svg=container?container.querySelector('.architecture-pan svg'):null;
-        if(!container||!svg)return;
-        var rect=container.getBoundingClientRect();
-        var dims=normalizeArchitectureSvg(svg);
-        var availableWidth=Math.max(240,rect.width-64);
-        var availableHeight=Math.max(180,rect.height-64);
-        var scale=Math.min(1,availableWidth/dims.width,availableHeight/dims.height);
-        scale=clampArchitectureScale(scale);
-        var x=Math.max(24,Math.round((rect.width-dims.width*scale)/2));
-        var y=Math.max(24,Math.round((rect.height-dims.height*scale)/2));
-        setArchitectureViewport({scale:scale,x:x,y:y});
-    }
-    function clampArchitectureScale(value){
-        return Math.max(0.08,Math.min(3,value));
-    }
-    function zoomArchitecture(multiplier,clientX,clientY){
-        var container=architectureRenderRef.current;
-        setArchitectureViewport(function(prev){
-            var nextScale=clampArchitectureScale(prev.scale*multiplier);
-            var rect=container?container.getBoundingClientRect():null;
-            var px=rect?(clientX==null?rect.left+rect.width/2:clientX)-rect.left:0;
-            var py=rect?(clientY==null?rect.top+rect.height/2:clientY)-rect.top:0;
-            var ratio=nextScale/prev.scale;
-            return{
-                scale:nextScale,
-                x:px-(px-prev.x)*ratio,
-                y:py-(py-prev.y)*ratio
-            };
-        });
-    }
-    function resetArchitectureViewport(){
-        fitArchitectureViewport();
-    }
-    function handleArchitecturePointerDown(e){
-        if(e.button!==undefined&&e.button!==0)return;
-        e.preventDefault();
-        architectureDragRef.current={
-            pointerId:e.pointerId,
-            startX:e.clientX,
-            startY:e.clientY,
-            originX:architectureViewport.x,
-            originY:architectureViewport.y
-        };
-        if(e.currentTarget&&e.currentTarget.setPointerCapture){
-            try{e.currentTarget.setPointerCapture(e.pointerId);}catch(err){}
-        }
-        setArchitectureDragging(true);
-    }
-    function handleArchitecturePointerMove(e){
-        var drag=architectureDragRef.current;
-        if(!drag)return;
-        e.preventDefault();
-        setArchitectureViewport(function(prev){
-            return Object.assign({},prev,{
-                x:drag.originX+e.clientX-drag.startX,
-                y:drag.originY+e.clientY-drag.startY
-            });
-        });
-    }
-    function handleArchitecturePointerUp(e){
-        if(e&&e.currentTarget&&e.currentTarget.releasePointerCapture&&architectureDragRef.current){
-            try{e.currentTarget.releasePointerCapture(architectureDragRef.current.pointerId);}catch(err){}
-        }
-        architectureDragRef.current=null;
-        setArchitectureDragging(false);
-    }
-    function handleArchitectureWheel(e){
-        e.preventDefault();
-        zoomArchitecture(e.deltaY<0?1.12:0.88,e.clientX,e.clientY);
-    }
-    function downloadMermaid(){
-        var diagram=data&&data.architectureDiagram;
-        var text=diagram?generateMermaidBlockDiagram(diagram,architectureIncludeTests,architectureIncludeBuildOutput):'';
-        if(!text){showNotification('No Mermaid source to download.','error');return;}
-        var blob=new Blob([text],{type:'text/plain'});
-        var url=URL.createObjectURL(blob);
-        var a=document.createElement('a');
-        a.href=url;
-        a.download='codeflow-architecture.mmd';
-        a.click();
-        URL.revokeObjectURL(url);
-        showNotification('Mermaid source downloaded.','success');
-    }
-    function downloadArchitectureSVG(){
-        var svg=architectureRenderRef.current?architectureRenderRef.current.querySelector('svg'):null;
-        if(!svg){showNotification('No rendered architecture SVG to download.','error');return;}
-        var clone=svg.cloneNode(true);
-        clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
-        var blob=new Blob([new XMLSerializer().serializeToString(clone)],{type:'image/svg+xml'});
-        var url=URL.createObjectURL(blob);
-        var a=document.createElement('a');
-        a.href=url;
-        a.download='codeflow-architecture.svg';
-        a.click();
-        URL.revokeObjectURL(url);
-        showNotification('Architecture SVG downloaded.','success');
     }
     function graphSvgToPngDataUrlForPdf(scale,done){
         scale=scale||2;
@@ -17491,105 +17118,6 @@ function App(){
             )
         );
     }
-    function getArchitectureViewStats(diagram,includeTests,includeBuildOutput){
-        if(!diagram)return{blocks:0,dependencies:0,routes:0,apiRoutes:0,databaseTouchpoints:0,warnings:0};
-        var blocks=getVisibleArchitectureBlocks(diagram.blocks||[],!!includeTests,!!includeBuildOutput);
-        var visibleIds=new Set(blocks.map(function(block){return block.id;}));
-        var dependencies=(diagram.dependencies||[]).filter(function(dep){return visibleIds.has(dep.from)&&visibleIds.has(dep.to);});
-        var stats=computeArchitectureStats(blocks,dependencies);
-        stats.warnings=diagram.stats&&diagram.stats.warnings!=null?diagram.stats.warnings:(diagram.warnings?diagram.warnings.length:0);
-        return stats;
-    }
-    function renderArchitectureView(){
-        return React.createElement('div',{className:'architecture-view'},
-            React.createElement('div',{className:'architecture-shell'},
-                React.createElement('div',{
-                    className:'mermaid-render'+(architectureDragging?' dragging':''),
-                    ref:architectureRenderRef,
-                    onPointerDown:handleArchitecturePointerDown,
-                    onPointerMove:handleArchitecturePointerMove,
-                    onPointerUp:handleArchitecturePointerUp,
-                    onPointerCancel:handleArchitecturePointerUp,
-                    onWheel:handleArchitectureWheel,
-                    role:'img',
-                    'aria-label':'Architecture block diagram. Drag to pan, mouse wheel to zoom.'
-                })
-            )
-        );
-    }
-    function architectureGroupDotColor(group){
-        if(group==='Browser App'||group==='App Entry / Shell'||group==='Analysis Core'||group==='Frontend Routes'||group==='Frontend Page Components')return'var(--blue)';
-        if(group==='GitHub Action'||group==='Repository Collection'||group==='Backend API / Platform Logic')return'var(--purple)';
-        if(group==='Rendering / Reports'||group==='Storage'||group==='Configuration')return'var(--orange)';
-        if(group==='Content / Data')return'var(--green)';
-        if(group==='Testing'||group==='Fixtures / Examples'||group==='Build Output')return'var(--t3)';
-        return'var(--t2)';
-    }
-    function renderArchitectureBlockList(blocks,emptyText){
-        if(!blocks||!blocks.length)return React.createElement('div',{style:{fontSize:10,color:'var(--t3)',padding:8}},emptyText);
-        return React.createElement('div',{className:'architecture-list'},
-            blocks.slice(0,12).map(function(block){
-                return React.createElement('div',{key:block.id,className:'architecture-list-item'},
-                    React.createElement(StatusDot,{color:architectureGroupDotColor(block.group)}),
-                    React.createElement('span',{title:(block.files&&block.files[0])||block.route||block.title},block.title)
-                );
-            }),
-            blocks.length>12&&React.createElement('div',{style:{fontSize:9,color:'var(--t3)'}},'+',blocks.length-12,' more')
-        );
-    }
-    function renderArchitectureSummary(){
-        var diagram=data&&data.architectureDiagram;
-        if(!diagram)return React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-title'},'No architecture diagram'));
-        var stats=getArchitectureViewStats(diagram,architectureIncludeTests,architectureIncludeBuildOutput);
-        var blocks=getVisibleArchitectureBlocks(diagram.blocks||[],architectureIncludeTests,architectureIncludeBuildOutput);
-        var hidden=diagram.hiddenSummary||{build:0,tests:0,fixtures:0,lowSignal:0,total:0};
-        var groupOrder=getArchitectureGroupOrder(diagram.profile||'generic');
-        var groupCards=groupOrder.map(function(group){
-            var groupBlocks=blocks.filter(function(block){return block.group===group;});
-            if(!groupBlocks.length)return null;
-            return React.createElement('div',{key:group,className:'card'},
-                React.createElement('div',{className:'card-header'},
-                    React.createElement('div',{className:'card-title'},group),
-                    React.createElement('span',{className:'badge badge-default'},groupBlocks.length)
-                ),
-                React.createElement('div',{className:'card-body'},renderArchitectureBlockList(groupBlocks,'No blocks in this group.'))
-            );
-        }).filter(Boolean);
-        return React.createElement(React.Fragment,null,
-            React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},React.createElement(Icon,{name:'layers',size:'m'}),' Architecture Summary'),
-            React.createElement('div',{className:'stats-grid',style:{marginBottom:12}},
-                React.createElement('div',{className:'stat-card'},React.createElement('div',{className:'stat-value'},stats.blocks||0),React.createElement('div',{className:'stat-label'},'Blocks')),
-                React.createElement('div',{className:'stat-card'},React.createElement('div',{className:'stat-value'},stats.dependencies||0),React.createElement('div',{className:'stat-label'},'Deps')),
-                React.createElement('div',{className:'stat-card'},React.createElement('div',{className:'stat-value'},stats.routes||0),React.createElement('div',{className:'stat-label'},'Routes')),
-                React.createElement('div',{className:'stat-card warn'},React.createElement('div',{className:'stat-value'},stats.databaseTouchpoints||0),React.createElement('div',{className:'stat-label'},'DB Touches'))
-            ),
-            React.createElement('div',{className:'card'},
-                React.createElement('div',{className:'card-header'},React.createElement('div',{className:'card-title'},React.createElement(Icon,{name:'globe',size:'s'}),' Framework'),React.createElement('span',{className:'badge badge-info'},diagram.framework)),
-                React.createElement('div',{className:'card-body'},
-                    React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:10}},'Type: ',diagram.type,' | Profile: ',diagram.profile||'generic',' | Warnings: ',stats.warnings||0),
-                    React.createElement('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
-                        React.createElement('button',{className:'top-btn'+(architectureIncludeTests?' primary':''),style:{fontSize:10,padding:'4px 10px'},onClick:function(){setArchitectureIncludeTests(function(v){return !v;});},type:'button'},'Tests'),
-                        React.createElement('button',{className:'top-btn'+(architectureIncludeBuildOutput?' primary':''),style:{fontSize:10,padding:'4px 10px'},onClick:function(){setArchitectureIncludeBuildOutput(function(v){return !v;});},type:'button'},'Build output')
-                    ),
-                    React.createElement('div',{style:{fontSize:9,color:'var(--t3)',marginTop:8}},'Pan: drag diagram · Zoom: scroll wheel · Export: navbar Export button')
-                )
-            ),
-            hidden.total>0&&React.createElement('div',{className:'card'},
-                React.createElement('div',{className:'card-header'},React.createElement('div',{className:'card-title'},React.createElement(Icon,{name:'info',size:'s'}),' Hidden from diagram'),React.createElement('span',{className:'badge badge-default'},hidden.total)),
-                React.createElement('div',{className:'card-body'},
-                    hidden.build>0&&React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:4}},hidden.build,' build file',hidden.build===1?'':'s'),
-                    hidden.tests>0&&React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:4}},hidden.tests,' test file',hidden.tests===1?'':'s'),
-                    hidden.fixtures>0&&React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:4}},hidden.fixtures,' fixture file',hidden.fixtures===1?'':'s'),
-                    hidden.lowSignal>0&&React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:4}},hidden.lowSignal,' low-signal utility file',hidden.lowSignal===1?'':'s')
-                )
-            ),
-            groupCards,
-            diagram.warnings&&diagram.warnings.length>0&&React.createElement('div',{className:'card'},
-                React.createElement('div',{className:'card-header'},React.createElement('div',{className:'card-title'},React.createElement(Icon,{name:'warning',size:'s'}),' Warnings'),React.createElement('span',{className:'badge badge-warning'},diagram.warnings.length)),
-                React.createElement('div',{className:'card-body'},diagram.warnings.map(function(warning,i){return React.createElement('div',{key:i,style:{fontSize:10,color:'var(--t2)',marginBottom:6,lineHeight:1.5}},warning);}))
-            )
-        );
-    }
     var health=useMemo(function(){return calcHealth(data);},[data]);
     return React.createElement('div',{className:'app',style:{'--topbar-height':topbarHeight+'px'}},
         React.createElement('input',{ref:zipInputRef,type:'file',accept:'.zip,application/zip,application/x-zip-compressed',style:{display:'none'},onChange:handleZipSelected}),
@@ -17742,27 +17270,21 @@ function App(){
                 ):
                 React.createElement(React.Fragment,null,
                     React.createElement('div',{className:'viz-selector'},
-                        React.createElement('select',{className:'viz-select','aria-label':'Visualization type',value:normalizeVizType(graphConfig.vizType),onChange:function(e){var v=normalizeVizType(e.target.value);setGraphConfig(Object.assign({},graphConfig,{vizType:v}));if(v==='architecture'){setSelected(null);setBlastRadius(null);}}},
-                            React.createElement('option',{value:'graph'},'Graph'),
+                        React.createElement('select',{className:'viz-select','aria-label':'Visualization type',value:normalizeVizType(graphConfig.vizType),onChange:function(e){var v=normalizeVizType(e.target.value);setGraphConfig(Object.assign({},graphConfig,{vizType:v}));}},
                             React.createElement('option',{value:'code'},'Code'),
+                            React.createElement('option',{value:'graph'},'Graph'),
                             React.createElement('option',{value:'graph3d'},'3D Graph'),
-                            React.createElement('option',{value:'treemap'},'Treemap'),
-                            React.createElement('option',{value:'matrix'},'Matrix'),
                             React.createElement('option',{value:'dendro'},'Tree'),
                             React.createElement('option',{value:'sankey'},'Flow'),
-                            React.createElement('option',{value:'bundle'},'Bundle'),
-                            React.createElement('option',{value:'architecture'},'Block Diagram')
+                            React.createElement('option',{value:'bundle'},'Bundle')
                         )
                     ),
                     graphConfig.vizType==='graph'&&React.createElement('svg',{ref:svgRef}),
                     graphConfig.vizType==='code'&&renderCodeView(),
                     graphConfig.vizType==='graph3d'&&React.createElement('div',{ref:graph3dRef,className:'graph3d-container',style:{width:'100%',height:'100%'}}),
-                    graphConfig.vizType==='treemap'&&React.createElement('div',{ref:treemapRef,className:'treemap-container'}),
-                    graphConfig.vizType==='matrix'&&React.createElement('div',{ref:matrixRef,className:'matrix-container',style:{width:'100%',height:'100%',overflow:'auto',display:'flex',alignItems:'center',justifyContent:'center'}}),
                     graphConfig.vizType==='dendro'&&React.createElement('div',{ref:dendroRef,className:'dendro-container',style:{width:'100%',height:'100%',position:'relative'}}),
                     graphConfig.vizType==='sankey'&&React.createElement('div',{ref:sankeyRef,className:'sankey-container',style:{width:'100%',height:'100%',position:'relative'}}),
                     graphConfig.vizType==='bundle'&&React.createElement('div',{ref:bundleRef,className:'bundle-container'}),
-                    graphConfig.vizType==='architecture'&&renderArchitectureView(),
                     vizUsesLineThickness(graphConfig.vizType)&&React.createElement('div',{className:'canvas-toolbar'},
                         vizHasGraphToolbar(graphConfig.vizType)&&React.createElement('button',{className:'tool-btn',onClick:zoomIn,'aria-label':'Zoom in'},'+'),
                         vizHasGraphToolbar(graphConfig.vizType)&&React.createElement('button',{className:'tool-btn',onClick:zoomOut,'aria-label':'Zoom out'},'−'),
@@ -17825,7 +17347,7 @@ function App(){
                         onKeyDown:handleMinimapKeyDown,
                         onWheel:function(e){e.preventDefault();e.stopPropagation();}
                     },React.createElement('canvas',{ref:minimapCanvasRef})),
-                    graphConfig.vizType!=='architecture'&&React.createElement('div',{className:'canvas-info'},
+                    React.createElement('div',{className:'canvas-info'},
                         React.createElement('div',{className:'info-chip'},React.createElement('strong',null,folderFilter?data.files.filter(function(f){return f.folder===folderFilter||f.folder.startsWith(folderFilter+'/');}).length:data.files.length),' files'),
                         React.createElement('div',{className:'info-chip'},React.createElement('strong',null,data.connections.length),' links'),
                         data.excludePatterns&&data.excludePatterns.length>0&&React.createElement('div',{className:'info-chip'},
@@ -17844,7 +17366,7 @@ function App(){
                     ),
                     renderColorByControl(),
                     renderCodeViewPrefs(),
-                    graphConfig.vizType!=='architecture'&&graphConfig.vizType!=='code'&&React.createElement('div',{className:'legend'+(legendCollapsed?' collapsed':'')+((graphConfig.vizType==='graph'||graphConfig.vizType==='graph3d')?' with-color-by':'')},
+                    graphConfig.vizType!=='code'&&React.createElement('div',{className:'legend'+(legendCollapsed?' collapsed':'')+((graphConfig.vizType==='graph'||graphConfig.vizType==='graph3d')?' with-color-by':'')},
                         React.createElement('div',{className:'legend-header',onClick:function(){setLegendCollapsed(!legendCollapsed);}},
                             React.createElement('div',{className:'legend-title',style:{margin:0}},colorMode==='folder'?'Folders':colorMode==='layer'?'Layers':'Churn'),
                             React.createElement('span',{className:'legend-toggle'},'▼')
@@ -17878,7 +17400,7 @@ function App(){
                 }}),
                 data?React.createElement(React.Fragment,null,
                     React.createElement('div',{className:'panel-tabs'},
-                        React.createElement('button',{className:'panel-tab'+(rightTab==='details'?' active':''),onClick:function(){setRightTab('details');setDrillDown(null);}},selected?iconLabel('file','FILE'):(graphConfig.vizType==='architecture'?iconLabel('layers','ARCH'):iconLabel('search','ISSUES'))),
+                        React.createElement('button',{className:'panel-tab'+(rightTab==='details'?' active':''),onClick:function(){setRightTab('details');setDrillDown(null);}},selected?iconLabel('file','FILE'):iconLabel('search','ISSUES')),
                         React.createElement('button',{className:'panel-tab'+(rightTab==='patterns'?' active':''),onClick:function(){setRightTab('patterns');setDrillDown(null);}},iconLabel('puzzle','PATTERNS'),React.createElement('span',{className:'panel-tab-pill'},data.patterns.length)),
                         React.createElement('button',{className:'panel-tab'+(rightTab==='security'?' active':''),onClick:function(){setRightTab('security');setDrillDown(null);}},iconLabel('security','SECURITY'),data.stats.security>0&&React.createElement('span',{className:'panel-tab-pill alert'},data.stats.security)),
                         React.createElement('button',{className:'panel-tab'+(rightTab==='suggestions'?' active':''),onClick:function(){setRightTab('suggestions');setDrillDown(null);}},iconLabel('action','ACTIONS'),data.suggestions&&data.suggestions.length>0&&React.createElement('span',{className:'panel-tab-pill alert'},data.suggestions.length))
@@ -18051,7 +17573,7 @@ function App(){
                                     })
                                 )
                             )
-                        ):graphConfig.vizType==='architecture'?renderArchitectureSummary():React.createElement(React.Fragment,null,
+                        ):React.createElement(React.Fragment,null,
                             React.createElement('div',{style:{fontSize:12,fontWeight:600,marginBottom:12}},React.createElement(Icon,{name:'search',size:'m'}),' Architecture Issues (',data.issues.length,')'),
                             data.issues.length===0?React.createElement('div',{style:{textAlign:'center',padding:20}},React.createElement(Icon,{name:'spark',size:'xxl',className:'empty-icon'}),React.createElement('div',{style:{color:'var(--green)'}},'No issues detected!')):
                             data.issues.map(function(issue,i){return React.createElement('div',{key:i,className:'security-item '+(issue.type==='critical'?'high':'medium'),style:{cursor:'pointer'},onClick:function(){setDrillDown({type:'issue',data:issue});}},
@@ -18149,16 +17671,8 @@ function App(){
             React.createElement('div',{className:'modal',onClick:function(e){e.stopPropagation();},style:{maxWidth:480}},
                 React.createElement('div',{className:'modal-header'},React.createElement('div',{className:'modal-title'},iconLabel('export','Export','m')),React.createElement('button',{className:'modal-close',onClick:function(){setShowExport(false);}},'×')),
                 React.createElement('div',{className:'modal-body'},
-                    data&&data.architectureDiagram&&React.createElement(React.Fragment,null,
-                        React.createElement('div',{style:{fontSize:10,fontWeight:600,color:'var(--t3)',textTransform:'uppercase',marginBottom:8}},graphConfig.vizType==='architecture'?'Block Diagram (current view)':'Block Diagram'),
-                        React.createElement('div',{className:'export-options'},
-                            React.createElement('div',{className:'export-option',onClick:function(){copyMermaid();setShowExport(false);}},React.createElement('div',{className:'export-option-icon'},React.createElement(Icon,{name:'copy',size:'xl'})),React.createElement('div',{className:'export-option-label'},'Copy Mermaid')),
-                            React.createElement('div',{className:'export-option',onClick:function(){downloadMermaid();setShowExport(false);}},React.createElement('div',{className:'export-option-icon'},React.createElement(Icon,{name:'code',size:'xl'})),React.createElement('div',{className:'export-option-label'},'Mermaid File')),
-                            React.createElement('div',{className:'export-option',onClick:function(){downloadArchitectureSVG();setShowExport(false);}},React.createElement('div',{className:'export-option-icon'},React.createElement(Icon,{name:'image',size:'xl'})),React.createElement('div',{className:'export-option-label'},'Diagram SVG'))
-                        )
-                    ),
-                    graphConfig.vizType!=='architecture'&&React.createElement(React.Fragment,null,
-                        React.createElement('div',{style:{fontSize:10,fontWeight:600,color:'var(--t3)',textTransform:'uppercase',marginBottom:8,marginTop:data&&data.architectureDiagram?16:0}},'Graph Visualization'),
+                    React.createElement(React.Fragment,null,
+                        React.createElement('div',{style:{fontSize:10,fontWeight:600,color:'var(--t3)',textTransform:'uppercase',marginBottom:8}},'Graph Visualization'),
                         !graphSvgExportEnabled(graphConfig.vizType)&&React.createElement('div',{style:{fontSize:9,color:'var(--t2)',marginBottom:10,lineHeight:1.4}},'Code cards are HTML overlays, not SVG. Switch to Graph to export an image.'),
                         React.createElement('div',{className:'export-options'},
                             React.createElement('div',{className:'export-option'+(graphSvgExportEnabled(graphConfig.vizType)?'':' disabled'),'aria-disabled':graphSvgExportEnabled(graphConfig.vizType)?undefined:'true',onClick:function(){if(!graphSvgExportEnabled(graphConfig.vizType))return;exportSVG();setShowExport(false);}},React.createElement('div',{className:'export-option-icon'},React.createElement(Icon,{name:'image',size:'xl'})),React.createElement('div',{className:'export-option-label'},'SVG Image')),

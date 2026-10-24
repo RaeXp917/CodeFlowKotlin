@@ -1,8 +1,7 @@
-// Stage 1 — Visualization cleanup and Tree Map default.
-// Verifies: Cluster (disjoint) removed from UI and unreachable; Metrics view
-// absent while internal metrics are preserved; Tree Map is the initial default;
-// a previously saved/unsupported view falls back safely to Tree Map; Block
-// Diagram and the other retained visualizations remain available.
+// Visualization views — current supported set and Code default.
+// (Stage 1 removed Cluster and defaulted to Tree Map; the Stage 2 follow-up
+// removed Matrix, Tree Map and Block Diagram and made Code the default. This
+// file tracks the current, authoritative behavior.)
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -23,72 +22,62 @@ const context = { console };
 vm.createContext(context);
 vm.runInContext(html.slice(start, end + endMarker.length), context);
 
-test('supported viz types exclude the removed Cluster (disjoint)', () => {
-  assert.ok(Array.isArray(context.SUPPORTED_VIZ_TYPES), 'SUPPORTED_VIZ_TYPES missing');
-  assert.equal(context.SUPPORTED_VIZ_TYPES.indexOf('disjoint'), -1, 'disjoint must not be a supported view');
-  assert.equal(context.isSupportedVizType('disjoint'), false);
-  // Retained views remain supported.
-  ['graph', 'code', 'graph3d', 'treemap', 'matrix', 'dendro', 'sankey', 'bundle', 'architecture'].forEach((v) => {
-    assert.equal(context.isSupportedVizType(v), true, v);
-  });
+const REMOVED = ['disjoint', 'treemap', 'matrix', 'architecture'];
+const RETAINED = ['graph', 'code', 'graph3d', 'dendro', 'sankey', 'bundle'];
+
+test('supported viz types are exactly the retained set', () => {
+  assert.deepEqual([...context.SUPPORTED_VIZ_TYPES].sort(), [...RETAINED].sort());
+  REMOVED.forEach((v) => assert.equal(context.isSupportedVizType(v), false, v + ' should be unsupported'));
+  RETAINED.forEach((v) => assert.equal(context.isSupportedVizType(v), true, v + ' should be supported'));
 });
 
-test('Tree Map is the initial default visualization', () => {
-  assert.equal(context.DEFAULT_VIZ_TYPE, 'treemap');
-  // The React state initializer uses the shared default constant.
+test('Code is the default visualization', () => {
+  assert.equal(context.DEFAULT_VIZ_TYPE, 'code');
   assert.match(html, /viewMode:'force',vizType:DEFAULT_VIZ_TYPE/);
 });
 
-test('a previously saved / unsupported view falls back safely to Tree Map', () => {
-  assert.equal(context.normalizeVizType('disjoint'), 'treemap', 'removed Cluster must fall back to Tree Map');
-  assert.equal(context.normalizeVizType('metrics'), 'treemap', 'an unknown saved view must fall back');
-  assert.equal(context.normalizeVizType(undefined), 'treemap');
-  assert.equal(context.normalizeVizType(''), 'treemap');
-  assert.equal(context.normalizeVizType(null), 'treemap');
-  // A valid saved preference is preserved, not overridden.
-  assert.equal(context.normalizeVizType('graph'), 'graph');
-  assert.equal(context.normalizeVizType('architecture'), 'architecture');
-  assert.equal(context.normalizeVizType('treemap'), 'treemap');
+test('removed/unknown views normalize to Code; valid views are preserved', () => {
+  REMOVED.forEach((v) => assert.equal(context.normalizeVizType(v), 'code', v + ' must normalize to code'));
+  ['metrics', 'cluster', undefined, null, ''].forEach((v) =>
+    assert.equal(context.normalizeVizType(v), 'code'));
+  RETAINED.forEach((v) => assert.equal(context.normalizeVizType(v), v, v + ' must be preserved'));
 });
 
-test('Cluster is removed from the selector, rendering and state', () => {
-  assert.doesNotMatch(html, /value:'disjoint'/, 'Cluster option still present in selector');
-  assert.doesNotMatch(html, /vizType==='disjoint'/, 'Cluster rendering branch still present');
-  assert.doesNotMatch(html, /disjointRef/, 'disjoint ref still present');
-  assert.doesNotMatch(html, /class','disjoint-/, 'disjoint D3 classes still present');
-  assert.doesNotMatch(html, /'cluster-bg'/, 'cluster-bg helper still present');
-  // The generic unused "cluster" icon case was dropped.
-  assert.doesNotMatch(html, /case 'cluster':/, 'dead cluster icon case still present');
+test('Matrix, Tree Map and Block Diagram are gone from the selector and rendering', () => {
+  ['treemap', 'matrix', 'architecture'].forEach((v) => {
+    assert.ok(!html.includes("value:'" + v + "'"), v + ' option still present');
+    assert.ok(!html.includes("vizType==='" + v + "'"), v + ' render/branch still present');
+  });
+  assert.doesNotMatch(html, /renderArchitectureView/);
+  assert.doesNotMatch(html, /treemapRef|matrixRef|architectureRenderRef/);
+  // No dedicated styling for the removed views remains.
+  assert.doesNotMatch(html, /\.treemap-container\b/);
+  assert.doesNotMatch(html, /\.matrix-container\b/);
+  assert.doesNotMatch(html, /\.architecture-view\b/);
 });
 
-test('the viz selector no longer wires an unthickened Cluster view', () => {
-  assert.equal(context.vizUsesLineThickness('disjoint'), false);
+test('the retained visualizations remain selectable and renderable', () => {
+  const opts = {
+    code: 'Code', graph: 'Graph', graph3d: '3D Graph',
+    dendro: 'Tree', sankey: 'Flow', bundle: 'Bundle',
+  };
+  Object.entries(opts).forEach(([v, label]) => {
+    assert.ok(html.includes("React.createElement('option',{value:'" + v + "'}," + "'" + label + "')"),
+      'missing option ' + v);
+  });
+  assert.match(html, /vizType==='code'&&renderCodeView\(\)/);
+  assert.match(html, /vizType==='graph'&&React\.createElement\('svg'/);
 });
 
-test('Block Diagram (architecture) is retained', () => {
-  assert.match(html, /React\.createElement\('option',\{value:'architecture'\},'Block Diagram'\)/);
-  assert.match(html, /vizType==='architecture'&&renderArchitectureView\(\)/);
-});
-
-test('all other retained visualizations remain selectable', () => {
-  const retained = [
-    ["value:'graph'", 'Graph'],
-    ["value:'code'", 'Code'],
-    ["value:'graph3d'", '3D Graph'],
-    ["value:'treemap'", 'Treemap'],
-    ["value:'matrix'", 'Matrix'],
-    ["value:'dendro'", 'Tree'],
-    ["value:'sankey'", 'Flow'],
-    ["value:'bundle'", 'Bundle'],
-  ];
-  retained.forEach(([needle]) => assert.ok(html.includes(needle), 'missing option ' + needle));
-});
-
-test('no standalone Metrics view exists, but internal metrics are preserved', () => {
-  // There is no user-visible "Metrics" view/panel option to navigate to.
-  assert.doesNotMatch(html, /value:'metrics'/);
-  assert.doesNotMatch(html, /React\.createElement\('option',\{value:'[^']*'\},'Metrics'\)/);
-  // Internal metrics computation and the impact-analysis metrics card remain.
-  assert.ok(html.includes('function codeCardContentMetrics('), 'internal code metrics removed');
-  assert.ok(html.includes('Impact Metrics'), 'impact-analysis metrics card removed');
+test('architecture/security/metrics analysis capabilities are preserved', () => {
+  // Block Diagram view is gone, but the architecture findings/model remain.
+  assert.match(html, /function buildArchitectureDiagram\(/);
+  assert.match(html, /function generateMermaidBlockDiagram\(/);
+  assert.match(html, /architectureDiagram:architectureDiagram/);
+  assert.match(html, /detectArchitectureInsights:function/);
+  assert.match(html, /function computeArchitectureInsights\(/);
+  // Security + internal metrics stay.
+  assert.match(html, /detectSecurity/);
+  assert.match(html, /function codeCardContentMetrics\(/);
+  assert.match(html, /Impact Metrics/);
 });

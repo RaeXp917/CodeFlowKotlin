@@ -285,28 +285,27 @@ strings and Pascal comment forms; unsupported language features fall back gracef
 
 ### Views
 
-Switch the active view with the visualization selector. **Tree Map is the default
-view** on load and when a project is first selected (a valid saved per-project
+Switch the active view with the visualization selector. **Code is the default
+view** on load and when a project is selected (a valid saved per-project
 preference, when available, takes precedence). Any unknown or removed saved view
-falls back safely to Tree Map.
+falls back safely to Code.
 
 | View | Description |
 |------|-------------|
-| **Tree Map** | Default. Proportional, space-filling map of files/folders |
+| **Code** | Default. Full-file cards for selected and connected files, grouped by directory |
 | **Graph** | Force-directed dependency graph |
-| **Code** | Full-file cards for selected and connected files, grouped by directory |
 | **3D Graph** | Dependency graph in 3D |
-| **Matrix** | Dependency adjacency matrix |
 | **Tree** | Hierarchical dendrogram |
 | **Flow** | Sankey flow of folder-to-folder connections |
 | **Bundle** | Circular hierarchical edge bundling |
-| **Block Diagram** | Architecture block diagram (may show a single block for some projects) |
 
-> The **Cluster** view has been removed to simplify the interface; the folder
-> grouping, clustering algorithms and dependency analysis used by the other views
-> are unchanged. There is no separate Metrics view — internal code metrics,
-> analysis statistics, security findings and architecture insights remain and are
-> surfaced in the relevant panels (e.g. impact analysis).
+> The **Cluster**, **Matrix**, **Tree Map** and **Block Diagram** views have been
+> removed to focus the interface on code exploration. This removes only the
+> *visualizations*: the underlying analysis is unchanged. Dependency
+> relationships, security findings, code metrics, impact analysis and the
+> architecture model/insights (`buildArchitectureDiagram`, architecture insight
+> cards, etc.) all remain and are surfaced in the relevant panels (e.g. the
+> Actions/Insights and impact-analysis panels). There is no separate Metrics view.
 
 ---
 

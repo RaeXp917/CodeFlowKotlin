@@ -95,10 +95,9 @@ test('local source is never uploaded to GitHub (no PUT/POST of file contents)', 
   assert.match(selectorSrc, /\/__codeflow\/select-project/);
 });
 
-test('Tree Map remains the default and retained views are intact (Stage 1 preserved)', () => {
+test('the default view is driven by the shared constant and retained views exist', () => {
   assert.match(html, /viewMode:'force',vizType:DEFAULT_VIZ_TYPE/);
-  assert.match(html, /React\.createElement\('option',\{value:'architecture'\},'Block Diagram'\)/);
-  ["value:'graph'", "value:'code'", "value:'treemap'", "value:'bundle'"].forEach((n) =>
+  ["value:'graph'", "value:'code'", "value:'bundle'"].forEach((n) =>
     assert.ok(html.includes(n), 'missing retained view ' + n));
 });
 
