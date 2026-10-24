@@ -37,7 +37,7 @@
       if (!response.ok) throw new Error('Could not switch to ' + project);
       // Hard reload resets existing CodeFlow analysis, cards, filters and watchers
       // to exactly the newly selected project. No other view is altered.
-      window.location.assign('/?cli=1');
+      window.location.assign('/');
     }).catch(function (error) {
       changing = false;
       statusError((error && error.message) || 'Project switch failed');

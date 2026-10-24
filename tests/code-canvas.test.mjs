@@ -1436,8 +1436,8 @@ test('CLI cache keys use the watched root instead of a shared fallback', () => {
   assert.equal(a.sourceKey, '/tmp/alpha');
   assert.equal(a.title, 'alpha');
   assert.notEqual(a.sourceKey, b.sourceKey);
-  assert.equal(missing.sourceKey, 'cli');
-  assert.equal(context.analysisCacheKey('cli', a.sourceKey), 'cli:/tmp/alpha');
+  assert.equal(missing.sourceKey, 'local-project');
+  assert.equal(context.analysisCacheKey('local-project', a.sourceKey), 'local-project:/tmp/alpha');
 });
 
 test('ZIP cache keys include archive metadata, not only the filename', () => {
@@ -1674,16 +1674,16 @@ test('hydration IDs follow the loaded analysis, not a live CLI session', () => {
     context.analysisHydrationIdFromParts(alpha, graph),
     context.analysisHydrationIdFromParts(beta, graph)
   );
-  const cli = context.loadedAnalysisSourceIdentity({
-    localSourceKind: 'cli',
+  const local = context.loadedAnalysisSourceIdentity({
+    localSourceKind: 'local-project',
     cliOk: true,
     cliRoot: '/watch',
     githubOwner: 'owner',
     githubRepo: 'alpha',
     githubKey: 'owner/alpha'
   });
-  assert.equal(cli.sourceType, 'cli');
-  assert.equal(cli.sourceKey, '/watch');
+  assert.equal(local.sourceType, 'local-project');
+  assert.equal(local.sourceKey, '/watch');
 });
 
 test('symbol list wheel stays native instead of panning the canvas', () => {
@@ -1942,12 +1942,12 @@ test('CLI watch recovery skips already flushed and in-flight paths', () => {
 
 test('CLI watch diffs only apply to the matching CLI analysis', () => {
   const status = { ok: true, root: '/tmp/alpha', name: 'alpha' };
-  assert.equal(context.cliWatchAppliesToAnalysis('cli', status, { sourceType: 'cli', sourceKey: '/tmp/alpha' }), true);
-  assert.equal(context.cliWatchAppliesToAnalysis('cli', status, { sourceType: 'cli', sourceKey: '/tmp/beta' }), false);
+  assert.equal(context.cliWatchAppliesToAnalysis('local-project', status, { sourceType: 'local-project', sourceKey: '/tmp/alpha' }), true);
+  assert.equal(context.cliWatchAppliesToAnalysis('local-project', status, { sourceType: 'local-project', sourceKey: '/tmp/beta' }), false);
   assert.equal(context.cliWatchAppliesToAnalysis('folder', status, { sourceType: 'folder' }), false);
   assert.equal(context.cliWatchAppliesToAnalysis('zip', status, { sourceType: 'zip' }), false);
   assert.equal(context.cliWatchAppliesToAnalysis(null, status, { sourceType: 'github' }), false);
-  assert.equal(context.cliWatchAppliesToAnalysis('cli', { ok: false }, { sourceType: 'cli', sourceKey: '/tmp/alpha' }), false);
+  assert.equal(context.cliWatchAppliesToAnalysis('local-project', { ok: false }, { sourceType: 'local-project', sourceKey: '/tmp/alpha' }), false);
 });
 
 test('HTML attribute sanitizer encodes quotes before they reach data-sym', () => {
@@ -2075,7 +2075,7 @@ test('index.html ships a working Code view, not a stub', () => {
   assert.match(htmlSource, /armRecentDelete/);
   assert.match(htmlSource, /Confirm\?/);
   assert.match(htmlSource, /__codeflow\/status/);
-  assert.match(htmlSource, /analyzeFromCli\(false,status\)/);
+  assert.match(htmlSource, /analyzeLocalProject\(false,status\)/);
   assert.match(htmlSource, /retainedFolderMatchesRecord/);
   assert.match(htmlSource, /retainedZipMatchesRecord/);
   assert.match(htmlSource, /cliRecordMatchesStatus/);

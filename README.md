@@ -128,7 +128,7 @@ See [card/](./card/) for setup, or jump to the [style gallery](#card-style-galle
 
 **Your code stays on your machine.** CodeFlow:
 
-- Analyzes your selected local project in the browser (in CLI mode a local-only server on `127.0.0.1` serves the app and reads just that project)
+- Analyzes your selected local project in the browser; a local-only server on `127.0.0.1` serves the app and reads just that project
 - Never uploads your local project source anywhere
 - Requires **no GitHub login** — no Personal Access Token, no GitHub App
 - Makes optional public GitHub API calls directly from your browser (never via a proxy); local source is never sent to GitHub
@@ -186,9 +186,21 @@ You can now analyze code directly from your local machine without uploading to G
 ## Usage
 
 ### Local projects (primary)
-Pick a project from the **Project dropdown** in the topbar. It lists the local
-projects discovered by the CLI/project server and switches analysis to the one
-selected project. Switching projects clears the previous project's analysis.
+Open the app at `http://127.0.0.1:4173/` and pick a project from the **Project
+dropdown** in the topbar. It lists the local projects discovered by the project
+server and runs the one unified local pipeline:
+
+**Selected project → read local files → existing parser/analyzer → Code view.**
+
+The analysis is keyed to a stable project identity (the canonical project root),
+not just the folder name. Switching projects cancels the previous project's work,
+clears its files/cards and loads only the newly selected project — projects are
+never mixed. Use the **Re-analyze** button in the topbar to re-read the current
+project's files and rebuild the graph, security and architecture findings; file
+changes mark the analysis stale so you can re-analyze on demand. If the selected
+folder was deleted or moved, the app says so instead of failing silently; with no
+project selected it shows a neutral empty state. (The legacy `?cli=1` URL still
+resolves but is no longer required or a separate mode.)
 
 ### Public repositories (optional)
 Use the **Open GitHub URL** field to analyze a public repository anonymously:
@@ -332,7 +344,7 @@ falls back safely to Code.
 ## Source selection
 
 CodeFlow is **local-first**. The primary control in the topbar is the **Project
-dropdown**, which lists the local projects discovered by the CLI/project server
+dropdown**, which lists the local projects discovered by the project server
 and switches analysis to a single selected project. Analysis is always scoped to
 one project at a time.
 

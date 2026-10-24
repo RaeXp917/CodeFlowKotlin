@@ -210,6 +210,7 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
         const live = await dirExists(currentRoot);
         return json(res, 200, {
           ok: live, root: currentRoot, name: currentProject,
+          id: live ? makeKey(currentRoot) : null,// stable identity (canonical root), not the display name
           watch: !!(watcher && watcher.watching) && live,
           missing: !!currentProject && !live,
         });
@@ -301,7 +302,7 @@ async function main() {
     app.server.once('error', reject);
     app.server.listen(parsed.port, HOST, resolve);
   });
-  const url = 'http://' + HOST + ':' + parsed.port + '/?cli=1';
+  const url = 'http://' + HOST + ':' + parsed.port + '/';
   console.log('CodeFlowKotlin: ' + url);
   console.log('Projects directory: ' + parsed.projectsRoot);
   console.log('Use the Project dropdown in the existing CodeFlow header.');
