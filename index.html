@@ -1152,7 +1152,7 @@ function maskJsLiterals(src){
 }
 // Project-level ecosystem detection from file paths, extensions and imports.
 function detectProjectEcosystems(files){
-    var eco={android:false,swiftui:false,react:false};
+    var eco={android:false,swiftui:false,react:false,flutter:false,dart:false};
     (files||[]).forEach(function(f){
         if(!f)return;
         var name=String(f.name||(f.path||'').split('/').pop()||'').toLowerCase();
@@ -1163,13 +1163,193 @@ function detectProjectEcosystems(files){
         if(name==='package.json'&&/"(react|react-dom|next)"\s*:/.test(content))eco.react=true;
         if(/\.(jsx|tsx)$/.test(name)&&/from\s+['"]react['"]|from\s+['"]react\/|require\(\s*['"]react['"]/.test(content))eco.react=true;
         if(/\.(js|ts|mjs|cjs)$/.test(name)&&/from\s+['"]react['"]|require\(\s*['"]react['"]/.test(content))eco.react=true;
+        // Dart / Flutter. A .dart file or a pubspec.yaml marks a Dart project.
+        // Flutter is claimed only with explicit evidence (a flutter SDK dependency
+        // in pubspec.yaml, or a package:flutter/ import), so a plain Dart package
+        // is never misclassified as Flutter.
+        if(/\.dart$/.test(name))eco.dart=true;
+        if(name==='pubspec.yaml'){
+            eco.dart=true;
+            if(/\bsdk\s*:\s*flutter\b/.test(content))eco.flutter=true;
+        }
+        if(/\.dart$/.test(name)&&/\bimport\s+['"]package:flutter\//.test(content))eco.flutter=true;
     });
+    if(eco.flutter)eco.dart=true;// Flutter is a Dart project.
     return eco;
 }
+// ---- Shared architecture rule + learning catalog (single source of truth) ----
+// Every actionable rule emitted by the architecture analyzer has a stable entry
+// here with its metadata, evidence requirement, short illustrative examples,
+// false-positive exclusions and an official documentation link. Learning topics
+// are small, offline teaching cards used by the interactive guide. Phases B-E
+// extend these catalogs; the pipeline reads from them so there is one source of
+// truth rather than a competing analyzer.
+var ARCHITECTURE_RULE_CATALOG={
+    'android-globalscope-usage':{
+        ruleId:'android-globalscope-usage',ecosystem:'kotlin',languages:['kotlin'],frameworks:['android'],
+        kind:'issue',severity:'high',confidence:'high',
+        title:'GlobalScope coroutine has no lifecycle owner',
+        explanation:'A coroutine launched on GlobalScope is not tied to any lifecycle, so it can outlive the screen/ViewModel that started it, leak work and continue after cancellation.',
+        evidence:'A GlobalScope.launch / GlobalScope.async call site.',
+        badExample:'GlobalScope.launch { repository.sync() }',
+        goodExample:'viewModelScope.launch { repository.sync() }',
+        exclusions:['Not flagged inside comments or string literals.'],
+        docUrl:'https://developer.android.com/kotlin/coroutines/coroutines-best-practices',
+        learnTopicId:'kotlin-coroutine-scope'
+    },
+    'android-viewmodel-holds-ui-reference':{
+        ruleId:'android-viewmodel-holds-ui-reference',ecosystem:'kotlin',languages:['kotlin'],frameworks:['android'],
+        kind:'issue',severity:'high',confidence:'high',
+        title:'ViewModel holds a lifecycle-sensitive reference',
+        explanation:'A ViewModel outlives Activity/Fragment/View instances. Holding a Context/Activity/Fragment/View field leaks the UI and can crash on configuration changes.',
+        evidence:'A ViewModel/AndroidViewModel class with a Context/Activity/Fragment/View (etc.) property.',
+        badExample:'class MyViewModel(val activity: Activity): ViewModel()',
+        goodExample:'class MyViewModel(app: Application): AndroidViewModel(app)',
+        exclusions:['Hilt @ApplicationContext is allowed.','Application in AndroidViewModel is allowed.'],
+        docUrl:'https://developer.android.com/topic/libraries/architecture/viewmodel#best-practices',
+        learnTopicId:'kotlin-mvvm-layers'
+    },
+    'compose-state-without-remember':{
+        ruleId:'compose-state-without-remember',ecosystem:'kotlin',languages:['kotlin'],frameworks:['android','compose'],
+        kind:'potential',severity:'high',confidence:'medium',
+        title:'mutableStateOf in a @Composable without remember',
+        explanation:'State created directly in a @Composable body is recreated on every recomposition, so it resets. It must be stored with remember/rememberSaveable (or hoisted to a ViewModel).',
+        evidence:'mutableStateOf(...) inside a @Composable function body, not wrapped by remember/rememberSaveable.',
+        badExample:'@Composable fun C(){ var n = mutableStateOf(0) }',
+        goodExample:'@Composable fun C(){ var n by remember { mutableStateOf(0) } }',
+        exclusions:['ViewModel state properties are not flagged.','remember { … } / rememberSaveable(keys){ … } wrapping is respected.'],
+        docUrl:'https://developer.android.com/develop/ui/compose/state#state-in-composables',
+        learnTopicId:'compose-state'
+    },
+    'android-ui-builds-data-layer':{
+        ruleId:'android-ui-builds-data-layer',ecosystem:'kotlin',languages:['kotlin'],frameworks:['android'],
+        kind:'potential',severity:'medium',confidence:'medium',
+        title:'UI layer constructs the data layer directly',
+        explanation:'A UI/presentation file directly building Retrofit/Room couples the UI to data-layer construction, which hurts testability and reuse. Build these behind a repository boundary and inject them.',
+        evidence:'Retrofit.Builder() or Room.databaseBuilder() in a UI/presentation file.',
+        badExample:'// in a Composable/Activity\nRetrofit.Builder().baseUrl(url).build()',
+        goodExample:'// provided by DI, consumed via a repository interface',
+        exclusions:['Only direct construction in a UI file is flagged, not a repository boundary elsewhere.'],
+        docUrl:'https://developer.android.com/topic/architecture/data-layer',
+        learnTopicId:'kotlin-mvvm-layers'
+    },
+    'swiftui-observedobject-ownership':{
+        ruleId:'swiftui-observedobject-ownership',ecosystem:'swift',languages:['swift'],frameworks:['swiftui'],
+        kind:'issue',severity:'high',confidence:'high',
+        title:'@ObservedObject owns its model',
+        explanation:'@ObservedObject does not own its model, so SwiftUI may recreate it on re-render and lose state. A view that creates the model should own it with @StateObject.',
+        evidence:'@ObservedObject property with an initializer (e.g. = Model()).',
+        badExample:'@ObservedObject var model = Model()',
+        goodExample:'@StateObject var model = Model()',
+        exclusions:['@ObservedObject passed in (no initializer) is correct and not flagged.'],
+        docUrl:'https://developer.apple.com/documentation/swiftui/stateobject',
+        learnTopicId:'swiftui-observation'
+    },
+    'swiftui-state-not-private':{
+        ruleId:'swiftui-state-not-private',ecosystem:'swift',languages:['swift'],frameworks:['swiftui'],
+        kind:'recommendation',severity:'low',confidence:'medium',
+        title:'@State should be private',
+        explanation:'@State is a view-local source of truth. Marking it private keeps ownership clear and prevents it being set from outside the view.',
+        evidence:'A non-private @State property.',
+        badExample:'@State var isOn = false',
+        goodExample:'@State private var isOn = false',
+        exclusions:['This is a style recommendation, never a high-severity error.'],
+        docUrl:'https://developer.apple.com/documentation/swiftui/state',
+        learnTopicId:'swiftui-state-ownership'
+    },
+    'react-array-index-key':{
+        ruleId:'react-array-index-key',ecosystem:'react',languages:['javascript','typescript'],frameworks:['react'],
+        kind:'potential',severity:'medium',confidence:'medium',
+        title:'List rendered with the array index as key',
+        explanation:'Using the map index as a React key breaks element identity when the list reorders or changes, causing subtle state/DOM bugs. Use a stable id.',
+        evidence:'key={index} where index is the .map index parameter.',
+        badExample:'items.map((x, i) => <Row key={i} />)',
+        goodExample:'items.map((x) => <Row key={x.id} />)',
+        exclusions:['Stable keys (key={item.id}) are not flagged.'],
+        docUrl:'https://react.dev/learn/rendering-lists#why-does-react-need-keys',
+        learnTopicId:null
+    }
+};
+var LEARNING_TOPICS={
+    'kotlin-mvvm-layers':{
+        topicId:'kotlin-mvvm-layers',title:'Android layered architecture',ecosystem:'kotlin',
+        roles:['UI','ViewModel','Domain (optional)','Repository','Data source'],
+        explanation:'Recommended Android apps flow UI → ViewModel → (optional Domain/UseCase) → Repository → Data source. Dependencies point downward; the UI never reaches past the repository boundary. The domain layer is optional — not every operation needs a UseCase.',
+        example:'class ListViewModel(private val repo: ItemRepository): ViewModel()',
+        docUrl:'https://developer.android.com/topic/architecture/recommendations',
+        relatedRuleIds:['android-viewmodel-holds-ui-reference','android-ui-builds-data-layer']
+    },
+    'compose-state':{
+        topicId:'compose-state',title:'State in Jetpack Compose',ecosystem:'kotlin',
+        roles:['Composable','ViewModel'],
+        explanation:'State read in a Composable must survive recomposition: keep it in a ViewModel, or make it local with remember/rememberSaveable. Hoist state to the lowest common caller that needs it.',
+        example:'var text by remember { mutableStateOf("") }',
+        docUrl:'https://developer.android.com/develop/ui/compose/state',
+        relatedRuleIds:['compose-state-without-remember']
+    },
+    'kotlin-coroutine-scope':{
+        topicId:'kotlin-coroutine-scope',title:'Coroutine scope & lifecycle',ecosystem:'kotlin',
+        roles:['ViewModel','Repository'],
+        explanation:'Launch coroutines in a lifecycle-aware scope (viewModelScope, lifecycleScope) so they are cancelled with their owner. GlobalScope work is unmanaged and can leak.',
+        example:'viewModelScope.launch { repo.load() }',
+        docUrl:'https://developer.android.com/kotlin/coroutines/coroutines-best-practices',
+        relatedRuleIds:['android-globalscope-usage']
+    },
+    'swiftui-observation':{
+        topicId:'swiftui-observation',title:'SwiftUI model ownership',ecosystem:'swift',
+        roles:['View','Observable model'],
+        explanation:'A view that creates an observable model owns it with @StateObject (or @State with @Observable in modern SwiftUI); a view that receives one uses @ObservedObject (or a plain let for @Observable). Ownership controls the model’s lifetime.',
+        example:'@StateObject private var model = CounterModel()',
+        docUrl:'https://developer.apple.com/documentation/SwiftUI/Managing-model-data-in-your-app',
+        relatedRuleIds:['swiftui-observedobject-ownership']
+    },
+    'swiftui-state-ownership':{
+        topicId:'swiftui-state-ownership',title:'SwiftUI @State ownership',ecosystem:'swift',
+        roles:['View'],
+        explanation:'@State is view-local value state that SwiftUI owns across re-renders. Keep it private and hoist shared state up or into an observable model.',
+        example:'@State private var isPresented = false',
+        docUrl:'https://developer.apple.com/documentation/swiftui/state',
+        relatedRuleIds:['swiftui-state-not-private']
+    },
+    'flutter-architecture-layers':{
+        topicId:'flutter-architecture-layers',title:'Flutter app architecture',ecosystem:'flutter',
+        roles:['Widget/View','ViewModel / state controller','Repository','Service'],
+        explanation:'Flutter’s recommended architecture separates a UI layer (Widgets + a view-model/state controller) from a data layer (Repositories + Services). The UI depends on repositories, not directly on services or raw data sources. BLoC/Riverpod/Provider are all valid state approaches — adapt to the one the project uses.',
+        example:'class HomeViewModel extends ChangeNotifier { final ItemRepository repo; }',
+        docUrl:'https://docs.flutter.dev/app-architecture/guide',
+        relatedRuleIds:[]
+    },
+    'flutter-state-management':{
+        topicId:'flutter-state-management',title:'Flutter state management',ecosystem:'flutter',
+        roles:['Widget','State controller'],
+        explanation:'Common approaches include ChangeNotifier/Provider, Riverpod, BLoC/Cubit and ValueNotifier. None is universally required; detect and respect the one in use rather than forcing a particular package.',
+        example:'final counterProvider = StateNotifierProvider(...);',
+        docUrl:'https://docs.flutter.dev/app-architecture/recommendations',
+        relatedRuleIds:[]
+    },
+    'flutter-dispose':{
+        topicId:'flutter-dispose',title:'Disposing controllers in Flutter',ecosystem:'flutter',
+        roles:['State<T>'],
+        explanation:'Owned controllers/subscriptions (AnimationController, TextEditingController, StreamSubscription, etc.) created in a State must be released in dispose() to avoid leaks.',
+        example:'@override void dispose(){ controller.dispose(); super.dispose(); }',
+        docUrl:'https://docs.flutter.dev/perf/best-practices',
+        relatedRuleIds:[]
+    }
+};
+function getArchitectureRule(ruleId){return ARCHITECTURE_RULE_CATALOG[ruleId]||null;}
+function getLearningTopic(topicId){return topicId?(LEARNING_TOPICS[topicId]||null):null;}
+function listLearningTopics(ecosystem){
+    return Object.keys(LEARNING_TOPICS).map(function(k){return LEARNING_TOPICS[k];})
+        .filter(function(t){return !ecosystem||t.ecosystem===ecosystem;});
+}
 function pushArchInsight(insights,o){
+    // Enrich from the shared catalog so docUrl / learning topic stay in one place.
+    var meta=getArchitectureRule(o.ruleId)||{};
     insights.push({
-        ruleId:o.ruleId,ecosystem:o.ecosystem,severity:o.severity,confidence:o.confidence,kind:o.kind,
-        title:o.title,problem:o.problem,remediation:o.remediation,docUrl:o.docUrl,
+        ruleId:o.ruleId,ecosystem:o.ecosystem||meta.ecosystem,severity:o.severity,confidence:o.confidence,kind:o.kind,
+        title:o.title,problem:o.problem,remediation:o.remediation,
+        docUrl:o.docUrl||meta.docUrl||null,
+        topicId:o.topicId||meta.learnTopicId||null,
         file:o.name,path:o.path,line:o.line,code:o.code
     });
 }
@@ -2130,6 +2310,10 @@ const Parser={
         return suggestions.sort(function(a,b){var p={critical:0,high:1,medium:2,low:3};return p[a.priority]-p[b.priority];});
     },
     detectArchitectureInsights:function(files){return computeArchitectureInsights(files);},
+    detectProjectEcosystems:function(files){return detectProjectEcosystems(files);},
+    getArchitectureRule:function(ruleId){return getArchitectureRule(ruleId);},
+    getLearningTopic:function(topicId){return getLearningTopic(topicId);},
+    getLearningTopics:function(ecosystem){return listLearningTopics(ecosystem);},
     detectSecurity:function(files){
         var issues=[];
         // CodeFlow self-analysis: this app's own analyzer sources are detection

@@ -27,8 +27,13 @@ suggestions continue to work unchanged. The three ecosystems below receive
    - **Swift/SwiftUI** — `.swift` files that `import SwiftUI`.
    - **React** — a `package.json` depending on `react`/`react-dom`/`next`, a
      `.jsx`/`.tsx` file importing `react`, or a `.js`/`.ts` file importing `react`.
+   - **Flutter / Dart** — a `.dart` file or a `pubspec.yaml` marks a **Dart**
+     project; **Flutter** is claimed only with explicit evidence: a flutter SDK
+     dependency in `pubspec.yaml` (`sdk: flutter`) or a `package:flutter/` import.
+     A plain Dart package is therefore detected as Dart but **not** Flutter.
    A plain JavaScript/TypeScript project with no React dependency is **not**
-   treated as React, so its files are never flagged by React rules.
+   treated as React, so its files are never flagged by React rules. The detector
+   (`detectProjectEcosystems`) returns `{android, swiftui, react, flutter, dart}`.
 
 2. **Per-file, per-language rules** run only for the detected ecosystems and the
    matching file extension. Build output (`build/`, `dist/`, `.next/`, …) and
@@ -50,12 +55,42 @@ suggestions continue to work unchanged. The three ecosystems below receive
 
 ### Parser / fallback behavior
 
-The Kotlin and Java Tree-sitter grammars are vendored, but the synchronous scan
-path does not load them, so these rules use the documented lexical masking
-fallback above. This is **not** full AST precision: it is comment/string-aware
-token matching with structural brace/paren matching where needed. The rules are
-written conservatively so that, when evidence is insufficient, they stay silent
-rather than guess.
+The Kotlin and Swift (and Java) Tree-sitter grammars are vendored, but the
+synchronous scan path does not load them, so these rules use the documented
+lexical masking fallback above. This is **not** full AST precision: it is
+comment/string-aware token matching with structural brace/paren matching where
+needed. The rules are written conservatively so that, when evidence is
+insufficient, they stay silent rather than guess.
+
+**Dart has no Tree-sitter grammar vendored.** `.dart` files are recognized as
+code and analyzed with the same comment/string-aware heuristic parsing; CodeFlow
+does **not** advertise full syntax-aware (AST) Dart support. Flutter/Dart
+architecture rules (added in a later phase) are built on this heuristic basis and
+are written conservatively for the same reason.
+
+### Shared rule & learning catalog
+
+The architecture analyzer reads from a single in-file catalog, bundled with the
+app and available offline:
+
+- **`ARCHITECTURE_RULE_CATALOG`** — keyed by stable `ruleId`. Each entry carries
+  `ecosystem`, `languages`, `frameworks`, `kind`, `severity`, `confidence`,
+  `title`, `explanation`, `evidence`, a short `badExample`/`goodExample`,
+  `exclusions` (false-positive guards), an official `docUrl`, and an optional
+  `learnTopicId`. `pushArchInsight` enriches each emitted finding from this
+  catalog (e.g. `docUrl`, `topicId`), so there is one source of truth rather than
+  a competing analyzer.
+- **`LEARNING_TOPICS`** — keyed by stable `topicId`. Each is a small offline
+  teaching card: `title`, `ecosystem`, related architectural `roles`, an
+  `explanation`, a short illustrative `example`, an official `docUrl`, and
+  `relatedRuleIds`. These power the interactive Architecture Guide.
+
+Accessors are exposed on `Parser`: `detectProjectEcosystems`,
+`getArchitectureRule(ruleId)`, `getLearningTopic(topicId)` and
+`getLearningTopics(ecosystem)`. Documentation links point at official sites
+(developer.android.com, developer.apple.com, react.dev, docs.flutter.dev,
+dart.dev) and open only when the user chooses; nothing is fetched at analysis
+time.
 
 ## Severity and confidence semantics
 
