@@ -10521,7 +10521,7 @@ function graphSvgExportEnabled(vizType){
 }
 
 function vizUsesLineThickness(vizType){
-    return vizType==='graph'||vizType==='code'||vizType==='graph3d'||vizType==='dendro'||vizType==='sankey'||vizType==='disjoint'||vizType==='bundle';
+    return vizType==='graph'||vizType==='code'||vizType==='graph3d'||vizType==='dendro'||vizType==='sankey'||vizType==='bundle';
 }
 
 function vizHasGraphToolbar(vizType){
@@ -10538,6 +10538,16 @@ function vizHasCanvasMinimap(vizType){
 
 function vizUsesForceLinkParticles(vizType){
     return vizType==='code';
+}
+// Supported visualization types after Cluster removal. Any stale/unknown value
+// (e.g. a previously saved 'disjoint') normalizes to the Tree Map default.
+var SUPPORTED_VIZ_TYPES=['graph','code','graph3d','treemap','matrix','dendro','sankey','bundle','architecture'];
+var DEFAULT_VIZ_TYPE='treemap';
+function isSupportedVizType(vizType){
+    return SUPPORTED_VIZ_TYPES.indexOf(vizType)!==-1;
+}
+function normalizeVizType(vizType){
+    return isSupportedVizType(vizType)?vizType:DEFAULT_VIZ_TYPE;
 }
 
 function collectVisibleCodeFiles(selectedPath,data,folderFilter,limit){
@@ -12868,9 +12878,6 @@ function Icon(props){
         case 'flow':
             children=[React.createElement('path',Object.assign({key:'p1',d:'M4 7h10'},common)),React.createElement('polyline',Object.assign({key:'p2',points:'11 4 14 7 11 10'},common)),React.createElement('path',Object.assign({key:'p3',d:'M4 17h16'},common)),React.createElement('polyline',Object.assign({key:'p4',points:'17 14 20 17 17 20'},common))];
             break;
-        case 'cluster':
-            children=[React.createElement('circle',Object.assign({key:'c1',cx:'8',cy:'8',r:'3'},common)),React.createElement('circle',Object.assign({key:'c2',cx:'16',cy:'8',r:'3'},common)),React.createElement('circle',Object.assign({key:'c3',cx:'12',cy:'16',r:'3'},common)),React.createElement('path',Object.assign({key:'p1',d:'M10.5 10.5 11.5 13.5M13.5 13.5l1-3'},common))];
-            break;
         case 'target':
             children=[React.createElement('circle',Object.assign({key:'c1',cx:'12',cy:'12',r:'8'},common)),React.createElement('circle',Object.assign({key:'c2',cx:'12',cy:'12',r:'4'},common)),React.createElement('circle',Object.assign({key:'c3',cx:'12',cy:'12',r:'1'},common))];
             break;
@@ -13062,7 +13069,7 @@ function App(){
     var _x=useState(null),folderFilter=_x[0],setFolderFilter=_x[1];
     var _y=useState(new Set()),expandedFns=_y[0],setExpandedFns=_y[1];
     var _z=useState(false),showUnused=_z[0],setShowUnused=_z[1];
-    var _aa=useState({spacing:200,linkDist:70,viewMode:'force',vizType:'graph',showLabels:true,curvedLinks:true}),graphConfig=_aa[0],setGraphConfig=_aa[1];
+    var _aa=useState({spacing:200,linkDist:70,viewMode:'force',vizType:DEFAULT_VIZ_TYPE,showLabels:true,curvedLinks:true}),graphConfig=_aa[0],setGraphConfig=_aa[1];
     var _ab=useState(false),showGraphConfig=_ab[0],setShowGraphConfig=_ab[1];
     var _ac=useState(260),sidebarWidth=_ac[0],setSidebarWidth=_ac[1];
     var _ad=useState(360),rightPanelWidth=_ad[0],setRightPanelWidth=_ad[1];
@@ -13098,7 +13105,6 @@ function App(){
     var matrixRef=useRef(null);
     var dendroRef=useRef(null);
     var sankeyRef=useRef(null);
-    var disjointRef=useRef(null);
     var bundleRef=useRef(null);
     var architectureRenderRef=useRef(null);
     var architectureDragRef=useRef(null);
@@ -13502,7 +13508,7 @@ function App(){
         }else{
             setLocalSourceKind(record.localSourceKind||record.sourceType);
         }
-        setGraphConfig(function(cfg){return Object.assign({},cfg,{vizType:cfg.vizType==='architecture'?'graph':cfg.vizType});});
+        setGraphConfig(function(cfg){return Object.assign({},cfg,{vizType:normalizeVizType(cfg.vizType==='architecture'?DEFAULT_VIZ_TYPE:cfg.vizType)});});
         showNotification('Loaded cached analysis. Re-analyze to refresh.','success');
     }
 
@@ -16378,76 +16384,6 @@ function App(){
         .on('click',function(e,d){e.stopPropagation();filterByFolder(d.fullPath);});
     },[data,graphConfig.vizType,colorMap,folderFilter,lineThickness]);
 
-    // Disjoint Force-Directed - Separate clusters per folder
-    useEffect(function(){
-        if(!data||!disjointRef.current||graphConfig.vizType!=='disjoint')return;
-        var container=d3.select(disjointRef.current);
-        container.selectAll('*').remove();
-        var w=disjointRef.current.clientWidth||800,h=disjointRef.current.clientHeight||600;
-        var svg=container.append('svg').attr('width',w).attr('height',h);
-        var g=svg.append('g');
-        var zoom=d3.zoom().scaleExtent([0.2,4]).on('zoom',function(e){g.attr('transform',e.transform);});
-        svg.call(zoom);
-        var filteredFiles=folderFilter?data.files.filter(function(f){return f.folder===folderFilter||f.folder.startsWith(folderFilter+'/');}):data.files;
-        var files=filteredFiles.slice(0,100);
-        var fileIdx={};files.forEach(function(f,i){fileIdx[f.path]=i;});
-        var folders=[...new Set(files.map(function(f){return f.folder||'root';}))];
-        var cols=Math.ceil(Math.sqrt(folders.length));
-        var cellW=w/cols,cellH=h/Math.ceil(folders.length/cols);
-        var centers={};
-        folders.forEach(function(f,i){centers[f]={x:(i%cols+0.5)*cellW,y:(Math.floor(i/cols)+0.5)*cellH};});
-        var nodes=files.map(function(f){return{id:f.path,name:f.name,folder:f.folder||'root',fns:f.functions.length,lines:f.lines,layer:f.layer,cx:centers[f.folder||'root'].x,cy:centers[f.folder||'root'].y};});
-        var links=[];
-        data.connections.forEach(function(c){
-            var src=typeof c.source==='object'?c.source.id:c.source;
-            var tgt=typeof c.target==='object'?c.target.id:c.target;
-            if(fileIdx[src]!==undefined&&fileIdx[tgt]!==undefined&&src!==tgt)links.push({source:src,target:tgt,count:c.count||1});
-        });
-        var sim=d3.forceSimulation(nodes)
-            .force('link',d3.forceLink(links).id(function(d){return d.id;}).distance(40).strength(0.3))
-            .force('charge',d3.forceManyBody().strength(-80))
-            .force('x',d3.forceX(function(d){return d.cx;}).strength(0.15))
-            .force('y',d3.forceY(function(d){return d.cy;}).strength(0.15))
-            .force('collide',d3.forceCollide(15));
-        g.selectAll('rect.cluster-bg').data(folders).join('rect').attr('class','cluster-bg')
-            .attr('x',function(d,i){return(i%cols)*cellW+10;}).attr('y',function(d,i){return Math.floor(i/cols)*cellH+10;})
-            .attr('width',cellW-20).attr('height',cellH-20).attr('rx',12)
-            .attr('fill',function(d){return colorMap[d]||COLORS[folders.indexOf(d)%COLORS.length];}).attr('opacity',0.08)
-            .attr('stroke',function(d){return colorMap[d]||COLORS[folders.indexOf(d)%COLORS.length];}).attr('stroke-width',1).attr('stroke-opacity',0.3);
-        g.selectAll('text.cluster-label').data(folders).join('text').attr('class','cluster-label')
-            .attr('x',function(d,i){return(i%cols)*cellW+20;}).attr('y',function(d,i){return Math.floor(i/cols)*cellH+28;})
-            .attr('fill','var(--t2)').attr('font-size','11px').attr('font-weight','600').text(function(d){return d.split('/').pop()||'root';});
-        var link=g.selectAll('line.disjoint-link').data(links).join('line').attr('class','disjoint-link')
-            .attr('stroke','var(--border)').attr('stroke-width',scaleStrokeWidth(1,lineThickness)).attr('stroke-opacity',0.3);
-        var tooltip=container.append('div').attr('class','treemap-tooltip').style('display','none').style('position','absolute');
-        var node=g.selectAll('g.disjoint-node').data(nodes).join('g').attr('class','disjoint-node').style('cursor','pointer')
-            .call(d3.drag().on('start',function(e,d){if(!e.active)sim.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;})
-                .on('drag',function(e,d){d.fx=e.x;d.fy=e.y;}).on('end',function(e,d){if(!e.active)sim.alphaTarget(0);d.fx=null;d.fy=null;}));
-        node.append('circle').attr('class','disjoint-circle').attr('r',function(d){return Math.max(6,Math.min(14,4+d.fns));})
-            .attr('fill',function(d){return colorMap[d.folder]||COLORS[0];}).attr('stroke','var(--bg0)').attr('stroke-width',1.5);
-        node.on('mouseenter',function(e,d){
-            tooltip.html(renderTooltipHtml(d.name,[
-                {label:'Lines',value:d.lines||0},
-                {label:'Functions',value:d.fns||0},
-                {label:'Folder',value:d.folder}
-            ]))
-                .style('display','block').style('left',(e.offsetX+15)+'px').style('top',(e.offsetY+15)+'px');
-            link.attr('stroke-opacity',function(l){return l.source.id===d.id||l.target.id===d.id?0.8:0.05;}).attr('stroke',function(l){return l.source.id===d.id||l.target.id===d.id?'var(--acc)':'var(--border)';});
-            d3.select(this).select('circle').transition().duration(150).attr('r',14).attr('stroke','var(--acc)').attr('stroke-width',2);
-        }).on('mousemove',function(e){tooltip.style('left',(e.offsetX+15)+'px').style('top',(e.offsetY+15)+'px');})
-        .on('mouseleave',function(e,d){
-            tooltip.style('display','none');
-            link.attr('stroke-opacity',0.3).attr('stroke','var(--border)');
-            d3.select(this).select('circle').transition().duration(150).attr('r',Math.max(6,Math.min(14,4+d.fns))).attr('stroke','var(--bg0)').attr('stroke-width',1.5);
-        }).on('click',function(e,d){e.stopPropagation();if(selectFileRef.current)selectFileRef.current(d.id);});
-        sim.on('tick',function(){
-            link.attr('x1',function(d){return d.source.x;}).attr('y1',function(d){return d.source.y;}).attr('x2',function(d){return d.target.x;}).attr('y2',function(d){return d.target.y;});
-            node.attr('transform',function(d){return'translate('+d.x+','+d.y+')';});
-        });
-        svg.on('click',function(){setSelected(null);setBlastRadius(null);});
-        return function(){sim.stop();};
-    },[data,graphConfig.vizType,colorMap,folderFilter,lineThickness]);
-
     // Circular Bundle visualization - Interactive with zoom, selection, blast radius
     useEffect(function(){
         if(!data||!bundleRef.current||graphConfig.vizType!=='bundle')return;
@@ -17961,7 +17897,7 @@ function App(){
                 ):
                 React.createElement(React.Fragment,null,
                     React.createElement('div',{className:'viz-selector'},
-                        React.createElement('select',{className:'viz-select','aria-label':'Visualization type',value:graphConfig.vizType,onChange:function(e){var v=e.target.value;setGraphConfig(Object.assign({},graphConfig,{vizType:v}));if(v==='architecture'){setSelected(null);setBlastRadius(null);}}},
+                        React.createElement('select',{className:'viz-select','aria-label':'Visualization type',value:normalizeVizType(graphConfig.vizType),onChange:function(e){var v=normalizeVizType(e.target.value);setGraphConfig(Object.assign({},graphConfig,{vizType:v}));if(v==='architecture'){setSelected(null);setBlastRadius(null);}}},
                             React.createElement('option',{value:'graph'},'Graph'),
                             React.createElement('option',{value:'code'},'Code'),
                             React.createElement('option',{value:'graph3d'},'3D Graph'),
@@ -17969,7 +17905,6 @@ function App(){
                             React.createElement('option',{value:'matrix'},'Matrix'),
                             React.createElement('option',{value:'dendro'},'Tree'),
                             React.createElement('option',{value:'sankey'},'Flow'),
-                            React.createElement('option',{value:'disjoint'},'Cluster'),
                             React.createElement('option',{value:'bundle'},'Bundle'),
                             React.createElement('option',{value:'architecture'},'Block Diagram')
                         )
@@ -17981,7 +17916,6 @@ function App(){
                     graphConfig.vizType==='matrix'&&React.createElement('div',{ref:matrixRef,className:'matrix-container',style:{width:'100%',height:'100%',overflow:'auto',display:'flex',alignItems:'center',justifyContent:'center'}}),
                     graphConfig.vizType==='dendro'&&React.createElement('div',{ref:dendroRef,className:'dendro-container',style:{width:'100%',height:'100%',position:'relative'}}),
                     graphConfig.vizType==='sankey'&&React.createElement('div',{ref:sankeyRef,className:'sankey-container',style:{width:'100%',height:'100%',position:'relative'}}),
-                    graphConfig.vizType==='disjoint'&&React.createElement('div',{ref:disjointRef,className:'disjoint-container',style:{width:'100%',height:'100%',position:'relative'}}),
                     graphConfig.vizType==='bundle'&&React.createElement('div',{ref:bundleRef,className:'bundle-container'}),
                     graphConfig.vizType==='architecture'&&renderArchitectureView(),
                     vizUsesLineThickness(graphConfig.vizType)&&React.createElement('div',{className:'canvas-toolbar'},

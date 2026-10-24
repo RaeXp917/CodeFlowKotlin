@@ -2330,7 +2330,7 @@ test('index.html ships a working Code view, not a stub', () => {
 });
 
 test('thickness control is offered on every view that draws links', () => {
-  ['graph', 'code', 'graph3d', 'dendro', 'sankey', 'disjoint', 'bundle'].forEach((viz) => {
+  ['graph', 'code', 'graph3d', 'dendro', 'sankey', 'bundle'].forEach((viz) => {
     assert.equal(context.vizUsesLineThickness(viz), true, viz);
   });
   ['treemap', 'matrix', 'architecture', 'none', ''].forEach((viz) => {
@@ -2344,7 +2344,7 @@ test('thickness control is offered on every view that draws links', () => {
 test('canvas mini-map is wired for Graph and Code only', () => {
   assert.equal(context.vizHasCanvasMinimap('graph'), true);
   assert.equal(context.vizHasCanvasMinimap('code'), true);
-  ['graph3d', 'treemap', 'matrix', 'dendro', 'sankey', 'disjoint', 'bundle', 'architecture', ''].forEach((viz) => {
+  ['graph3d', 'treemap', 'matrix', 'dendro', 'sankey', 'bundle', 'architecture', ''].forEach((viz) => {
     assert.equal(context.vizHasCanvasMinimap(viz), false, viz);
   });
   assert.match(htmlSource, /function vizHasCanvasMinimap\(/);
