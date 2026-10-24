@@ -41,51 +41,16 @@ test('the Private Key modal and its styling are removed', () => {
   assert.doesNotMatch(html, /Private Key \(PEM format\)/);
 });
 
-test('the GitHub adapter keeps only its anonymous public surface', () => {
-  // App/JWT auth helpers are gone.
-  assert.doesNotMatch(html, /generateJWT/);
-  assert.doesNotMatch(html, /authenticateApp/);
-  assert.doesNotMatch(html, /getInstallationToken/);
-  assert.doesNotMatch(html, /getRepoInstallation/);
-  assert.doesNotMatch(html, /installationToken/);
-  // The public adapter and its anonymous entry points remain.
-  assert.match(html, /var GitHub=\{/);
-  assert.match(html, /request:function\(url,options,errorMap\)\{/);
-  assert.match(html, /getRateLimit:function\(\)/);
-  assert.match(html, /getFile:function/);
-  assert.match(html, /scan:function/);
-});
-
-test('analyze() follows the anonymous path (no auth promise)', () => {
-  assert.match(html, /Public GitHub analysis is anonymous/);
-  assert.match(html, /GitHub\.token=''/);
-  assert.doesNotMatch(html, /Authenticating with GitHub App/);
-  assert.doesNotMatch(html, /var authPromise/);
-});
-
-test('rate-limit guidance no longer recommends authentication', () => {
-  assert.doesNotMatch(html, /add a token or GitHub App/);
-  assert.doesNotMatch(html, /add a GitHub token/);
-  assert.doesNotMatch(html, /Developer Settings -> Personal access tokens/);
-  // It points to the local alternatives instead.
-  assert.match(html, /Open Folder/);
-  assert.match(html, /not rate-limited/);
-});
-
-test('the Privacy modal is accurate (no stale token / nothing-persisted claims)', () => {
+// GitHub runtime removal is covered in depth by tests/github-removal.test.mjs.
+// The remaining auth-focused assertions confirm no credential UI ever returns.
+test('the Privacy modal describes local-only behavior (no GitHub claims)', () => {
   assert.doesNotMatch(html, /Nothing Persisted/);
   assert.doesNotMatch(html, /Your Token Stays Local/);
-  assert.match(html, /No GitHub Login/);
-  assert.match(html, /Locally Stored Settings/);
-  assert.match(html, /source is never sent to GitHub/);
-  assert.match(html, /never uploaded/);
-});
-
-test('GitHub becomes an optional, clearly-labelled URL control', () => {
-  assert.match(html, /placeholder:'https:\/\/github\.com\/owner\/repo'/);
-  assert.match(html, /Open GitHub URL \(optional\)/);
-  // Public URL parsing (shorthand support) is preserved.
-  assert.match(html, /function parseUrl\(/);
+  assert.doesNotMatch(html, /No GitHub Login/);
+  assert.doesNotMatch(html, /Optional, Direct GitHub Calls/);
+  assert.match(html, /Local-Only Analysis/);
+  assert.match(html, /No External Services/);
+  assert.match(html, /offline-capable/);
 });
 
 test('local source is never uploaded to GitHub (no PUT/POST of file contents)', () => {

@@ -6,7 +6,9 @@ const vm = require('node:vm');
 const repoRoot = path.resolve(__dirname, '..');
 const htmlSource = fs.readFileSync(path.join(repoRoot, 'index.html'), 'utf8');
 const parserStart = htmlSource.indexOf('const Parser={');
-const parserEnd = htmlSource.indexOf('\nvar GitHub={', parserStart);
+// The GitHub adapter that used to follow Parser was removed; slice to the end of
+// the shared analyzer block instead.
+const parserEnd = htmlSource.indexOf('// ===== CODEFLOW_ANALYZER_END =====', parserStart);
 
 if (parserStart === -1 || parserEnd === -1) {
   throw new Error('Could not locate Parser source in index.html');

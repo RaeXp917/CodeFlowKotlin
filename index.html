@@ -740,12 +740,11 @@ body{height:100dvh;min-height:100dvh}
  * CodeFlow keeps its application code in one HTML entry point and ships its
  * pinned browser runtime alongside it for cold offline use.
  *
- * The file is organized in five broad sections:
+ * The file is organized in four broad sections:
  * 1. Shared constants, exclusion helpers, and browser-yield utilities.
  * 2. Parser and static-analysis primitives.
- * 3. GitHub API adapter and repository scanning.
- * 4. Shared analysis pipeline plus inline Web Worker fallback.
- * 5. React UI, local folder/ZIP ingestion, visualization, and modals.
+ * 3. Shared analysis pipeline plus inline Web Worker fallback.
+ * 4. React UI, local project/folder/ZIP ingestion, visualization, and modals.
  */
 const{useState,useEffect,useLayoutEffect,useRef,useMemo,useCallback}=React;
 const COLORS=['#4d9fff','#a78bfa','#22d3ee','#00ff9d','#ff9f43','#ec4899','#ff5f5f','#84cc16'];
@@ -4090,191 +4089,6 @@ function renderTooltipHtml(title,stats){
         return '<div class="treemap-tooltip-stat"><span>'+escapeHtml(stat.label)+':</span><span>'+escapeHtml(stat.value)+'</span></div>';
     }).join('');
 }
-
-// ---------------------------------------------------------------------------
-// GitHub API Adapter
-// ---------------------------------------------------------------------------
-
-function buildGitHubApiUrl(segments,query){
-    var path=segments.filter(function(segment){return segment!==undefined&&segment!==null&&segment!=='';}).map(function(segment){
-        return encodeURIComponent(String(segment));
-    }).join('/');
-    var url='https://api.github.com/'+path;
-    if(!query)return url;
-    var params=new URLSearchParams();
-    Object.keys(query).forEach(function(key){
-        var value=query[key];
-        if(value===undefined||value===null||value==='')return;
-        params.set(key,String(value));
-    });
-    var queryString=params.toString();
-    return queryString?url+'?'+queryString:url;
-}
-
-function buildRepoApiUrl(owner,repo,segments,query){
-    return buildGitHubApiUrl(['repos',owner,repo].concat(segments||[]),query);
-}
-
-function splitRepoPath(path){
-    return (path||'').split('/').filter(Boolean);
-}
-
-function decodeBase64Utf8(content){
-    var normalized=String(content||'').replace(/\s+/g,'');
-    if(!normalized)return null;
-    var binary=atob(normalized);
-    var bytes=new Uint8Array(binary.length);
-    for(var i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
-    try{
-        return new TextDecoder('utf-8').decode(bytes);
-    }catch(e){
-        var text='';
-        for(var j=0;j<bytes.length;j++)text+=String.fromCharCode(bytes[j]);
-        return text;
-    }
-}
-
-var GitHub={
-    token:'',
-    rateLimit:{remaining:60,limit:60,reset:0},
-    requestTimeoutMs:15000,
-    
-    request:function(url,options,errorMap){
-        var self=this;
-        var h=Object.assign({'Accept':'application/vnd.github.v3+json'},options&&options.headers?options.headers:{});
-        if(this.token&&!h.Authorization)h.Authorization='Bearer '+this.token;
-        var controller=new AbortController();
-        var timeoutId=setTimeout(function(){controller.abort();},this.requestTimeoutMs);
-        var requestOptions=Object.assign({},options||{},{headers:h,signal:controller.signal});
-        return fetch(url,requestOptions).then(function(r){
-            // Track rate limit from headers
-            var rem=r.headers.get('x-ratelimit-remaining');
-            var lim=r.headers.get('x-ratelimit-limit');
-            var rst=r.headers.get('x-ratelimit-reset');
-            if(rem!==null)self.rateLimit.remaining=parseInt(rem,10);
-            if(lim!==null)self.rateLimit.limit=parseInt(lim,10);
-            if(rst!==null)self.rateLimit.reset=parseInt(rst,10);
-            if(!r.ok){
-                throw new Error(
-                    errorMap&&errorMap[r.status]
-                        ? errorMap[r.status]
-                        : r.status===401
-                            ? 'GitHub request was not authorized'
-                            : r.status===403
-                                ? 'Rate limited - public GitHub allows about 60 requests/hour per IP. Open a local Folder or ZIP instead.'
-                                : r.status===404
-                                    ? 'Repository not found'
-                                    : r.status===429
-                                        ? 'Rate limited (429) - try again later, or open a local Folder or ZIP.'
-                                        : 'Error '+r.status
-                );
-            }
-            return r.json();
-        }).catch(function(err){
-            if(err&&err.name==='AbortError'){
-                throw new Error('GitHub request timed out. Please try again.');
-            }
-            throw err;
-        }).finally(function(){
-            clearTimeout(timeoutId);
-        });
-    },
-    fetch:function(url,options,errorMap){
-        return this.request(url,options,errorMap);
-    },
-    getRateLimit:function(){
-        var self=this;
-        return this.request(buildGitHubApiUrl(['rate_limit'])).then(function(d){
-            if(d.resources&&d.resources.core){
-                self.rateLimit.remaining=d.resources.core.remaining;
-                self.rateLimit.limit=d.resources.core.limit;
-                self.rateLimit.reset=d.resources.core.reset;
-            }
-            return self.rateLimit;
-        }).catch(function(){return self.rateLimit;});
-    },
-    getFile:function(o,r,p){
-        return this.fetch(buildRepoApiUrl(o,r,['contents'].concat(splitRepoPath(p)))).then(function(d){return d.content?decodeBase64Utf8(d.content):null;}).catch(function(){return null;});
-    },
-    getCommits:function(o,r,path,limit){
-        if(this.rateLimit.remaining<20&&!this.token)return Promise.resolve([]);// Skip when rate limited
-        return this.fetch(buildRepoApiUrl(o,r,['commits'],{per_page:limit||30,path:path||undefined})).catch(function(){return[];});
-    },
-    getBlame:function(o,r,path){
-        return this.getCommits(o,r,path,50).then(function(commits){
-            var authors={};
-            commits.forEach(function(c){var name=c.commit.author.name;authors[name]=(authors[name]||0)+1;});
-            return Object.entries(authors).map(function(e){return{name:e[0],commits:e[1],percent:Math.round(e[1]/commits.length*100)};}).sort(function(a,b){return b.commits-a.commits;});
-        }).catch(function(){return[];});
-    },
-    getPR:function(o,r,prNum){
-        var self=this;
-        return this.fetch(buildRepoApiUrl(o,r,['pulls',String(prNum)])).then(function(pr){
-            return self.fetch(buildRepoApiUrl(o,r,['pulls',String(prNum),'files'])).then(function(files){
-                pr.files=files;return pr;
-            });
-        }).catch(function(){return null;});
-    },
-    // Fast scan using Git Trees API (single request for all files!)
-    scanTree:function(o,r,cb,compiledPatterns){
-        var self=this;
-        if(cb)cb('Fetching repository tree...');
-        // First get repo info to find default branch
-        return this.fetch(buildRepoApiUrl(o,r)).then(function(repo){
-            var branch=repo.default_branch||'main';
-            if(cb)cb('Loading file tree ('+branch+')...');
-            // Get full tree in one request with recursive flag
-            return self.fetch(buildRepoApiUrl(o,r,['git','trees',branch],{recursive:1}));
-        }).then(function(tree){
-            if(!tree.tree)throw new Error('Invalid tree response');
-            var f=[];
-            tree.tree.forEach(function(i){
-                if(i.type!=='blob')return;
-                var name=i.path.includes('/')?i.path.substring(i.path.lastIndexOf('/')+1):i.path;
-                if(shouldExcludeFile(i.path,name,compiledPatterns))return;
-                var pathParts=i.path.split('/');
-                var ignored=pathParts.slice(0,-1).some(function(part,idx){
-                    var dirPath=pathParts.slice(0,idx+1).join('/');
-                    return shouldIgnoreDirectory(dirPath,part,compiledPatterns);
-                });
-                if(ignored)return;
-                var folder=i.path.includes('/')?i.path.substring(0,i.path.lastIndexOf('/')):'root';
-                f.push({path:i.path,name:name,folder:folder,size:i.size||0,isCode:Parser.isCode(name)});
-            });
-            if(cb)cb('Found '+f.length+' files');
-            return f;
-        });
-    },
-    // Fallback: recursive scan using Contents API (many requests)
-    scanRecursive:function(o,r,cb,p,d,compiledPatterns){
-        var self=this;p=p||'';d=d||0;
-        if(d>10)return Promise.resolve([]);
-        return this.fetch(buildRepoApiUrl(o,r,['contents'].concat(splitRepoPath(p)))).then(function(c){
-            var f=[];
-            var promises=[];
-            c.forEach(function(i){
-                if(i.type==='file'&&!shouldExcludeFile(i.path,i.name,compiledPatterns)){
-                    f.push({path:i.path,name:i.name,folder:i.path.includes('/')?i.path.substring(0,i.path.lastIndexOf('/')):'root',size:i.size,isCode:Parser.isCode(i.name)});
-                }else if(i.type==='dir'&&!shouldIgnoreDirectory(i.path,i.name,compiledPatterns)){
-                    if(cb)cb('/'+i.path);
-                    promises.push(self.scanRecursive(o,r,cb,i.path,d+1,compiledPatterns).catch(function(){return[];}));
-                }
-            });
-            return Promise.all(promises).then(function(results){
-                results.forEach(function(res){f=f.concat(res);});
-                return f;
-            });
-        }).catch(function(e){if(d===0)throw e;return[];});
-    },
-    // Smart scan: try tree API first (1 request), fallback to recursive
-    scan:function(o,r,cb,compiledPatterns){
-        var self=this;
-        return this.scanTree(o,r,cb,compiledPatterns).catch(function(e){
-            if(cb)cb('Tree API failed, using fallback...');
-            return self.scanRecursive(o,r,cb,'',0,compiledPatterns);
-        });
-    }
-};
 
 // ---------------------------------------------------------------------------
 // Shared Analysis Pipeline
@@ -8784,8 +8598,8 @@ async function buildAnalysisData(options){
     var fetchFailedFiles=analyzed.filter(function(file){return file.analysisSkipped==='fetch-failed';});
     if(fetchFailedFiles.length)issues.push({
         type:'critical',
-        title:fetchFailedFiles.length+' Files Not Fetched — Partial Analysis',
-        desc:'GitHub API requests failed (usually the unauthenticated rate limit of 60/hour). Every metric below is computed WITHOUT these files. Add a token, or use Open ZIP for a complete analysis.',
+        title:fetchFailedFiles.length+' Files Not Read — Partial Analysis',
+        desc:'Some local files could not be read (permissions, a file removed mid-scan, or a read error). Every metric below is computed WITHOUT these files. Re-analyze the project to try again.',
         items:fetchFailedFiles.map(function(file){return{name:file.name,file:file.path,size:file.size||0};})
     });
     var deadFns=Object.entries(fnStats).filter(function(x){
@@ -9959,17 +9773,6 @@ function normalizeExcludeKey(patterns){
     return list.join('\n');
 }
 
-function githubCacheSourceKey(owner,repo,patterns){
-    var base=String(owner||'')+'/'+String(repo||'');
-    var excl=normalizeExcludeKey(patterns);
-    return excl?base+'|excl:'+excl:base;
-}
-
-function githubSourceKeyForLoadedAnalysis(owner,repo,data,pendingPatterns){
-    var patterns=data&&data.excludePatterns!=null?data.excludePatterns:pendingPatterns;
-    return githubCacheSourceKey(owner,repo,patterns);
-}
-
 function cachedAnalysisMatchesExcludes(record,patterns){
     if(!record)return false;
     var wanted=normalizeExcludeKey(patterns);
@@ -10454,10 +10257,6 @@ function unburyNodesFromCards(nodes,cardPaths,sizesByPath,pad,boxesByPath){
         if(!moved)break;
     }
     return list;
-}
-
-function githubZipDownloadUrl(owner,repo){
-    return 'https://github.com/'+encodeURIComponent(owner)+'/'+encodeURIComponent(repo)+'/archive/HEAD.zip';
 }
 
 function analysisCacheKey(sourceType,sourceKey){
@@ -11865,7 +11664,6 @@ function loadedAnalysisSourceIdentity(options){
     if(options.localSourceKind==='folder')return{sourceType:'folder',sourceKey:options.folderKey||'local-folder'};
     if(options.localSourceKind==='zip')return{sourceType:'zip',sourceKey:options.zipKey||'zip'};
     if(options.localSourceKind==='local-project')return{sourceType:'local-project',sourceKey:options.cliRoot||'local-project'};
-    if(options.githubOwner&&options.githubRepo)return{sourceType:'github',sourceKey:options.githubKey||(options.githubOwner+'/'+options.githubRepo)};
     if(options.cliOk)return{sourceType:'local-project',sourceKey:options.cliRoot||'local-project'};
     return null;
 }
@@ -13025,14 +12823,6 @@ function getFilePreviewIconName(filename){
         },extra||{});
     }
 
-function buildAppUrl(repo,autoRun){
-    var url=new URL(window.location.href);
-    url.search='';
-    if(repo)url.searchParams.set('repo',repo);
-    if(autoRun&&repo)url.searchParams.set('run','1');
-    return url.toString();
-}
-
 function getDialogTone(tone){
     if(tone==='danger')return{
         color:'var(--red)',
@@ -13110,7 +12900,6 @@ function HealthRing(props){
 
 function App(){
     var _a=useState(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'),theme=_a[0],setTheme=_a[1];
-    var _b=useState(''),repoUrl=_b[0],setRepoUrl=_b[1];
     var _d=useState(false),loading=_d[0],setLoading=_d[1];
     var _e=useState(''),progress=_e[0],setProgress=_e[1];
     var _f=useState(null),error=_f[0],setError=_f[1];
@@ -13125,10 +12914,7 @@ function App(){
     var _m2=useState(null),drillDown=_m2[0],setDrillDown=_m2[1];// {type:'issue'|'pattern'|'security'|'suggestion'|'duplicate', data:...}
     var _n=useState(null),blastRadius=_n[0],setBlastRadius=_n[1];
     var _o=useState(null),ownership=_o[0],setOwnership=_o[1];
-    var _p=useState(''),prUrl=_p[0],setPrUrl=_p[1];
-    var _q=useState(null),prData=_q[0],setPrData=_q[1];
     var _r=useState(false),showExport=_r[0],setShowExport=_r[1];
-    var _s=useState(false),showPR=_s[0],setShowPR=_s[1];
     var _t=useState(false),showPrivacy=_t[0],setShowPrivacy=_t[1];
     var _u=useState(null),tooltip=_u[0],setTooltip=_u[1];
     var _v=useState(null),toast=_v[0],setToast=_v[1];
@@ -13362,56 +13148,28 @@ function App(){
     },[pendingRecentDelete]);
 
     useEffect(function(){
-        var params=new URLSearchParams(window.location.search);
-        var repo=params.get('repo');
-        var shouldAutoRun=params.get('run')==='1';
-        if(repo&&repo.length<200&&!repo.includes('{')&&/^[a-zA-Z0-9_.\/-]+$/.test(repo)){
-            setRepoUrl(repo);
-            if(shouldAutoRun){
-                setTimeout(function(){var btn=document.getElementById('analyze-btn');if(btn)btn.click();},500);
-            }
-        }
+        // Local-only: no ?repo/?run remote analysis. Old links open the app normally.
         refreshRecentList();
         loadActiveProject();
     },[]);
-
-    function parseUrl(url){
-        if(!url||typeof url!=='string')return null;
-        url=url.trim();
-        if(url.length>200||url.includes('{')|| url.includes('"'))return null;
-        var m=url.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)/);
-        if(m)return{owner:m[1],repo:m[2].replace(/\.git$/,'')};
-        var simple=url.match(/^([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)\/?$/);
-        if(simple)return{owner:simple[1],repo:simple[2]};
-        return null;
-    }
 
     function currentAnalysisSource(){
         if(localSourceKind==='folder')return{sourceType:'folder',sourceKey:(repoInfo&&(repoInfo.folderKey||repoInfo.name))||'local-folder',title:(repoInfo&&repoInfo.name)||'Local Folder',repoUrl:'',localSourceKind:'folder'};
         if(localSourceKind==='zip')return{sourceType:'zip',sourceKey:(repoInfo&&(repoInfo.zipKey||repoInfo.name))||'zip',title:(repoInfo&&repoInfo.name)||'ZIP Archive',repoUrl:'',localSourceKind:'zip'};
         if(localSourceKind==='local-project')return{sourceType:'local-project',sourceKey:(repoInfo&&repoInfo.cliRoot)||(cliStatus&&cliStatus.root)||'local-project',title:(cliStatus&&cliStatus.name)||(repoInfo&&repoInfo.name)||'Local watch',repoUrl:'',localSourceKind:'local-project'};
-        if(repoInfo&&repoInfo.owner&&repoInfo.repo&&repoInfo.owner!=='local')return{sourceType:'github',sourceKey:githubSourceKeyForLoadedAnalysis(repoInfo.owner,repoInfo.repo,data,activeExcludePatterns),title:repoInfo.owner+'/'+repoInfo.repo,repoUrl:repoInfo.owner+'/'+repoInfo.repo,localSourceKind:null};
-        var parsed=parseUrl(repoUrl);
-        if(parsed)return{sourceType:'github',sourceKey:githubSourceKeyForLoadedAnalysis(parsed.owner,parsed.repo,data,activeExcludePatterns),title:parsed.owner+'/'+parsed.repo,repoUrl:parsed.owner+'/'+parsed.repo,localSourceKind:null};
         if(cliStatus&&cliStatus.ok)return{sourceType:'local-project',sourceKey:cliStatus.root||'local-project',title:cliStatus.name||'Local watch',repoUrl:'',localSourceKind:'local-project'};
         return null;
     }
     var analysisGraphIdentity=useMemo(function(){return analysisGraphKey(data);},[data]);
     var loadedSourceIdentity=useMemo(function(){
-        var parsed=parseUrl(repoUrl);
-        var githubOwner=repoInfo&&repoInfo.owner&&repoInfo.owner!=='local'?repoInfo.owner:(parsed&&parsed.owner);
-        var githubRepo=repoInfo&&repoInfo.owner&&repoInfo.owner!=='local'?repoInfo.repo:(parsed&&parsed.repo);
         return loadedAnalysisSourceIdentity({
             localSourceKind:localSourceKind,
             folderKey:repoInfo&&(repoInfo.folderKey||repoInfo.name),
             zipKey:repoInfo&&(repoInfo.zipKey||repoInfo.name),
             cliRoot:(repoInfo&&repoInfo.cliRoot)||(cliStatus&&cliStatus.root),
-            cliOk:!!(cliStatus&&cliStatus.ok),
-            githubOwner:githubOwner,
-            githubRepo:githubRepo,
-            githubKey:githubOwner&&githubRepo?githubSourceKeyForLoadedAnalysis(githubOwner,githubRepo,data,activeExcludePatterns):null
+            cliOk:!!(cliStatus&&cliStatus.ok)
         });
-    },[localSourceKind,repoInfo,repoUrl,data,cliStatus]);
+    },[localSourceKind,repoInfo,data,cliStatus]);
     var currentHydrationId=useMemo(function(){
         return analysisHydrationIdFromParts(loadedSourceIdentity,analysisGraphIdentity);
     },[loadedSourceIdentity,analysisGraphIdentity]);
@@ -13477,7 +13235,6 @@ function App(){
         setCliDirty([]);
         clearCliLiveDiffs();
         if(record.repoInfo)setRepoInfo(record.repoInfo);
-        if(record.repoUrl)setRepoUrl(record.repoUrl);
         var folderMatches=record.sourceType==='folder'&&retainedFolderMatchesRecord(record,{sourceKey:localFolderKeyRef.current});
         var zipMatches=record.sourceType==='zip'&&retainedZipMatchesRecord(record,{
             sourceKey:zipKeyRef.current,
@@ -13546,24 +13303,6 @@ function App(){
         setPendingRecentDelete(next.armedId);
         if(pendingRecentDeleteTimerRef.current)clearTimeout(pendingRecentDeleteTimerRef.current);
         pendingRecentDeleteTimerRef.current=setTimeout(function(){setPendingRecentDelete(null);},4000);
-    }
-
-    function startGithubZipDownload(owner,repo){
-        var url=githubZipDownloadUrl(owner,repo);
-        var a=document.createElement('a');
-        a.href=url;
-        a.rel='noopener';
-        a.target='_blank';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        showNotification('ZIP download started. Use Open ZIP to analyze it here.','success');
-    }
-
-    function downloadCurrentGithubZip(){
-        var parsed=parseUrl(repoUrl)||(repoInfo&&repoInfo.owner&&repoInfo.repo?{owner:repoInfo.owner,repo:repoInfo.repo}:null);
-        if(!parsed){showNotification('Enter a GitHub URL first.','warning');return;}
-        startGithubZipDownload(parsed.owner,parsed.repo);
     }
 
     function clearCliLiveDiffs(){
@@ -13757,7 +13496,6 @@ function App(){
         setBlastRadius(null);
         setOwnership(null);
         setFolderFilter(null);
-        setPrData(null);
         setFilePreview(null);
         setMobilePanel(null);
         setShowGraphConfig(false);
@@ -13809,201 +13547,6 @@ function App(){
 
     function toggleMobilePanel(panel){
         setMobilePanel(function(prev){return prev===panel?null:panel;});
-    }
-
-    function analyze(forceRefresh,explicitUrl){
-        var p=parseUrl(explicitUrl||repoUrl);
-        if(!p){setError('Invalid URL. Use format: owner/repo');return;}
-        if(explicitUrl)setRepoUrl(explicitUrl);
-        var shouldForce=forceRefresh===true||forceRefreshRef.current;
-        forceRefreshRef.current=false;
-        var githubKey=githubCacheSourceKey(p.owner,p.repo,activeExcludePatterns);
-        var cacheId=analysisCacheKey('github',githubKey);
-        if(!shouldForce){
-            getRecentAnalysis(cacheId).then(function(record){
-                if(record&&record.data&&cachedAnalysisMatchesExcludes(record,activeExcludePatterns)){
-                    applyCachedAnalysis(record);
-                    return;
-                }
-                analyze(true);
-            }).catch(function(){analyze(true);});
-            return;
-        }
-        var currentExcludePatterns=activeExcludePatterns;
-
-        resetAnalysisState();
-        setLocalDirHandle(null);
-        setLocalSourceKind(null);
-        zipArchiveRef.current=null;
-        zipFileRef.current=null;
-        setLoading(true);
-        setProgress('Initializing...');
-
-        // Public GitHub analysis is anonymous: no credentials are collected or sent.
-        GitHub.token='';
-
-        setRepoInfo(p);
-
-        setProgress('Loading language parsers...');
-        Parser.initTreeSitter().catch(function(){return null;}).then(function(){
-            setProgress('Checking rate limit...');
-            return GitHub.getRateLimit();
-        }).then(function(rl){
-            var estimatedRequests=50;// Conservative estimate for a small-medium repo
-
-            // Warn if the anonymous public rate limit is very low.
-            if(rl.remaining<estimatedRequests){
-                var resetTime=new Date(rl.reset*1000).toLocaleTimeString();
-                return requestConfirm({
-                    tone:'warning',
-                    icon:'warning',
-                    title:'GitHub API rate limit is low',
-                    message:
-                        'Remaining requests: '+rl.remaining+'/'+rl.limit+'\n'+
-                        'Resets at: '+resetTime+'\n\n'+
-                        'Public GitHub requests are temporarily limited (about 60 per hour, shared by IP address).\n'+
-                        'Open Folder to analyze a local project, or download a ZIP and use Open ZIP — both are fully local and not rate-limited.\n\n'+
-                        'Continue anyway with the remaining requests?',
-                    confirmLabel:'Continue anyway'
-                }).then(function(proceed){
-                    if(!proceed){
-                        setLoading(false);
-                        return Promise.reject('cancelled');
-                    }
-                    setProgress('Scanning repository...');
-                    return GitHub.scan(p.owner,p.repo,setProgress,currentExcludePatterns);
-                });
-            }
-
-            setProgress('Scanning repository...');
-            return GitHub.scan(p.owner,p.repo,setProgress,currentExcludePatterns);
-        }).then(function(files){
-            if(!files)return;// Cancelled
-            if(!files.length)throw new Error(currentExcludePatterns.length?'No code files found after applying exclude patterns':'No code files found');
-            var SOFT_LIMIT=ANALYSIS_LIMITS.repoSoft,HARD_LIMIT=ANALYSIS_LIMITS.repoMax;
-            function beginRepoAnalysis(){
-                if(files.length>HARD_LIMIT){
-                    showNotification('Found '+files.length+' files. Using a '+HARD_LIMIT+'-file API sample. Use Open ZIP for full analysis.','warning');
-                }
-                var max=Math.min(files.length,HARD_LIMIT);
-                var analyzed=[];
-                var allFns=[];
-
-                function processFile(i){
-                    if(i>=max){finishAnalysis();return;}
-                    var f=files[i];
-                    setProgress('Analyzing '+(i+1)+'/'+max+': '+f.name);
-                    var isCodeFile=f.isCode!==false&&Parser.isCode(f.name);
-                    if(Parser.isOversized(f.size)){
-                        analyzed.push(makeOversizedAnalysisFile(f,f.size,isCodeFile));
-                        processFile(i+1);
-                        return;
-                    }
-                    if(isCodeFile){
-                        Promise.all([
-                            GitHub.getFile(p.owner,p.repo,f.path),
-                            GitHub.getCommits(p.owner,p.repo,f.path,10).catch(function(){return[];})
-                        ]).then(function(results){
-                            var content=results[0];
-                            var commits=results[1];
-                            if(content){
-                                var layer=Parser.detectLayer(f.path);
-                                var actualIsCode=!Parser.isScriptContainer(f.path)||Parser.hasEmbeddedCode(content,f.path);
-                                var fns=actualIsCode?Parser.extract(content,f.path):[];
-                                analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content,functions:fns,lines:content.split('\n').length,layer:layer,churn:Array.isArray(commits)?commits.length:0,isCode:actualIsCode});
-                                if(actualIsCode){
-                                    fns.forEach(function(fn){allFns.push(Object.assign({},fn,{folder:f.folder,layer:layer}));});
-                                }
-                            }else{
-                                // Content fetch failed (rate limit, network) — keep the
-                                // file visible instead of silently shrinking the repo.
-                                analyzed.push(makeFetchFailedAnalysisFile(f));
-                            }
-                            processFile(i+1);
-                        }).catch(function(){analyzed.push(makeFetchFailedAnalysisFile(f));processFile(i+1);});
-                    }else{
-                        GitHub.getFile(p.owner,p.repo,f.path).then(function(content){
-                            var layer=Parser.detectLayer(f.path);
-                            var lines=content?content.split('\n').length:0;
-                            analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content||'',functions:[],lines:lines,layer:layer,churn:0,isCode:false});
-                            processFile(i+1);
-                        }).catch(function(){
-                            analyzed.push(makeFetchFailedAnalysisFile(f));
-                            processFile(i+1);
-                        });
-                    }
-                }
-
-                async function finishAnalysis(){
-                    try{
-                        var dataObj=await runAnalysisData({
-                            analyzed:analyzed,
-                            allFns:allFns,
-                            excludePatterns:currentExcludePatterns.map(function(x){return x.raw;}),
-                            progress:setProgress,
-                            yieldFn:yieldToBrowser
-                        });
-                        var failedCount=analyzed.filter(function(af){return af.analysisSkipped==='fetch-failed';}).length;
-                        if(failedCount>0){
-                            showNotification(failedCount+' of '+analyzed.length+' files could not be fetched (GitHub rate limit?). Results are PARTIAL — add a token or use Open ZIP for full analysis.','warning');
-                        }
-                        setData(dataObj);
-                        setExpandedPaths(new Set(['']));
-                        setCachedFromId(null);
-                        persistCurrentAnalysis(dataObj,{sourceType:'github',sourceKey:githubKey,title:p.owner+'/'+p.repo,repoUrl:p.owner+'/'+p.repo,repoInfo:p,localSourceKind:null});
-                        window.history.replaceState({},'',buildAppUrl(p.owner+'/'+p.repo,false));
-                        setLoading(false);
-                    }catch(err){
-                        setError('Analysis failed: '+(err.message||err)+'. Try a smaller repository.');
-                        setLoading(false);
-                    }
-                }
-
-                processFile(0);
-                return null;
-            }
-
-            if(files.length>SOFT_LIMIT&&files.length<=HARD_LIMIT){
-                return requestConfirm({
-                    tone:'warning',
-                    icon:'warning',
-                    title:'Analyze a large repository?',
-                    message:
-                        'This repository has '+files.length+' files.\n\n'+
-                        'Analyzing larger repositories can take longer and may hit GitHub API rate limits.\n\n'+
-                        'The folder picker is faster when the API is rate-limited. You can also download a ZIP and use Open ZIP — both are fully local.',
-                    confirmLabel:'Analyze repository'
-                }).then(function(proceed){
-                    if(!proceed){
-                        setLoading(false);
-                        return Promise.reject('cancelled');
-                    }
-                    return beginRepoAnalysis();
-                });
-            }
-
-            if(files.length>HARD_LIMIT){
-                return requestConfirm({
-                    tone:'warning',
-                    icon:'archive',
-                    title:'Analyze a GitHub API sample?',
-                    message:
-                        'This GitHub repository has '+files.length+' analyzable files.\n\n'+
-                        'The folder picker is faster when the API is rate-limited. Download the ZIP yourself, then use Open ZIP to read it in-page.\n\n'+
-                        'The browser cannot fetch GitHub zipballs directly because GitHub redirects those downloads to a CORS-restricted host.\n\n'+
-                        'Continue now with a '+HARD_LIMIT+'-file API sample?',
-                    confirmLabel:'Analyze sample'
-                }).then(function(proceed){
-                    if(!proceed){
-                        setLoading(false);
-                        return Promise.reject('cancelled');
-                    }
-                    return beginRepoAnalysis();
-                });
-            }
-
-            return beginRepoAnalysis();
-        }).catch(function(e){if(e!=='cancelled'){setError(e.message||e);setLoading(false);}});
     }
 
     function launchLocalFolderPicker(compiledPatterns){
@@ -14084,8 +13627,7 @@ function App(){
 
     function refreshAnalysis(record){
         var source=record&&record.sourceType?record:null;
-        var kind=source?source.sourceType:(localSourceKind||(parseUrl(repoUrl)?'github':null));
-        var githubUrl=source?(source.repoUrl||source.sourceKey):repoUrl;
+        var kind=source?source.sourceType:localSourceKind;
         setCachedFromId(null);
         if(kind==='local-project'||(!source&&cliStatus&&cliStatus.ok&&localSourceKind==='local-project')){
             var wantedRoot=source&&source.sourceType==='local-project'?source.sourceKey:'';
@@ -14139,11 +13681,6 @@ function App(){
             readZipArchive(zipFileRef.current,activeExcludePatterns);
             return;
         }
-        if(kind==='github'||parseUrl(githubUrl)){
-            analyze(true,githubUrl);
-            return;
-        }
-        analyze(true);
     }
 
     async function readLocalFolder(dirHandle, compiledPatterns, path=''){
@@ -14502,15 +14039,11 @@ function App(){
             }
             var blast=calcBlast(path,data.connections,data.files);
             setBlastRadius(blast);
-            setOwnership(null);
+            // Ownership came from GitHub commit history (git blame), which is no
+            // longer fetched. There is no local history source, so it stays empty.
+            setOwnership([]);
+            setOwnerLoading(false);
             setExpandedFns(new Set());
-            if(repoInfo&&!localSourceKind){
-                setOwnerLoading(true);
-                GitHub.getBlame(repoInfo.owner,repoInfo.repo,path).then(function(owners){setOwnership(owners);setOwnerLoading(false);}).catch(function(){setOwnerLoading(false);});
-            }else if(localSourceKind){
-                setOwnerLoading(false);
-                setOwnership([]);
-            }
             selectedPathRef.current=path;
             codeLinkParticlesHiddenRef.current=false;
             if(graphConfig.vizType!=='code')updateGraphHighlight(path,blast);
@@ -14627,7 +14160,6 @@ function App(){
         if(localSourceKind==='local-project'&&cliStatus&&cliStatus.ok)return 'local-project';
         if(folderSourceIsLive())return 'folder';
         if(zipSourceIsLive())return 'zip';
-        if(repoInfo&&repoInfo.owner&&repoInfo.repo&&repoInfo.owner!=='local')return 'github';
         if(cliStatus&&cliStatus.ok&&localSourceKind!=='folder'&&localSourceKind!=='zip')return 'local-project';
         return null;
     }
@@ -14679,7 +14211,7 @@ function App(){
             if(!entry||typeof entry.async!=='function')return Promise.resolve(null);
             return entry.async('string').catch(function(){return null;});
         }
-        return GitHub.getFile(repoInfo.owner,repoInfo.repo,path).then(function(content){return typeof content==='string'?content:null;}).catch(function(){return null;});
+        return Promise.resolve(null);
     }
 
     function rememberHydratedSources(updates){
@@ -16798,16 +16330,7 @@ function App(){
         showNotification('Report exported as '+format.toUpperCase(),'success');
     }
     function showNotification(msg,type){setToast({msg:msg,type:type||'success'});setTimeout(function(){setToast(null);},3000);}
-    function copyLink(){
-        if(localSourceKind){
-            showNotification('Share links are not available for local sources','warning');
-            return;
-        }
-        var shareUrl=buildAppUrl(repoInfo?repoInfo.owner+'/'+repoInfo.repo:repoUrl,true);
-        navigator.clipboard.writeText(shareUrl).then(function(){showNotification('Link copied to clipboard!');}).catch(function(){showNotification('Failed to copy link','error');});
-    }
-    function analyzePR(){if(!prUrl||!repoInfo)return;var m=prUrl.match(/\/pull\/(\d+)/);if(!m){showNotification('Invalid PR URL','error');return;}GitHub.getPR(repoInfo.owner,repoInfo.repo,m[1]).then(function(pr){if(pr)setPrData(pr);else showNotification('Could not load PR','error');});}
-    function resetAnalysis(){setData(null);setSelected(null);setBlastRadius(null);setOwnership(null);setRepoInfo(null);setRepoUrl('');setPrData(null);setFolderFilter(null);setLocalDirHandle(null);setLocalSourceKind(null);setArchitectureIncludeTests(false);setArchitectureIncludeBuildOutput(false);setCachedFromId(null);setActiveSymbol(null);setCliDirty([]);clearCliLiveDiffs();localFolderKeyRef.current=null;localFolderSelectionRef.current=null;localFilesRef.current=null;zipKeyRef.current=null;zipArchiveRef.current=null;zipFileRef.current=null;window.history.replaceState({},'',window.location.pathname);}
+    function resetAnalysis(){setData(null);setSelected(null);setBlastRadius(null);setOwnership(null);setRepoInfo(null);setFolderFilter(null);setLocalDirHandle(null);setLocalSourceKind(null);setCachedFromId(null);setActiveSymbol(null);setCliDirty([]);clearCliLiveDiffs();localFolderKeyRef.current=null;localFolderSelectionRef.current=null;localFilesRef.current=null;zipKeyRef.current=null;zipArchiveRef.current=null;zipFileRef.current=null;window.history.replaceState({},'',window.location.pathname);}
     function filterByFolder(path){setFolderFilter(function(prev){return prev===path?null:path;});}
     function renderRecentsList(){
         return React.createElement('div',{className:'sidebar-scroll'},
@@ -16872,7 +16395,7 @@ function App(){
         );
     }
     function renderOverviewPane(){
-        if(!data)return renderSidebarEmpty('No Repository','Enter a GitHub URL, open a folder, or load a ZIP archive');
+        if(!data)return renderSidebarEmpty('No Project','Select a local project from the Project dropdown, or open a folder or ZIP archive');
         return React.createElement('div',{className:'sidebar-scroll'},
             React.createElement('div',{className:'health-score',style:{marginBottom:10}},
                 React.createElement(HealthRing,{score:health.score,grade:health.grade}),
@@ -17317,19 +16840,11 @@ function App(){
                         React.createElement('span',{className:'logo-text'},'CODEFLOW')
                     ),
                     React.createElement('div',{className:'mobile-action-stack'},
-                        data&&!localSourceKind&&React.createElement('button',{className:'top-btn mobile-icon-btn','aria-label':'Analyze Pull Request',title:'Pull Request',onClick:function(){setShowPR(true);},type:'button'},React.createElement(Icon,{name:'pull-request',size:'m'})),
                         data&&React.createElement('button',{className:'top-btn mobile-icon-btn','aria-label':'Export analysis',title:'Export',onClick:function(){setShowExport(true);},type:'button'},React.createElement(Icon,{name:'export',size:'m'})),
-                        data&&!localSourceKind&&React.createElement('button',{className:'top-btn mobile-icon-btn','aria-label':'Copy share link',title:'Share',onClick:copyLink,type:'button'},React.createElement(Icon,{name:'share',size:'m'})),
                         React.createElement('button',{className:'top-btn mobile-icon-btn','aria-label':'Toggle theme',title:'Theme',onClick:function(){setTheme(function(t){return t==='dark'?'light':'dark';});},type:'button'},React.createElement(Icon,{name:theme==='dark'?'sun':'moon',size:'m'}))
                     )
                 ),
                 React.createElement('div',{className:'mobile-source-controls'},
-                    React.createElement('div',{className:'mobile-primary-row'},
-                        React.createElement('input',{className:'repo-input github-url-input','aria-label':'Open GitHub URL (optional)',placeholder:'https://github.com/owner/repo',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
-                        React.createElement('button',{id:'mobile-analyze-btn',className:'top-btn primary mobile-analyze-btn','aria-label':'Analyze repository',title:'Analyze',onClick:analyze,disabled:loading||!repoUrl,type:'button'},
-                            React.createElement(Icon,{name:loading?'activity':'search',size:'m'})
-                        )
-                    ),
                     React.createElement('div',{className:'mobile-secondary-row'},
                         React.createElement('div',{className:'project-selector-slot','data-codeflow-project-slot':'mobile'}),
                         React.createElement('button',{className:'top-btn','aria-label':'Edit exclude patterns',onClick:function(){openExcludeModal();},disabled:loading,type:'button',style:customExcludeCount?{borderColor:'var(--acc)',color:'var(--acc)'}:null},
@@ -17344,10 +16859,6 @@ function App(){
                         React.createElement('button',{className:'top-btn','aria-label':'Open ZIP archive',onClick:function(){openLocalZip();},disabled:loading,type:'button'},
                             React.createElement(Icon,{name:'archive',size:'m'}),
                             'ZIP'
-                        ),
-                        parseUrl(repoUrl)&&React.createElement('button',{className:'top-btn','aria-label':'Download GitHub ZIP',onClick:downloadCurrentGithubZip,disabled:loading,type:'button'},
-                            React.createElement(Icon,{name:'export',size:'m'}),
-                            'ZIP URL'
                         ),
                         data&&React.createElement('button',{className:'refresh-btn','aria-label':'Re-analyze',onClick:refreshAnalysis,disabled:loading,title:'Re-analyze',type:'button'},
                             React.createElement(Icon,{name:'refresh',size:'m'}),
@@ -17366,15 +16877,10 @@ function App(){
             ),
             React.createElement('div',{className:'repo-input-group'},
                 React.createElement('div',{className:'project-selector-slot','data-codeflow-project-slot':'desktop'}),
-                React.createElement('input',{className:'repo-input github-url-input','aria-label':'Open GitHub URL (optional)',placeholder:'https://github.com/owner/repo',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
                 React.createElement('button',{className:'top-btn','aria-label':'Edit exclude patterns',title:'Edit exclude patterns'+(customExcludeCount>0?' ('+customExcludeCount+')':''),onClick:function(){openExcludeModal();},disabled:loading,style:customExcludeCount?{borderColor:'var(--acc)',color:'var(--acc)'}:null},
                     React.createElement(Icon,{name:'ban',size:'m'}),
                     !data&&'Excludes',
                     (!data&&customExcludeCount>0)?' ('+customExcludeCount+')':''
-                ),
-                React.createElement('button',{id:'analyze-btn',className:'top-btn primary','aria-label':'Analyze repository',title:'Analyze repository',onClick:analyze,disabled:loading||!repoUrl},
-                    React.createElement(Icon,{name:loading?'activity':'search',size:'m'}),
-                    !data&&'Analyze'
                 ),
                 React.createElement('button',{className:'top-btn','aria-label':'Open local folder',title:'Open local folder',onClick:function(){openLocalFolder();},disabled:loading},
                     React.createElement(Icon,{name:'folder',size:'m'}),
@@ -17383,10 +16889,6 @@ function App(){
                 React.createElement('button',{className:'top-btn','aria-label':'Open ZIP archive',title:'Open ZIP archive',onClick:function(){openLocalZip();},disabled:loading},
                     React.createElement(Icon,{name:'archive',size:'m'}),
                     !data&&'Open ZIP'
-                ),
-                parseUrl(repoUrl)&&React.createElement('button',{className:'top-btn','aria-label':'Download GitHub ZIP',title:'Download a ZIP of this repo, then open it here',onClick:downloadCurrentGithubZip,disabled:loading},
-                    React.createElement(Icon,{name:'export',size:'m'}),
-                    !data&&'Download ZIP'
                 ),
                 data&&React.createElement('button',{className:'refresh-btn','aria-label':'Re-analyze',onClick:refreshAnalysis,disabled:loading,title:'Re-analyze the selected project'},
                     React.createElement(Icon,{name:'refresh',size:'m'}),
@@ -17407,9 +16909,7 @@ function App(){
                 )
             ),
             React.createElement('div',{className:'topbar-actions'},
-                React.createElement('button',{className:'top-btn','aria-label':'Analyze Pull Request',title:'Analyze Pull Request',onClick:function(){setShowPR(true);},disabled:!data||!!localSourceKind},React.createElement(Icon,{name:'pull-request',size:'m'}),!data&&'PR'),
                 React.createElement('button',{className:'top-btn','aria-label':'Export analysis',title:'Export analysis',onClick:function(){setShowExport(true);},disabled:!data},React.createElement(Icon,{name:'export',size:'m'}),!data&&'Export'),
-                React.createElement('button',{className:'top-btn','aria-label':'Copy share link',title:'Copy share link',onClick:copyLink,disabled:!data||!!localSourceKind},React.createElement(Icon,{name:'share',size:'m'}),!data&&'Share'),
                 React.createElement('button',{className:'top-btn','aria-label':'Toggle theme',title:theme==='dark'?'Switch to light mode':'Switch to dark mode',onClick:function(){setTheme(function(t){return t==='dark'?'light':'dark';});}},React.createElement(Icon,{name:theme==='dark'?'sun':'moon',size:'m'}),!data&&(theme==='dark'?'Light':'Dark'))
             )
         ),
@@ -17448,13 +16948,8 @@ function App(){
                 !data?React.createElement('div',{className:'empty-state'},
                     React.createElement(Icon,{name:'logo',size:'xxl',className:'empty-icon'}),
                     React.createElement('div',{className:'empty-title'},'CodeFlow'),
-                    React.createElement('div',{className:'empty-desc'},'Visualize architecture, blast radius, ownership, patterns & security\n\nEnter a GitHub URL, open a folder, or load a ZIP archive'),
-                    parseUrl(repoUrl)&&React.createElement('div',{className:'github-hint'},
-                        'The folder picker is faster when the API is rate-limited. ',
-                        React.createElement('button',{type:'button',onClick:downloadCurrentGithubZip},'Download ZIP'),
-                        ' and use Open ZIP to read it in-page.'
-                    ),
-                    cliStatus&&cliStatus.ok&&React.createElement('div',{className:'cli-chip',style:{marginTop:10}},'CLI watching ',cliStatus.name||cliStatus.root)
+                    React.createElement('div',{className:'empty-desc'},'Visualize architecture, blast radius, patterns & security\n\nSelect a local project from the Project dropdown (or open a folder or ZIP) to begin'),
+                    cliStatus&&cliStatus.ok&&React.createElement('div',{className:'cli-chip',style:{marginTop:10}},'Watching ',cliStatus.name||cliStatus.root)
                 ):
                 React.createElement(React.Fragment,null,
                     React.createElement('div',{className:'viz-selector'},
@@ -17851,7 +17346,7 @@ function App(){
                 ):React.createElement('div',{className:'empty-state'},
                     React.createElement(Icon,{name:'chart',size:'xxl',className:'empty-icon'}),
                     React.createElement('div',{className:'empty-title'},'Analysis'),
-                    React.createElement('div',{className:'empty-desc'},'Analyze a GitHub repo, local folder, or ZIP archive to see insights')
+                    React.createElement('div',{className:'empty-desc'},'Select a local project, open a folder, or load a ZIP archive to see insights')
                 )
             )
         ),
@@ -17864,8 +17359,7 @@ function App(){
                         !graphSvgExportEnabled(graphConfig.vizType)&&React.createElement('div',{style:{fontSize:9,color:'var(--t2)',marginBottom:10,lineHeight:1.4}},'Code cards are HTML overlays, not SVG. Switch to Graph to export an image.'),
                         React.createElement('div',{className:'export-options'},
                             React.createElement('div',{className:'export-option'+(graphSvgExportEnabled(graphConfig.vizType)?'':' disabled'),'aria-disabled':graphSvgExportEnabled(graphConfig.vizType)?undefined:'true',onClick:function(){if(!graphSvgExportEnabled(graphConfig.vizType))return;exportSVG();setShowExport(false);}},React.createElement('div',{className:'export-option-icon'},React.createElement(Icon,{name:'image',size:'xl'})),React.createElement('div',{className:'export-option-label'},'SVG Image')),
-                            React.createElement('div',{className:'export-option'+(graphConfig.vizType==='graph'?'':' disabled'),'aria-disabled':graphConfig.vizType==='graph'?undefined:'true',onClick:function(){if(graphConfig.vizType!=='graph')return;exportPDF();setShowExport(false);}},React.createElement('div',{className:'export-option-icon'},React.createElement(Icon,{name:'file-pdf',size:'xl'})),React.createElement('div',{className:'export-option-label'},'PDF Document')),
-                            React.createElement('div',{className:'export-option',onClick:function(){copyLink();setShowExport(false);}},React.createElement('div',{className:'export-option-icon'},React.createElement(Icon,{name:'link',size:'xl'})),React.createElement('div',{className:'export-option-label'},'Share Link'))
+                            React.createElement('div',{className:'export-option'+(graphConfig.vizType==='graph'?'':' disabled'),'aria-disabled':graphConfig.vizType==='graph'?undefined:'true',onClick:function(){if(graphConfig.vizType!=='graph')return;exportPDF();setShowExport(false);}},React.createElement('div',{className:'export-option-icon'},React.createElement(Icon,{name:'file-pdf',size:'xl'})),React.createElement('div',{className:'export-option-label'},'PDF Document'))
                         )
                     ),
                     React.createElement('div',{style:{fontSize:10,fontWeight:600,color:'var(--t3)',textTransform:'uppercase',marginBottom:8,marginTop:16}},'Analysis Report'),
@@ -17916,120 +17410,6 @@ function App(){
                     excludePatternDraft&&React.createElement('button',{className:'top-btn',onClick:function(){setExcludePatternDraft('');},style:{marginRight:'auto'}},'Clear Custom'),
                     React.createElement('button',{className:'top-btn',onClick:closeExcludeModal},'Cancel'),
                     React.createElement('button',{className:'top-btn primary',onClick:saveExcludePatterns},'Save')
-                )
-            )
-        ),
-        showPR&&React.createElement('div',{className:'modal-overlay',onClick:function(){setShowPR(false);}},
-            React.createElement('div',{className:'modal pr-modal',onClick:function(e){e.stopPropagation();}},
-                React.createElement('div',{className:'modal-header'},React.createElement('div',{className:'modal-title'},iconLabel('chart','PR Impact Analyzer','m')),React.createElement('button',{className:'modal-close',onClick:function(){setShowPR(false);}},'×')),
-                React.createElement('div',{className:'modal-body',style:{maxHeight:'75vh',overflowY:'auto'}},
-                    React.createElement('div',{className:'form-group'},React.createElement('label',{className:'form-label'},'Pull Request URL'),React.createElement('input',{className:'form-input','aria-label':'Pull Request URL',placeholder:'https://github.com/owner/repo/pull/123',value:prUrl,onChange:function(e){setPrUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter')analyzePR();}})),
-                    React.createElement('button',{className:'top-btn primary','aria-label':'Analyze Pull Request',onClick:analyzePR,style:{marginBottom:16,width:'100%'}},iconLabel('search','Analyze PR Impact')),
-                    prData&&(function(){
-                        var risk = calcPRRisk(prData, data);
-                        var reviewers = findSuggestedReviewers(prData, data);
-                        var testImpact = findTestImpact(prData, data);
-                        var chains = findDependencyChains(prData, data);
-                        var riskColor = risk.level === 'critical' ? 'var(--red)' : risk.level === 'high' ? 'var(--orange)' : risk.level === 'medium' ? 'var(--blue)' : 'var(--green)';
-                        return React.createElement(React.Fragment, null,
-                            React.createElement('div',{className:'pr-header',style:{marginBottom:16}},
-                                React.createElement('div',{className:'pr-title',style:{fontSize:14}},prData.title),
-                                React.createElement('div',{className:'pr-stats',style:{marginTop:8}},
-                                    React.createElement('span',{className:'pr-add'},'+',prData.additions||0),
-                                    React.createElement('span',{className:'pr-del'},'-',prData.deletions||0),
-                                    React.createElement('span',{style:{color:'var(--t3)',marginLeft:8}},prData.files?prData.files.length:0,' files')
-                                )
-                            ),
-                            React.createElement('div',{className:'pr-impact-grid'},
-                                React.createElement('div',{className:'pr-impact-card'},
-                                    React.createElement('div',{className:'pr-risk-meter'},
-                                        React.createElement('div',{className:'pr-risk-circle',style:{borderColor:riskColor,background:'rgba('+[risk.level==='critical'?'255,95,95':risk.level==='high'?'255,159,67':risk.level==='medium'?'77,159,255':'34,197,94'].join(',')+',0.1)'}},
-                                            React.createElement('div',{className:'pr-risk-value',style:{color:riskColor}},risk.score),
-                                            React.createElement('div',{className:'pr-risk-text',style:{color:riskColor}},risk.level)
-                                        ),
-                                        React.createElement('div',{style:{marginTop:12,fontSize:10,color:'var(--t2)',textAlign:'center'}},'Risk Score')
-                                    ),
-                                    risk.factors.length > 0 && React.createElement('div',{style:{marginTop:12}},
-                                        risk.factors.map(function(f,i) { return React.createElement('div',{key:i,style:{fontSize:9,color:'var(--t2)',padding:'4px 0',borderTop:i>0?'1px solid var(--border2)':'none'}},'• ',f); })
-                                    )
-                                ),
-                                React.createElement('div',{className:'pr-impact-card'},
-                                    React.createElement('div',{className:'pr-impact-card-title'},iconLabel('impact','Impact Metrics')),
-                                    React.createElement('div',{className:'pr-metric-row'},React.createElement('span',{className:'pr-metric-label'},'Total Blast Radius'),React.createElement('span',{className:'pr-metric-value'},risk.totalBlast,' files')),
-                                    React.createElement('div',{className:'pr-metric-row'},React.createElement('span',{className:'pr-metric-label'},'Files Changed'),React.createElement('span',{className:'pr-metric-value'},prData.files?prData.files.length:0)),
-                                    React.createElement('div',{className:'pr-metric-row'},React.createElement('span',{className:'pr-metric-label'},'Lines Modified'),React.createElement('span',{className:'pr-metric-value'},(prData.additions||0)+(prData.deletions||0))),
-                                    React.createElement('div',{className:'pr-metric-row'},React.createElement('span',{className:'pr-metric-label'},'Net Change'),React.createElement('span',{className:'pr-metric-value',style:{color:(prData.additions||0)-(prData.deletions||0)>=0?'var(--green)':'var(--red)'}},(prData.additions||0)-(prData.deletions||0)>0?'+':'',(prData.additions||0)-(prData.deletions||0)))
-                                ),
-                                reviewers.length > 0 && React.createElement('div',{className:'pr-impact-card'},
-                                    React.createElement('div',{className:'pr-impact-card-title'},iconLabel('users','Suggested Reviewers')),
-                                    reviewers.map(function(r,i) { return React.createElement('div',{key:i,className:'pr-reviewer-card'},
-                                        React.createElement('div',{className:'pr-reviewer-avatar',style:{background:r.avatar}},r.name[0]),
-                                        React.createElement('div',{className:'pr-reviewer-info'},
-                                            React.createElement('div',{className:'pr-reviewer-name'},r.name),
-                                            React.createElement('div',{className:'pr-reviewer-reason'},r.reason)
-                                        )
-                                    ); })
-                                ),
-                                testImpact.length > 0 && React.createElement('div',{className:'pr-impact-card'},
-                                    React.createElement('div',{className:'pr-impact-card-title'},iconLabel('beaker','Test Impact')),
-                                    React.createElement('div',{className:'pr-test-impact'},
-                                        testImpact.slice(0,5).map(function(t,i) { return React.createElement('div',{key:i,className:'pr-test-file'},
-                                            React.createElement('span',{className:'pr-test-icon'},React.createElement(Icon,{name:t.suggested?'spark':'security',size:'s'})),
-                                            React.createElement('span',{style:{flex:1}},t.file),
-                                            t.suggested && React.createElement('span',{className:'badge badge-info'},'suggested')
-                                        ); })
-                                    )
-                                )
-                            ),
-                            chains.length > 0 && React.createElement('div',{className:'pr-impact-card',style:{marginTop:16}},
-                                React.createElement('div',{className:'pr-impact-card-title'},iconLabel('link','Dependency Chains')),
-                                React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginBottom:12}},'Files that import modified files (downstream impact)'),
-                                chains.map(function(chain,i) { return React.createElement('div',{key:i,className:'pr-dependency-chain',style:{marginBottom:8}},
-                                    chain.map(function(node,j) { return React.createElement(React.Fragment,{key:j},
-                                        React.createElement('span',{className:'pr-chain-node'+(j===0?' changed':'')},node),
-                                        j < chain.length - 1 && React.createElement('span',{className:'pr-chain-arrow'},'→')
-                                    ); })
-                                ); })
-                            ),
-                            risk.hotspots.length > 0 && React.createElement('div',{className:'pr-impact-card',style:{marginTop:16}},
-                                React.createElement('div',{className:'pr-impact-card-title'},iconLabel('activity','Hotspots')),
-                                React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginBottom:12}},'Files with highest blast radius'),
-                                risk.hotspots.map(function(h,i) {
-                                    var maxBlast = Math.max.apply(null, risk.hotspots.map(function(x){return x.blast;})) || 1;
-                                    return React.createElement('div',{key:i,className:'pr-hotspot'},
-                                        React.createElement('span',{style:{fontSize:10,color:'var(--t1)',minWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},h.file.split('/').pop()),
-                                        React.createElement('div',{className:'pr-hotspot-bar'},
-                                            React.createElement('div',{className:'pr-hotspot-fill',style:{width:(h.blast/maxBlast*100)+'%',background:'linear-gradient(90deg, var(--orange), var(--red))'}})
-                                        ),
-                                        React.createElement('span',{style:{fontSize:9,color:'var(--t3)',minWidth:50,textAlign:'right'}},h.blast,' files')
-                                    );
-                                })
-                            ),
-                            React.createElement('div',{className:'pr-impact-card',style:{marginTop:16}},
-                                React.createElement('div',{className:'pr-impact-card-title'},iconLabel('folder','Changed Files')),
-                                React.createElement('div',{className:'pr-files-list'},
-                                    prData.files&&prData.files.slice(0,20).map(function(f,i){
-                                        var existing=data&&data.files.find(function(df){return df.path===f.filename;});
-                                        var blast=existing?calcBlast(f.filename,data.connections,data.files):null;
-                                        var statusColor = f.status === 'added' ? 'var(--green)' : f.status === 'removed' ? 'var(--red)' : 'var(--blue)';
-                                        return React.createElement('div',{key:i,className:'pr-file-row'},
-                                            React.createElement('div',{className:'pr-file-status',style:{background:statusColor}}),
-                                            React.createElement('div',{className:'pr-file-info'},
-                                                React.createElement('div',{className:'pr-file-path'},f.filename.split('/').pop()),
-                                                React.createElement('div',{className:'pr-file-folder'},f.filename.includes('/')?f.filename.substring(0,f.filename.lastIndexOf('/')):'root')
-                                            ),
-                                            React.createElement('div',{className:'pr-file-badges'},
-                                                f.additions>0&&React.createElement('span',{className:'pr-mini-badge',style:{background:'rgba(34,197,94,0.2)',color:'var(--green)'}},'+',f.additions),
-                                                f.deletions>0&&React.createElement('span',{className:'pr-mini-badge',style:{background:'rgba(255,95,95,0.2)',color:'var(--red)'}},'-',f.deletions),
-                                                blast&&React.createElement('span',{className:'pr-mini-badge',style:{background:blast.level==='low'?'rgba(34,197,94,0.2)':blast.level==='medium'?'rgba(255,159,67,0.2)':'rgba(255,95,95,0.2)',color:blast.level==='low'?'var(--green)':blast.level==='medium'?'var(--orange)':'var(--red)'}},React.createElement(Icon,{name:'impact',size:'s'}),' ',blast.count)
-                                            )
-                                        );
-                                    }),
-                                    prData.files&&prData.files.length>20&&React.createElement('div',{style:{textAlign:'center',padding:8,fontSize:10,color:'var(--t3)'}},'+',prData.files.length-20,' more files')
-                                )
-                            )
-                        );
-                    })()
                 )
             )
         ),
@@ -18186,23 +17566,23 @@ function App(){
                 React.createElement('div',{className:'modal-body'},
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'globe',size:'l'})),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Local-First Analysis'),React.createElement('div',{className:'privacy-text'},'CodeFlow analyzes your selected local project in your browser. In CLI mode a local-only server on 127.0.0.1 serves the app and reads just that project. Your source code is never uploaded.'))
-                    ),
-                    React.createElement('div',{className:'privacy-item'},
-                        React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'key',size:'l'})),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'No GitHub Login'),React.createElement('div',{className:'privacy-text'},'No GitHub authentication, token or GitHub App is required or collected. Public GitHub repositories can be analyzed anonymously, subject to GitHub\'s public API rate limits.'))
-                    ),
-                    React.createElement('div',{className:'privacy-item'},
-                        React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'share',size:'l'})),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Optional, Direct GitHub Calls'),React.createElement('div',{className:'privacy-text'},'When you open a public GitHub URL, requests go directly from your browser to api.github.com with no proxy. Your local project source is never sent to GitHub.'))
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Local-Only Analysis'),React.createElement('div',{className:'privacy-text'},'CodeFlow analyzes your selected local project in your browser. A local-only server on 127.0.0.1 serves the app and reads just that project. Your source code is never uploaded.'))
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'ban',size:'l'})),
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'No External Services'),React.createElement('div',{className:'privacy-text'},'There is no GitHub integration and no remote repository analysis. Analyzing a local project makes no external network requests; nothing is fetched from or sent to any server. (Official documentation links open only when you click them.)'))
+                    ),
+                    React.createElement('div',{className:'privacy-item'},
+                        React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'key',size:'l'})),
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'No Accounts or Tokens'),React.createElement('div',{className:'privacy-text'},'No login, account, API token or credential of any kind is required or collected.'))
+                    ),
+                    React.createElement('div',{className:'privacy-item'},
+                        React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'lock',size:'l'})),
                         React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Locally Stored Settings'),React.createElement('div',{className:'privacy-text'},'Your project configuration and the analysis cache are stored locally on your machine so your selection persists across restarts. They are never sent to a remote server.'))
                     ),
                     React.createElement('div',{style:{marginTop:16,padding:12,background:'var(--accbg)',borderRadius:8,fontSize:10,color:'var(--t1)'}},
                         React.createElement(Icon,{name:'spark',size:'s'}),
-                        ' Analyzing a public GitHub repository uses anonymous requests, which GitHub rate-limits (about 60 per hour per IP). Use Open Folder or Open ZIP for unlimited, fully local analysis.'
+                        ' CodeFlowKotlin is free and offline-capable: it needs no external services to start or to analyze your local projects.'
                     )
                 ),
                 React.createElement('div',{className:'modal-footer'},

@@ -79,5 +79,5 @@ test('architecture/security/metrics analysis capabilities are preserved', () => 
   // Security + internal metrics stay.
   assert.match(html, /detectSecurity/);
   assert.match(html, /function codeCardContentMetrics\(/);
-  assert.match(html, /Impact Metrics/);
+  assert.match(html, /function calcBlast\(/);
 });

@@ -1347,13 +1347,6 @@ test('cache keys and records stay stable', () => {
   assert.ok(record.savedAt > 0);
 });
 
-test('github zip URL is a user-chosen download, not a hidden clone', () => {
-  assert.equal(
-    context.githubZipDownloadUrl('braedonsaunders', 'codeflow'),
-    'https://github.com/braedonsaunders/codeflow/archive/HEAD.zip'
-  );
-});
-
 test('CLI path helper rejects traversal', () => {
   assert.equal(context.resolveSafeCliPath('/tmp/proj', '../etc/passwd'), null);
   assert.equal(context.resolveSafeCliPath('/tmp/proj', '/etc/passwd'), null);
@@ -1384,49 +1377,6 @@ test('retained ZIP only matches its own recent record', () => {
   assert.equal(context.retainedZipMatchesRecord(recordA, { identity: 'main.zip|100|10' }), true);
   assert.equal(context.retainedZipMatchesRecord(recordB, { identity: 'main.zip|100|10' }), false);
   assert.equal(context.retainedZipMatchesRecord(recordA, { sourceKey: recordA.sourceKey }), true);
-});
-
-test('GitHub cache keys include the exclude pattern set', () => {
-  const none = context.githubCacheSourceKey('owner', 'repo', []);
-  const tests = context.githubCacheSourceKey('owner', 'repo', [{ raw: 'tests/**' }]);
-  const vendor = context.githubCacheSourceKey('owner', 'repo', ['vendor/**']);
-  assert.equal(none, 'owner/repo');
-  assert.notEqual(none, tests);
-  assert.notEqual(tests, vendor);
-  assert.equal(context.cachedAnalysisMatchesExcludes({ sourceKey: tests, data: { excludePatterns: ['tests/**'] } }, [{ raw: 'tests/**' }]), true);
-  assert.equal(context.cachedAnalysisMatchesExcludes({ sourceKey: tests, data: { excludePatterns: ['tests/**'] } }, [{ raw: 'vendor/**' }]), false);
-  assert.equal(context.analysisCacheKey('github', tests), 'github:' + tests);
-});
-
-test('loaded GitHub identity uses applied exclusions, not pending edits', () => {
-  const loaded = { files: [{ path: 'src/a.js', name: 'a.js' }], connections: [], excludePatterns: ['tests/**'] };
-  const pending = ['vendor/**'];
-  const fromLoaded = context.githubSourceKeyForLoadedAnalysis('owner', 'repo', loaded, pending);
-  const fromPending = context.githubSourceKeyForLoadedAnalysis('owner', 'repo', null, pending);
-  const appliedKey = context.githubCacheSourceKey('owner', 'repo', ['tests/**']);
-  const pendingKey = context.githubCacheSourceKey('owner', 'repo', pending);
-  assert.equal(fromLoaded, appliedKey);
-  assert.notEqual(fromLoaded, pendingKey);
-  assert.equal(fromPending, pendingKey);
-  assert.equal(
-    context.githubSourceKeyForLoadedAnalysis('owner', 'repo', { excludePatterns: [] }, pending),
-    context.githubCacheSourceKey('owner', 'repo', [])
-  );
-  const graph = context.analysisGraphKey(loaded);
-  const before = context.loadedAnalysisSourceIdentity({
-    githubOwner: 'owner',
-    githubRepo: 'repo',
-    githubKey: fromLoaded
-  });
-  const afterEdit = context.loadedAnalysisSourceIdentity({
-    githubOwner: 'owner',
-    githubRepo: 'repo',
-    githubKey: context.githubSourceKeyForLoadedAnalysis('owner', 'repo', loaded, ['docs/**'])
-  });
-  assert.equal(
-    context.analysisHydrationIdFromParts(before, graph),
-    context.analysisHydrationIdFromParts(afterEdit, graph)
-  );
 });
 
 test('CLI cache keys use the watched root instead of a shared fallback', () => {
@@ -1651,39 +1601,22 @@ test('selection reads the live body scrollTop of a previously scrolled card', ()
   assert.equal(context.readCodeCardBodyScroll(layer, ''), 0);
 });
 
-test('hydration IDs follow the loaded analysis, not a live CLI session', () => {
+test('hydration IDs follow the loaded analysis, not a live session', () => {
   const data = { files: [{ path: 'src/index.js', name: 'index.js' }], connections: [] };
   const graph = context.analysisGraphKey(data);
-  const watchingGithub = {
-    localSourceKind: null,
-    cliOk: true,
-    cliRoot: '/watch',
-    githubOwner: 'owner',
-    githubRepo: 'alpha',
-    githubKey: 'owner/alpha'
-  };
-  const alpha = context.loadedAnalysisSourceIdentity(watchingGithub);
-  const beta = context.loadedAnalysisSourceIdentity(Object.assign({}, watchingGithub, {
-    githubRepo: 'beta',
-    githubKey: 'owner/beta'
-  }));
-  assert.equal(alpha.sourceType, 'github');
-  assert.equal(alpha.sourceKey, 'owner/alpha');
-  assert.equal(beta.sourceKey, 'owner/beta');
+  const alpha = context.loadedAnalysisSourceIdentity({ localSourceKind: 'local-project', cliOk: true, cliRoot: '/projects/alpha' });
+  const beta = context.loadedAnalysisSourceIdentity({ localSourceKind: 'local-project', cliOk: true, cliRoot: '/projects/beta' });
+  assert.equal(alpha.sourceType, 'local-project');
+  assert.equal(alpha.sourceKey, '/projects/alpha');
+  assert.equal(beta.sourceKey, '/projects/beta');
   assert.notEqual(
     context.analysisHydrationIdFromParts(alpha, graph),
     context.analysisHydrationIdFromParts(beta, graph)
   );
-  const local = context.loadedAnalysisSourceIdentity({
-    localSourceKind: 'local-project',
-    cliOk: true,
-    cliRoot: '/watch',
-    githubOwner: 'owner',
-    githubRepo: 'alpha',
-    githubKey: 'owner/alpha'
-  });
-  assert.equal(local.sourceType, 'local-project');
-  assert.equal(local.sourceKey, '/watch');
+  // Folder identities remain stable and distinct from local projects.
+  const folder = context.loadedAnalysisSourceIdentity({ localSourceKind: 'folder', folderKey: 'proj-x' });
+  assert.equal(folder.sourceType, 'folder');
+  assert.equal(folder.sourceKey, 'proj-x');
 });
 
 test('symbol list wheel stays native instead of panning the canvas', () => {
@@ -2079,8 +2012,6 @@ test('index.html ships a working Code view, not a stub', () => {
   assert.match(htmlSource, /retainedFolderMatchesRecord/);
   assert.match(htmlSource, /retainedZipMatchesRecord/);
   assert.match(htmlSource, /cliRecordMatchesStatus/);
-  assert.match(htmlSource, /githubCacheSourceKey/);
-  assert.match(htmlSource, /githubSourceKeyForLoadedAnalysis/);
   assert.match(htmlSource, /folderFilterAfterCodeNav/);
   assert.match(htmlSource, /setFolderFilter\(nextFilter\)/);
   assert.match(htmlSource, /allowReplace=!!\(replace\|\|reveal\)/);
@@ -2129,7 +2060,6 @@ test('index.html ships a working Code view, not a stub', () => {
   assert.match(htmlSource, /fileHasLoadedSource/);
   assert.match(htmlSource, /onPointerDown/);
   assert.match(htmlSource, /__codeflow\/file\?path=/);
-  assert.match(htmlSource, /The folder picker is faster when the API is rate-limited/);
   assert.match(htmlSource, /className:'panel-tab-pill'/);
   assert.match(htmlSource, /\.panel-tab\{[^}]*flex-wrap:nowrap/);
   assert.match(htmlSource, /\.panel-tabs\{[^}]*flex-wrap:nowrap/);

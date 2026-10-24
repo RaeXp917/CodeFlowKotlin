@@ -4,7 +4,7 @@
 
 ### Visualize Your Codebase Architecture in Seconds
 
-**Zero setup. No installation. Just paste a GitHub URL.**
+**Local-first. No accounts, no tokens, no external services. Analyze your local projects in the browser.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
@@ -19,7 +19,7 @@
 
 ## Why CodeFlow?
 
-Ever opened a new codebase and felt completely lost? **CodeFlow** turns any GitHub repository or local codebase into an interactive architecture map in seconds.
+Ever opened a new codebase and felt completely lost? **CodeFlowKotlin** turns a local codebase into an interactive architecture map in seconds — entirely on your machine, with no external services.
 
 - **No installation required** — runs entirely in your browser
 - **No data collection** — your code never leaves your machine
@@ -130,8 +130,8 @@ See [card/](./card/) for setup, or jump to the [style gallery](#card-style-galle
 
 - Analyzes your selected local project in the browser; a local-only server on `127.0.0.1` serves the app and reads just that project
 - Never uploads your local project source anywhere
-- Requires **no GitHub login** — no Personal Access Token, no GitHub App
-- Makes optional public GitHub API calls directly from your browser (never via a proxy); local source is never sent to GitHub
+- Requires **no accounts, tokens or GitHub login** of any kind
+- Makes **no external network requests** when analyzing a local project; there is no remote repository analysis
 - Stores project configuration and the analysis cache locally so your selection persists across restarts
 - No analytics or tracking
 
@@ -139,10 +139,7 @@ See [card/](./card/) for setup, or jump to the [style gallery](#card-style-galle
 
 ## Quick Start
 
-### Option 1: Use Online (Recommended)
-Just visit [CodeFlow](https://codeflow-five.vercel.app/) and paste any GitHub URL.
-
-### Option 2: Self-Host
+### Option 1: Self-Host (Recommended)
 ```bash
 # Clone the repo
 git clone https://github.com/braedonsaunders/codeflow.git
@@ -154,7 +151,7 @@ open index.html
 No build process. No npm install. Clone the whole repository: `index.html` loads pinned,
 checked-in browser dependencies from `vendor/`, so a fresh local launch works without a network connection.
 
-### Option 3: Local project server
+### Option 2: Local project server
 Run the local CodeFlowKotlin application server over a folder that contains your
 projects (each immediate subfolder is offered in the Project dropdown):
 
@@ -167,7 +164,7 @@ lets you pick, analyze, watch and re-analyze a single local project. `npm start`
 runs the same server against the current directory. The old standalone
 `npx codeflow .` CLI has been removed in favour of this project server.
 
-### Option 4: Analyze Local Files
+### Option 3: Analyze Local Files
 You can now analyze code directly from your local machine without uploading to GitHub:
 
 1. Open CodeFlow in your browser
@@ -201,15 +198,6 @@ changes mark the analysis stale so you can re-analyze on demand. If the selected
 folder was deleted or moved, the app says so instead of failing silently; with no
 project selected it shows a neutral empty state. (The legacy `?cli=1` URL still
 resolves but is no longer required or a separate mode.)
-
-### Public repositories (optional)
-Use the **Open GitHub URL** field to analyze a public repository anonymously:
-```
-Shorthand: facebook/react
-Full URL:  https://github.com/facebook/react
-```
-No login is required. Anonymous requests are subject to GitHub's public rate
-limit (~60/hour per IP); use a local project or ZIP for unlimited analysis.
 
 ### Local Files
 Click the "Open Folder" button to analyze code from your computer:
@@ -343,26 +331,16 @@ falls back safely to Code.
 
 ## Source selection
 
-CodeFlow is **local-first**. The primary control in the topbar is the **Project
-dropdown**, which lists the local projects discovered by the project server
-and switches analysis to a single selected project. Analysis is always scoped to
-one project at a time.
+CodeFlowKotlin is **local-only**. The primary control in the topbar is the
+**Project dropdown**, which lists the local projects discovered by the project
+server and switches analysis to a single selected project. Analysis is always
+scoped to one project at a time. You can also **Open Folder** or **Open ZIP** to
+analyze a local tree directly in the browser.
 
-GitHub analysis is an **optional, secondary** source. The topbar's **Open GitHub
-URL** field (placeholder `https://github.com/owner/repo`, shorthand `owner/repo`
-still accepted) analyzes a public repository directly from your browser.
-
-> There is **no GitHub login**. CodeFlow does not collect or require a Personal
-> Access Token or GitHub App, and never uploads your local project source. Local
-> project source is never associated with a GitHub repository automatically.
-
-### GitHub API limits (optional public analysis)
-
-Anonymous public GitHub requests are rate-limited by GitHub to roughly **60
-requests/hour per IP address**. There is no in-app way to raise this, by design.
-If you hit the limit, CodeFlow tells you and points you to the fully local
-alternatives: **Open Folder** (or the Project dropdown) and **Open ZIP**, neither
-of which is rate-limited.
+> There is **no GitHub integration**: no remote repository analysis, no GitHub
+> URL input, no accounts or tokens, and no external network requests when
+> analyzing a local project. Your source code is never uploaded. Official
+> Android/Apple/Flutter/Dart documentation links open only when you click them.
 
 ---
 
@@ -435,10 +413,10 @@ node --test tests/*.test.mjs tests/*.smoke.js
 > Yes. Your code is fetched directly from GitHub to your browser. Nothing is sent to any server we control. The app and its pinned browser dependencies are checked into this repository for inspection.
 
 **Q: Can I use it offline?**
-> Yes. Clone the complete repository, open `index.html`, then use the local file analysis feature. All required browser and parser assets are checked in, so even a cold first load works without internet. GitHub URL analysis still requires access to GitHub's API.
+> Yes, entirely. All required browser and parser assets are checked in, so a cold first load works without internet, and analyzing a local project makes no external network requests at all.
 
-**Q: Why is GitHub analysis slow?**
-> For public GitHub analysis we make individual API calls for each file to get its content, and anonymous requests are rate-limited (~60/hour per IP). For large codebases, analyze a local project (Project dropdown / Open Folder) or Open ZIP instead — local analysis is faster and not rate-limited.
+**Q: Does it analyze GitHub repositories?**
+> No. CodeFlowKotlin is local-only — it analyzes a selected local project (or an opened folder/ZIP) on your machine. There is no GitHub repository analysis, URL input, or API usage. GitHub is used only as the version-control host for CodeFlowKotlin itself.
 
 **Q: How accurate is the dependency analysis?**
 > It's heuristic: unique functions are matched by name, while duplicate function names are scoped by file and explicit imports before edges are created. It may still miss dynamic imports or renamed runtime references, so it's designed for a quick overview, not 100% accuracy.
