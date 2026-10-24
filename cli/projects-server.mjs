@@ -14,7 +14,7 @@ import {
   isAllowedCliRequest, safeRequestPath, resolveSafeExistingPath,
   startFileWatchers, listWatchFiles, openBrowser,
   bumpWatchRev, currentWatchRev, CLI_FILE_MAX_BYTES, shouldSkipName,
-} from './codeflow.mjs';
+} from './server-utils.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const UI_ROOT = path.resolve(HERE, '..');

@@ -1,11 +1,10 @@
-#!/usr/bin/env node
-// Thin local entry point. Serves the same index.html UI and watches a folder.
-// The public app stays one HTML file in the browser.
+// Shared local-server utilities for the CodeFlowKotlin local application server
+// (cli/projects-server.mjs): secure path resolution, project source enumeration,
+// file watching, revision tracking, localhost request validation and the browser
+// launcher. These were previously housed in the now-removed standalone CLI.
 
-import { existsSync, promises as fs, watch } from 'node:fs';
-import http from 'node:http';
+import { promises as fs, watch } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const IGNORE = new Set([
@@ -101,22 +100,6 @@ export function isWatchableFile(name) {
   return TEXT_EXT.has(ext);
 }
 
-export function parseCliArgs(argv) {
-  const args = argv.slice(2);
-  let port = 4173;
-  let target = '.';
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--port' && args[i + 1]) {
-      port = Number(args[++i]);
-    } else if (args[i] === '--help' || args[i] === '-h') {
-      return { help: true };
-    } else if (!args[i].startsWith('-')) {
-      target = args[i];
-    }
-  }
-  return { port, target };
-}
-
 export async function listWatchFiles(root) {
   const files = [];
   async function walk(dir, rel) {
@@ -148,30 +131,6 @@ export async function listWatchFiles(root) {
   }
   await walk(root, '');
   return files;
-}
-
-function mimeFor(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  return {
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8',
-    '.mjs': 'text/javascript; charset=utf-8',
-    '.css': 'text/css; charset=utf-8',
-    '.json': 'application/json; charset=utf-8',
-    '.wasm': 'application/wasm',
-    '.woff2': 'font/woff2',
-    '.png': 'image/png',
-    '.svg': 'image/svg+xml'
-  }[ext] || 'application/octet-stream';
-}
-
-function sendJson(res, status, body) {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store'
-  });
-  res.end(payload);
 }
 
 export const CLI_FILE_MAX_BYTES = 2 * 1024 * 1024;
@@ -209,58 +168,6 @@ export async function readOpenedSnapshot(fh, size) {
     offset += bytesRead;
   }
   return offset === n ? buf : buf.subarray(0, offset);
-}
-
-function sendPublicError(res, status, message) {
-  sendJson(res, status, { error: message });
-}
-
-function sendFileError(res, status, message) {
-  if (res.headersSent) return;
-  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end(message);
-}
-
-function resolveSnapshotRev(options) {
-  options = options || {};
-  return typeof options.snapshotRev === 'function' ? options.snapshotRev() : options.snapshotRev;
-}
-
-function pipeSafeFile(res, filePath, contentType, maxBytes, options) {
-  options = options || {};
-  // Sample before open so an atomic save cannot bump the path rev onto
-  // bytes later read from the already-bound (stale) inode.
-  const snapshotRev = resolveSnapshotRev(options);
-  return fs.open(filePath, 'r').then(async (fh) => {
-    try {
-      const st = await fh.stat();
-      if (!st.isFile()) {
-        sendFileError(res, 404, 'Not found');
-        return;
-      }
-      if (Number.isFinite(maxBytes) && st.size > maxBytes) {
-        sendFileError(res, 413, 'File too large');
-        return;
-      }
-      const body = await readOpenedSnapshot(fh, st.size);
-      const headers = {
-        'Content-Type': contentType,
-        'Content-Length': String(body.length),
-        'Cache-Control': 'no-store'
-      };
-      if (Number.isFinite(Number(snapshotRev))) headers['X-Codeflow-Rev'] = String(Number(snapshotRev));
-      res.writeHead(200, headers);
-      res.end(body);
-    } finally {
-      await fh.close().catch(() => {});
-    }
-  }).catch((err) => {
-    if (isMissingFsError(err)) {
-      sendFileError(res, 404, 'Not found');
-      return;
-    }
-    sendFileError(res, 500, 'Read failed');
-  });
 }
 
 export function safeRequestPath(rawUrl) {
@@ -386,130 +293,4 @@ export function openBrowser(url, spawnFn) {
   } catch {
     console.log('Could not open a browser automatically. Open this URL manually: ' + url);
   }
-}
-
-export function createCodeflowServer(options) {
-  const uiRoot = options.uiRoot;
-  const watchRoot = options.watchRoot;
-  const name = path.basename(watchRoot);
-  const clients = new Set();
-  const watchRevs = new Map();
-
-  const watchSession = startFileWatchers(watchRoot, (rel) => {
-    const pathKey = normalizeWatchRel(rel);
-    const rev = bumpWatchRev(watchRevs, pathKey);
-    const payload = `data: ${JSON.stringify({ type: 'change', path: pathKey, rev })}\n\n`;
-    for (const client of clients) client.write(payload);
-  });
-
-  const server = http.createServer(async (req, res) => {
-    try {
-      if (!isAllowedCliRequest(req)) {
-        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Forbidden');
-        return;
-      }
-      const parsed = safeRequestPath(req.url);
-      if (!parsed.ok) {
-        res.writeHead(parsed.status, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end(parsed.status === 400 ? 'Bad request' : 'Not found');
-        return;
-      }
-      const url = parsed.url;
-      if (url.pathname === '/__codeflow/status') {
-        sendJson(res, 200, { ok: true, root: watchRoot, name, watch: !!watchSession.watching });
-        return;
-      }
-      if (url.pathname === '/__codeflow/files') {
-        try {
-          sendJson(res, 200, { files: await listWatchFiles(watchRoot) });
-        } catch {
-          console.error('codeflow: failed to list watched files');
-          sendPublicError(res, 500, 'Could not list files');
-        }
-        return;
-      }
-      if (url.pathname === '/__codeflow/file') {
-        const safe = await resolveSafeExistingPath(watchRoot, url.searchParams.get('path') || '');
-        if (!safe) {
-          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-          res.end('Not found');
-          return;
-        }
-        await pipeSafeFile(res, safe, 'text/plain; charset=utf-8', CLI_FILE_MAX_BYTES, {
-          snapshotRev: () => currentWatchRev(watchRevs, url.searchParams.get('path') || '')
-        });
-        return;
-      }
-      if (url.pathname === '/__codeflow/events') {
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive'
-        });
-        res.write(':\n\n');
-        clients.add(res);
-        req.on('close', () => clients.delete(res));
-        return;
-      }
-
-      let rel = parsed.pathname;
-      if (rel === '/') rel = '/index.html';
-      const safeUi = await resolveSafeExistingPath(uiRoot, rel.replace(/^\//, ''));
-      if (!safeUi) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Not found');
-        return;
-      }
-      await pipeSafeFile(res, safeUi, mimeFor(safeUi));
-    } catch {
-      if (!res.headersSent) {
-        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-      }
-      if (!res.writableEnded) res.end('Request failed');
-    }
-  });
-
-  return {
-    server,
-    close() {
-      watchSession.close();
-      for (const client of clients) client.end();
-      return new Promise((resolve) => server.close(resolve));
-    }
-  };
-}
-
-async function main() {
-  const parsed = parseCliArgs(process.argv);
-  if (parsed.help) {
-    console.log('Usage: npx codeflow [folder] [--port 4173]\nOpens the same Codeflow UI and watches that folder.');
-    process.exit(0);
-  }
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const uiRoot = path.resolve(here, '..');
-  const watchRoot = path.resolve(process.cwd(), parsed.target || '.');
-  const stat = await fs.stat(watchRoot).catch(() => null);
-  if (!stat || !stat.isDirectory()) {
-    console.error('Watch path is not a directory: ' + watchRoot);
-    process.exit(1);
-  }
-  if (!existsSync(path.join(uiRoot, 'index.html'))) {
-    console.error('Could not find index.html next to the CLI. Run this from the Codeflow repo or installed package.');
-    process.exit(1);
-  }
-
-  const { server } = createCodeflowServer({ uiRoot, watchRoot });
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(parsed.port, '127.0.0.1', resolve);
-  });
-  const url = 'http://127.0.0.1:' + parsed.port + '/?cli=1';
-  console.log('Codeflow UI: ' + url);
-  console.log('Watching: ' + watchRoot);
-  openBrowser(url);
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  main();
 }

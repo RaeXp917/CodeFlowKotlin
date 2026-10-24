@@ -154,8 +154,18 @@ open index.html
 No build process. No npm install. Clone the whole repository: `index.html` loads pinned,
 checked-in browser dependencies from `vendor/`, so a fresh local launch works without a network connection.
 
-### Option 3: Local CLI
-From this repo (or `npx` once published): `npx codeflow .` serves the same `index.html` UI, watches the folder, and opens it in your browser.
+### Option 3: Local project server
+Run the local CodeFlowKotlin application server over a folder that contains your
+projects (each immediate subfolder is offered in the Project dropdown):
+
+```
+node cli/projects-server.mjs "C:\Users\You\AndroidStudioProjects"
+```
+
+It binds `127.0.0.1:4173` (localhost only), serves the same `index.html` UI, and
+lets you pick, analyze, watch and re-analyze a single local project. `npm start`
+runs the same server against the current directory. The old standalone
+`npx codeflow .` CLI has been removed in favour of this project server.
 
 ### Option 4: Analyze Local Files
 You can now analyze code directly from your local machine without uploading to GitHub:

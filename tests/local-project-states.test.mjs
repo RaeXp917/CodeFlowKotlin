@@ -3,6 +3,7 @@
 // an empty "no code files" failure (the screenshot bug). Also asserts that a
 // real nested Android project enumerates its Kotlin source.
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +12,18 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { createProjectsServer } from '../cli/projects-server.mjs';
+
+// Issue a raw request with custom Host/Origin (fetch forbids setting Origin).
+function rawRequest(port, pathname, headers) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ hostname: '127.0.0.1', port, path: pathname, headers }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -83,6 +96,75 @@ test('no project selected yields a neutral 409, not an error analysis', async ()
     const st = await (await fetch(base + '/__codeflow/status')).json();
     assert.equal(st.ok, false);
     assert.equal(st.missing, false);
+  });
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('the project file endpoint does not follow symlinks escaping the root', async () => {
+  const root = await makeProjectsRoot();
+  const proj = path.join(root, 'app');
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'cfk-secret-'));
+  await fs.mkdir(path.join(proj, 'src'), { recursive: true });
+  await fs.writeFile(path.join(proj, 'src', 'app.kt'), 'val ok = 1');
+  await fs.writeFile(path.join(outside, 'id_rsa'), 'SECRET');
+  await fs.symlink(path.join(outside, 'id_rsa'), path.join(proj, 'src', 'leak.kt'));
+  await withServer(root, async (app, base) => {
+    await app.changeProject('app');
+    const leak = await fetch(base + '/__codeflow/file?path=src/leak.kt');
+    assert.equal(leak.status, 404);
+    assert.doesNotMatch(await leak.text(), /SECRET/);
+    const ok = await fetch(base + '/__codeflow/file?path=src/app.kt');
+    assert.equal(ok.status, 200);
+    assert.match(await ok.text(), /val ok/);
+  });
+  await fs.rm(root, { recursive: true, force: true });
+  await fs.rm(outside, { recursive: true, force: true });
+});
+
+test('the project file endpoint rejects oversized files', async () => {
+  const root = await makeProjectsRoot();
+  const proj = path.join(root, 'big');
+  await fs.mkdir(proj, { recursive: true });
+  await fs.writeFile(path.join(proj, 'huge.kt'), Buffer.alloc(2 * 1024 * 1024 + 1, 97));
+  await withServer(root, async (app, base) => {
+    await app.changeProject('big');
+    const huge = await fetch(base + '/__codeflow/file?path=huge.kt');
+    assert.equal(huge.status, 413);
+  });
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('state-changing + read endpoints reject cross-origin and non-loopback hosts', async () => {
+  const root = await makeProjectsRoot();
+  const proj = path.join(root, 'secure');
+  await fs.mkdir(proj, { recursive: true });
+  await fs.writeFile(path.join(proj, 'a.kt'), 'val a = 1');
+  await withServer(root, async (app, base) => {
+    await app.changeProject('secure');
+    const port = app.server.address().port;
+    assert.equal(await rawRequest(port, '/__codeflow/files', { Host: 'evil.example', Origin: 'http://evil.example' }), 403);
+    assert.equal(await rawRequest(port, '/__codeflow/file?path=a.kt', { Host: '127.0.0.1:' + port, Origin: 'http://evil.example' }), 403);
+    // Same-origin loopback is allowed.
+    assert.equal(await rawRequest(port, '/__codeflow/file?path=a.kt', { Host: '127.0.0.1:' + port, Origin: 'http://127.0.0.1:' + port }), 200);
+  });
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('switching projects never mixes files from the previous project', async () => {
+  const root = await makeProjectsRoot();
+  await fs.mkdir(path.join(root, 'alpha', 'src'), { recursive: true });
+  await fs.mkdir(path.join(root, 'beta', 'src'), { recursive: true });
+  await fs.writeFile(path.join(root, 'alpha', 'src', 'Alpha.kt'), 'class Alpha');
+  await fs.writeFile(path.join(root, 'beta', 'src', 'Beta.kt'), 'class Beta');
+  await withServer(root, async (app, base) => {
+    await app.changeProject('alpha');
+    let files = (await (await fetch(base + '/__codeflow/files')).json()).files;
+    assert.ok(files.some((f) => f.name === 'Alpha.kt'));
+    assert.ok(!files.some((f) => f.name === 'Beta.kt'));
+    await app.changeProject('beta');
+    files = (await (await fetch(base + '/__codeflow/files')).json()).files;
+    assert.ok(files.some((f) => f.name === 'Beta.kt'));
+    assert.ok(!files.some((f) => f.name === 'Alpha.kt'), 'previous project leaked into the new selection');
   });
   await fs.rm(root, { recursive: true, force: true });
 });
