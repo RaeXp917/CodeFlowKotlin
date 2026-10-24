@@ -73,6 +73,15 @@ Automatically identifies:
 - React custom hooks
 - Anti-patterns (God Objects, high coupling)
 
+### Architecture Intelligence (Kotlin/Android, Swift/SwiftUI, React)
+CodeFlow stays a general-purpose, multi-language analyzer, and adds focused, evidence-based architecture checks for three priority ecosystems. Each rule runs on a comment/string-masked copy of the source (so comments, KDoc/Javadoc, doc comments and string literals never trigger it), is gated by project-level ecosystem detection, and reports the exact file, one-based line, triggering snippet, a problem explanation, remediation and an official documentation link. Findings appear in the existing **Actions** panel with their evidence and a clickable **View source** location; the full list is also on `data.architectureInsights`.
+
+- **Kotlin/Android** — unstructured concurrency (`GlobalScope.launch/async`), ViewModels holding a `Context`/`Activity`/`Fragment`/`View` reference, `mutableStateOf` used inside a `@Composable` without `remember`, and UI-layer files constructing the data layer directly (`Retrofit.Builder()`, `Room.databaseBuilder()`).
+- **Swift/SwiftUI** — `@ObservedObject` that owns (initializes) its model where `@StateObject` is intended, and non-private `@State` properties.
+- **React** (JS/JSX/TS/TSX) — list items keyed by the array index.
+
+See [docs/architecture-analysis.md](docs/architecture-analysis.md) for the full rule catalog, severity/confidence semantics, parser/fallback behavior, limitations, and how to run the regression tests.
+
 ### Health Score
 Get an instant A-F grade for your codebase based on:
 - Dead code percentage

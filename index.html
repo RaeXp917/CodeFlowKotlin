@@ -1071,6 +1071,15 @@ function kjMatchParen(s,openIdx){
     }
     return -1;
 }
+// Index of the '}' matching the '{' at openIdx, or -1 (operates on masked source).
+function kjMatchBrace(s,openIdx){
+    var depth=0;
+    for(var k=openIdx;k<s.length;k++){
+        if(s[k]==='{')depth++;
+        else if(s[k]==='}'){depth--;if(depth===0)return k;}
+    }
+    return -1;
+}
 // From a position just past a ProcessBuilder constructor's ')', walk a chain of
 // .method(...) calls and report whether .start( is reached (e.g.
 // new ProcessBuilder(cmd).redirectErrorStream(true).start()).
@@ -1140,6 +1149,260 @@ function detectKotlinJavaProcessExec(masked,original){
     return findings
         .sort(function(a,b){return a.index-b.index;})
         .map(function(f){return{line:lineAt(f.index),code:snippet(f.index),api:f.api};});
+}
+// ---------------------------------------------------------------------------
+// Architecture insights (ecosystem-aware, evidence-based suggestions)
+//
+// A small, high-confidence set of architecture rules for the three priority
+// ecosystems (Kotlin/Android, Swift/SwiftUI, React). Every rule runs on a
+// comment/string-masked copy of the source so comments, KDoc/Javadoc, doc
+// comments, and ordinary string literals never trigger a finding, and every
+// finding carries a stable rule id, ecosystem, severity, confidence, the exact
+// file + one-based line, the triggering source line, a problem explanation,
+// remediation, and an official documentation link. Rules are per-language and
+// gated by project-level ecosystem detection, so unrelated languages and
+// non-React JS/TS projects are never touched. This lives inside the shared
+// analyzer block so the browser worker and the card action inherit it.
+// ---------------------------------------------------------------------------
+function archLineAt(original,idx){return original.slice(0,idx).split('\n').length;}
+function archSnippet(original,idx){
+    var s=original.lastIndexOf('\n',idx-1)+1;
+    var e=original.indexOf('\n',idx);
+    if(e<0)e=original.length;
+    return original.slice(s,e).trim().substring(0,160);
+}
+function archInAnyRange(idx,ranges){
+    for(var i=0;i<ranges.length;i++){if(idx>=ranges[i][0]&&idx<=ranges[i][1])return true;}
+    return false;
+}
+// JS/TS/JSX literal masking (comments, '…', "…", and `…` template literals).
+function maskJsLiterals(src){
+    var n=src.length,out=new Array(n);
+    for(var k=0;k<n;k++)out[k]=src[k];
+    function blank(a,b){for(var k=a;k<b&&k<n;k++){if(out[k]!=='\n')out[k]=' ';}}
+    var i=0;
+    while(i<n){
+        var c=src[i],d=src[i+1];
+        if(c==='/'&&d==='/'){var j=i+2;while(j<n&&src[j]!=='\n')j++;blank(i,j);i=j;continue;}
+        if(c==='/'&&d==='*'){var j2=i+2;while(j2<n&&!(src[j2]==='*'&&src[j2+1]==='/'))j2++;j2=(j2<n)?j2+2:n;blank(i,j2);i=j2;continue;}
+        if(c==='"'||c==="'"){var q=c,j3=i+1;while(j3<n){if(src[j3]==='\\'){j3+=2;continue;}if(src[j3]===q){j3++;break;}if(src[j3]==='\n')break;j3++;}blank(i,j3);i=j3;continue;}
+        if(c==='`'){var j4=i+1;while(j4<n){if(src[j4]==='\\'){j4+=2;continue;}if(src[j4]==='`'){j4++;break;}j4++;}blank(i,j4);i=j4;continue;}
+        i++;
+    }
+    return out.join('');
+}
+// Project-level ecosystem detection from file paths, extensions and imports.
+function detectProjectEcosystems(files){
+    var eco={android:false,swiftui:false,react:false};
+    (files||[]).forEach(function(f){
+        if(!f)return;
+        var name=String(f.name||(f.path||'').split('/').pop()||'').toLowerCase();
+        var content=f.content||'';
+        if(name==='androidmanifest.xml')eco.android=true;
+        if(/\.(kt|kts)$/.test(name)&&/\b(androidx?\.|android\.(app|content|os|view|widget|util))/.test(content))eco.android=true;
+        if(/\.swift$/.test(name)&&/\bimport\s+SwiftUI\b/.test(content))eco.swiftui=true;
+        if(name==='package.json'&&/"(react|react-dom|next)"\s*:/.test(content))eco.react=true;
+        if(/\.(jsx|tsx)$/.test(name)&&/from\s+['"]react['"]|from\s+['"]react\/|require\(\s*['"]react['"]/.test(content))eco.react=true;
+        if(/\.(js|ts|mjs|cjs)$/.test(name)&&/from\s+['"]react['"]|require\(\s*['"]react['"]/.test(content))eco.react=true;
+    });
+    return eco;
+}
+function pushArchInsight(insights,o){
+    insights.push({
+        ruleId:o.ruleId,ecosystem:o.ecosystem,severity:o.severity,confidence:o.confidence,kind:o.kind,
+        title:o.title,problem:o.problem,remediation:o.remediation,docUrl:o.docUrl,
+        file:o.name,path:o.path,line:o.line,code:o.code
+    });
+}
+function isViewModelKotlinFile(masked,name){
+    if(/viewmodel\.(kt|kts)$/i.test(name))return true;
+    return /\bclass\s+\w+[^\n{]*:\s*[^\n{]*\b(ViewModel|AndroidViewModel)\b/.test(masked);
+}
+function isUiKotlinFile(path,name,masked){
+    var p='/'+String(path||'').toLowerCase().replace(/^\/+/,'');
+    if(/\/(presentation|ui|screens?|views?|fragments?|activities)\//.test(p))return true;
+    if(/(activity|fragment|screen|view)\.(kt|kts)$/i.test(name))return true;
+    if(/@Composable\b/.test(masked)&&(/setContent\s*\(/.test(masked)||/androidx\.compose/.test(masked)))return true;
+    return false;
+}
+// True when the index sits directly inside a remember { … } / rememberSaveable { … }
+// block (the common multi-line idiom), so mutableStateOf there is already stable.
+function isInsideRememberBlock(masked,idx){
+    var depth=0;
+    for(var k=idx-1;k>=0;k--){
+        var ch=masked[k];
+        if(ch==='}')depth++;
+        else if(ch==='{'){
+            if(depth!==0){depth--;continue;}
+            // Found the enclosing '{'. Walk back over whitespace and, if present,
+            // a balanced (...) argument list, then read the call identifier. This
+            // recognizes remember { … }, remember(key) { … } and multi-line
+            // rememberSaveable(a, b, saver = …) { … }.
+            var j=k-1;
+            while(j>=0&&/\s/.test(masked[j]))j--;
+            if(masked[j]===')'){
+                var pd=0;
+                for(;j>=0;j--){
+                    if(masked[j]===')')pd++;
+                    else if(masked[j]==='('){pd--;if(pd===0){j--;break;}}
+                }
+                while(j>=0&&/\s/.test(masked[j]))j--;
+            }
+            var end=j+1,start=j;
+            while(start>=0&&/[A-Za-z0-9_]/.test(masked[start]))start--;
+            var ident=masked.slice(start+1,end);
+            return ident==='remember'||ident==='rememberSaveable';
+        }
+    }
+    return false;
+}
+// Brace ranges [open,close] for the bodies of @Composable functions (masked src).
+function kotlinComposableBodyRanges(masked){
+    var ranges=[],re=/@Composable\b/g,m;
+    while((m=re.exec(masked))!==null){
+        var funIdx=masked.indexOf('fun',m.index);
+        if(funIdx<0)continue;
+        var between=masked.slice(m.index+10,funIdx);
+        if(/[;}]/.test(between))continue;
+        var paren=masked.indexOf('(',funIdx);
+        if(paren<0)continue;
+        var pClose=kjMatchParen(masked,paren);
+        if(pClose<0)continue;
+        var brace=masked.indexOf('{',pClose);
+        if(brace<0)continue;
+        var newline=masked.indexOf('\n',pClose);
+        // Expression-bodied composable (fun X() = ...) has no block to scan.
+        var gap=masked.slice(pClose+1,brace);
+        if(/=/.test(gap)&&(newline<0||brace>newline))continue;
+        var bClose=kjMatchBrace(masked,brace);
+        if(bClose<0)continue;
+        ranges.push([brace,bClose]);
+    }
+    return ranges;
+}
+function runKotlinArchitectureRules(f,path,name,content,insights){
+    var masked=maskKotlinJavaLiterals(content);
+    var ECO='Kotlin/Android',m;
+    var gsRe=/\bGlobalScope\s*\.\s*(launch|async)\b/g;
+    while((m=gsRe.exec(masked))!==null){
+        pushArchInsight(insights,{ruleId:'android-globalscope-usage',ecosystem:ECO,severity:'high',confidence:'high',kind:'issue',
+            title:'Unstructured concurrency via GlobalScope',
+            problem:'GlobalScope.'+m[1]+' starts a coroutine with no lifecycle owner, so it keeps running after the screen or ViewModel is gone and can leak work or touch stale state.',
+            remediation:'Launch from a lifecycle-aware scope such as viewModelScope or lifecycleScope, or an injected CoroutineScope that is cancelled with its owner.',
+            docUrl:'https://developer.android.com/kotlin/coroutines/coroutines-best-practices',
+            name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+    }
+    if(isViewModelKotlinFile(masked,name)){
+        var leakRe=/\b(?:val|var)\s+\w+\s*:\s*(Context|Activity|AppCompatActivity|FragmentActivity|Fragment|View|TextView|Button|ImageView|ImageButton|EditText)\b/g;
+        while((m=leakRe.exec(masked))!==null){
+            // Hilt's @ApplicationContext injects the app-scoped Context, which is
+            // the recommended, leak-safe form (equivalent to AndroidViewModel).
+            if(/@ApplicationContext\b/.test(masked.slice(Math.max(0,m.index-60),m.index)))continue;
+            pushArchInsight(insights,{ruleId:'android-viewmodel-holds-ui-reference',ecosystem:ECO,severity:'high',confidence:'high',kind:'issue',
+                title:'ViewModel holds a '+m[1]+' reference',
+                problem:'A ViewModel survives configuration changes, so holding a '+m[1]+' outlives the Activity/Fragment that created it and leaks the whole view hierarchy.',
+                remediation:'Drop the UI/Context field: pass plain data in, expose state for the UI to observe, or use AndroidViewModel with the Application context when an app-scoped Context is genuinely needed.',
+                docUrl:'https://developer.android.com/topic/libraries/architecture/viewmodel#best-practices',
+                name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+        }
+    }
+    var ranges=kotlinComposableBodyRanges(masked);
+    if(ranges.length){
+        var stRe=/\bmutableStateOf\s*(?:<[^>]*>)?\s*\(/g;
+        while((m=stRe.exec(masked))!==null){
+            if(!archInAnyRange(m.index,ranges))continue;
+            if(isInsideRememberBlock(masked,m.index))continue;
+            pushArchInsight(insights,{ruleId:'compose-state-without-remember',ecosystem:ECO,severity:'high',confidence:'medium',kind:'issue',
+                title:'mutableStateOf inside a @Composable without remember',
+                problem:'Calling mutableStateOf directly in a composable allocates a fresh state holder on every recomposition, so the value resets and the UI never reflects updates as intended.',
+                remediation:'Wrap it as remember { mutableStateOf(...) } (or rememberSaveable to survive configuration changes), or hoist the state into a ViewModel.',
+                docUrl:'https://developer.android.com/develop/ui/compose/state#state-in-composables',
+                name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+        }
+    }
+    if(isUiKotlinFile(path,name,masked)){
+        var dlRe=/\b(Room\s*\.\s*databaseBuilder|Retrofit\s*\.\s*Builder)\s*\(/g;
+        while((m=dlRe.exec(masked))!==null){
+            var apiName=m[1].replace(/\s+/g,'');
+            pushArchInsight(insights,{ruleId:'android-ui-builds-data-layer',ecosystem:ECO,severity:'medium',confidence:'medium',kind:'issue',
+                title:'UI layer constructs the data layer directly',
+                problem:'A presentation-layer file builds '+apiName+'(...) itself, coupling the UI directly to database/network construction instead of depending on a repository abstraction.',
+                remediation:'Move creation of the database/network client into a repository or a dependency-injection module and have the UI depend on that abstraction.',
+                docUrl:'https://developer.android.com/topic/architecture/data-layer',
+                name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+        }
+    }
+}
+function runSwiftArchitectureRules(f,path,name,content,insights){
+    // The Kotlin/Java masker also covers Swift comments and "…"/"""…""" strings.
+    var masked=maskKotlinJavaLiterals(content);
+    var ECO='Swift/SwiftUI',m;
+    var ooRe=/@ObservedObject\s+(?:private\s+)?var\s+\w+\s*(?::[^=\n]+)?=\s*[A-Za-z_]/g;
+    while((m=ooRe.exec(masked))!==null){
+        pushArchInsight(insights,{ruleId:'swiftui-observedobject-ownership',ecosystem:ECO,severity:'high',confidence:'high',kind:'issue',
+            title:'@ObservedObject owns its model',
+            problem:'An @ObservedObject created inside the view is re-initialized whenever SwiftUI recreates the view, silently resetting its state; @ObservedObject is meant for a model owned elsewhere.',
+            remediation:'Use @StateObject for a reference model the view creates and owns, and keep @ObservedObject only for a model passed in from a parent.',
+            docUrl:'https://developer.apple.com/documentation/swiftui/stateobject',
+            name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+    }
+    var stRe=/@State\s+var\b/g;
+    while((m=stRe.exec(masked))!==null){
+        pushArchInsight(insights,{ruleId:'swiftui-state-not-private',ecosystem:ECO,severity:'low',confidence:'medium',kind:'recommendation',
+            title:'@State property is not private',
+            problem:'@State is local, view-owned storage. Leaving it non-private exposes it to external mutation, which Apple\u2019s SwiftUI guidance discourages.',
+            remediation:'Mark it private (@State private var ...); to share with child views pass a Binding, or move shared state to @StateObject / an @Observable model.',
+            docUrl:'https://developer.apple.com/documentation/swiftui/state',
+            name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+    }
+}
+function runReactArchitectureRules(f,path,name,content,insights){
+    var masked=maskJsLiterals(content);
+    var isReact=/\.(jsx|tsx)$/i.test(name)||/from\s+['"]react['"]|from\s+['"]react\/|require\(\s*['"]react['"]/.test(masked);
+    if(!isReact)return;
+    var ECO='React',m;
+    var mapRe=/\.map\s*\(\s*(?:async\s+)?\(?\s*\w+(?:\s*:\s*[^,)]+)?\s*,\s*(\w+)(?:\s*:\s*[^,)=]+)?\s*\)?\s*=>/g;
+    while((m=mapRe.exec(masked))!==null){
+        var idxName=m[1];
+        var windowEnd=Math.min(masked.length,m.index+1200);
+        var keyRe=new RegExp('key\\s*=\\s*\\{\\s*'+idxName+'\\s*\\}','g');
+        keyRe.lastIndex=m.index;
+        var km=keyRe.exec(masked);
+        if(km&&km.index<windowEnd){
+            pushArchInsight(insights,{ruleId:'react-array-index-key',ecosystem:ECO,severity:'medium',confidence:'medium',kind:'potential',
+                title:'List item key uses the array index',
+                problem:'Using the map index as a React key makes element identity depend on position, so reordering, insertion or deletion can corrupt component state and confuse the diff.',
+                remediation:'Use a stable, unique id derived from the item data as the key; fall back to the index only for a static list that never reorders.',
+                docUrl:'https://react.dev/learn/rendering-lists#why-does-react-need-keys',
+                name:name,path:path,line:archLineAt(content,km.index),code:archSnippet(content,km.index)});
+        }
+    }
+}
+// Entry point: returns a flat, severity-then-confidence sorted list of insights.
+function computeArchitectureInsights(files){
+    var list=files||[];
+    var eco=detectProjectEcosystems(list);
+    var insights=[];
+    list.forEach(function(f){
+        if(!f||!f.content||f.isCode===false)return;
+        var path=String(f.path||f.name||'');
+        var name=String(f.name||path.split('/').pop()||'');
+        var lower=name.toLowerCase();
+        if(isArchitectureBuildOutput(path,name)||isNonProductionPath(path))return;
+        var content=f.content;
+        if(eco.android&&/\.(kt|kts)$/.test(lower))runKotlinArchitectureRules(f,path,name,content,insights);
+        if(eco.swiftui&&/\.swift$/.test(lower))runSwiftArchitectureRules(f,path,name,content,insights);
+        if(eco.react&&/\.(jsx|tsx|js|ts|mjs|cjs)$/.test(lower))runReactArchitectureRules(f,path,name,content,insights);
+    });
+    var sevRank={high:0,medium:1,low:2};
+    var confRank={high:0,medium:1,low:2};
+    return insights.sort(function(a,b){
+        var s=(sevRank[a.severity]||9)-(sevRank[b.severity]||9);
+        if(s!==0)return s;
+        var c=(confRank[a.confidence]||9)-(confRank[b.confidence]||9);
+        if(c!==0)return c;
+        return (a.path||'').localeCompare(b.path||'')||((a.line||0)-(b.line||0));
+    });
 }
 const Parser={
     // Tree-sitter parsers are loaded lazily from vendored WASM and used when a language has
@@ -1888,8 +2151,26 @@ const Parser={
         if(testRatio<10&&data.files.length>10){
             suggestions.push({priority:'medium',icon:'beaker',title:'Add Test Coverage',desc:'Only '+testFiles.length+' test files found ('+Math.round(testRatio)+'%). Consider adding more tests.',action:'Focus on testing critical paths and high-complexity files',impact:'Prevents regressions and improves confidence'});
         }
+        // Evidence-based architecture insights (Kotlin/Android, Swift/SwiftUI, React).
+        // Each insight keeps its full evidence (file, line, snippet, rule id, doc)
+        // so the existing Actions panel can show and navigate to it. Capped so a
+        // large codebase cannot flood the panel; the full list stays on
+        // data.architectureInsights for consumers that want it.
+        var archInsights=(data.architectureInsights||[]);
+        archInsights.slice(0,25).forEach(function(ins){
+            var priority=ins.severity==='high'?'high':(ins.severity==='low'?'low':'medium');
+            suggestions.push({
+                priority:priority,icon:'layers',
+                title:'['+ins.ecosystem+'] '+ins.title,
+                desc:ins.problem,action:ins.remediation,
+                impact:(ins.kind==='recommendation'?'Recommendation':(ins.kind==='potential'?'Potential issue':'Confirmed issue'))+' · '+ins.confidence+' confidence',
+                ruleId:ins.ruleId,ecosystem:ins.ecosystem,severity:ins.severity,confidence:ins.confidence,kind:ins.kind,
+                path:ins.path,file:ins.file,line:ins.line,code:ins.code,docUrl:ins.docUrl
+            });
+        });
         return suggestions.sort(function(a,b){var p={critical:0,high:1,medium:2,low:3};return p[a.priority]-p[b.priority];});
     },
+    detectArchitectureInsights:function(files){return computeArchitectureInsights(files);},
     detectSecurity:function(files){
         var issues=[];
         // CodeFlow self-analysis: this app's own analyzer sources are detection
@@ -8490,6 +8771,8 @@ async function buildAnalysisData(options){
     await yieldFn();
     var patterns=Parser.detectPatterns(analyzed);
     var securityIssues=Parser.detectSecurity(analyzed);
+    // Computed while file contents are still in memory (they are released below).
+    var architectureInsights=Parser.detectArchitectureInsights(analyzed);
 
     progress('Analyzing code quality (4/6)...');
     await yieldFn();
@@ -8549,6 +8832,7 @@ async function buildAnalysisData(options){
         issues:issues,
         patterns:patterns,
         securityIssues:securityIssues,
+        architectureInsights:architectureInsights,
         refactorSuggestions:refactorSuggestions,
         duplicates:duplicates,
         layerViolations:layerViolations,
@@ -18058,7 +18342,12 @@ function App(){
                                         React.createElement('span',{style:{color:'var(--t3)'}},'Action: '),
                                         React.createElement('span',{style:{color:'var(--t1)'}},s.action)
                                     ),
-                                    React.createElement('div',{style:{fontSize:9,color:'var(--green)'}},React.createElement(Icon,{name:'spark',size:'s'}),' ',s.impact)
+                                    React.createElement('div',{style:{fontSize:9,color:'var(--green)'}},React.createElement(Icon,{name:'spark',size:'s'}),' ',s.impact),
+                                    s.path&&React.createElement('div',{style:{fontSize:9,color:'var(--acc)',marginTop:6,cursor:'pointer',display:'flex',alignItems:'center',gap:4},onClick:function(e){e.stopPropagation();openFilePreview(s.path,s.line);},title:'View source'},React.createElement(Icon,{name:'eye',size:'s'}),' ',s.path+(s.line?(':'+s.line):'')),
+                                    s.code&&React.createElement('div',{style:{fontSize:9,fontFamily:'monospace',background:'var(--bg0)',color:'var(--t2)',padding:'4px 6px',borderRadius:4,marginTop:4,whiteSpace:'pre-wrap',wordBreak:'break-all'}},s.code),
+                                    (s.ruleId||s.docUrl)&&React.createElement('div',{style:{fontSize:8,color:'var(--t3)',marginTop:4,display:'flex',gap:10,alignItems:'center'}},
+                                        s.ruleId&&React.createElement('span',null,s.ruleId),
+                                        s.docUrl&&React.createElement('a',{href:s.docUrl,target:'_blank',rel:'noopener noreferrer',style:{color:'var(--acc)',marginLeft:'auto'}},'Docs ↗'))
                                 );}),
                                 data.duplicates&&data.duplicates.length>0&&React.createElement('div',{style:{marginTop:16}},
                                     React.createElement('div',{style:{fontSize:11,fontWeight:600,marginBottom:8}},React.createElement(Icon,{name:'copy',size:'m'}),' Duplicate Functions (',data.duplicates.length,')'),
