@@ -6,8 +6,7 @@ const vm = require('node:vm');
 const repoRoot = path.resolve(__dirname, '..');
 const htmlSource = fs.readFileSync(path.join(repoRoot, 'index.html'), 'utf8');
 const parserStart = htmlSource.indexOf('const Parser={');
-// The GitHub adapter that used to follow Parser was removed; slice to the end of
-// the shared analyzer block instead.
+// Load the shared analyzer through its explicit boundary.
 const parserEnd = htmlSource.indexOf('// ===== CODEFLOW_ANALYZER_END =====', parserStart);
 
 if (parserStart === -1 || parserEnd === -1) {

@@ -1,8 +1,7 @@
 # CodeFlowKotlin
 
 Local-only source-code exploration, dependency analysis, security checks and offline
-architecture learning. Source stays on this computer. GitHub hosts this tool's Git
-repository; it is not an application data source.
+architecture learning for registered projects. Source stays on this computer.
 
 ## Start
 
@@ -20,8 +19,7 @@ Closing Android Studio or the launcher does not stop CodeFlow.
 The server binds only `127.0.0.1:4173`. Starting the Node server directly never
 opens a browser; browser opening is an explicit launcher action. `npm start` uses the
 current directory as the discovery parent. Browser dependencies are pinned under
-`vendor/` and load offline. No remote repository, PR, authentication, share-link,
-standalone analysis launcher or Card product is included.
+`vendor/` and load offline.
 
 ## Local projects
 
@@ -39,8 +37,7 @@ never share analyzed state. Add Folder can register this repository too.
 **Search** (`Ctrl+Shift+F`) supports case, whole-word, regex and include/exclude globs.
 Results navigate to real one-based source locations. Watching marks analysis/search
 stale; **Re-analyze** refreshes dependency, security and architecture results. Native
-folder picking requires an interactive Windows desktop. Open Folder and Open ZIP
-are local browser inputs; ZIP archives are never downloaded from a remote service.
+folder picking requires an interactive Windows desktop.
 
 ## Explore
 
@@ -78,7 +75,7 @@ Watch changes require **Re-analyze** before showing refreshed guide analysis;
 project switches and exclusions clear invalid context. Older caches need a
 Re-analyze to populate component metadata.
 
-See [the Guide implementation and verification notes](docs/architecture-analysis.md#interactive-architecture-guide-phase-e)
+See [the Guide implementation and verification notes](docs/architecture-analysis.md#interactive-architecture-guide)
 for supported roles, evidence limits and executable tests.
 
 
@@ -149,7 +146,7 @@ it. Writes prepare a complete same-directory temporary copy, flush it, recheck
 version/path/scope, then replace the original. Only existing UTF-8 source files up
 to 2 MiB are editable. UTF-8 BOM and consistent LF/CRLF are retained. Binary
 containers, mixed/CR-only line endings, hard links and symlinks/junctions are refused.
-Folder/ZIP browser inputs remain read-only; use Add Folder for editing.
+Use Add Folder to register projects for analysis and editing.
 
 After saving, source previews update and Search/dependency/security/architecture
 analysis becomes stale. Use Refresh Search or **Re-analyze** to recompute it. Other
@@ -177,11 +174,9 @@ when clicked. The application does not automatically fetch external documentatio
   search and watchers. Mutations require same-origin requests and a session CSRF token.
 - `vendor/`: pinned browser runtime assets, manifest and required licenses.
 - `tests/`: executable analyzer, UI helper, server and source-policy regression tests.
-- `.github/workflows/`: legitimate Git CI testing and CodeQL, outside app runtime.
+- CI workflows run the test suite and CodeQL for development changes.
 
-The removed Card Action and standalone analyzer have no runtime consumers. A small
-VM loader remains under `tests/helpers/` solely to test the analyzer embedded in the
-browser; no alternative production analyzer or command-line analysis mode exists.
+A VM loader under `tests/helpers/` tests the same analyzer embedded in the browser.
 
 ## License
 

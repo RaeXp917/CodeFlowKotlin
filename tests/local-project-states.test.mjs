@@ -168,13 +168,3 @@ test('switching projects never mixes files from the previous project', async () 
   });
   await fs.rm(root, { recursive: true, force: true });
 });
-
-test('index.html no longer shows the misleading CLI/watched-folder copy', async () => {
-  const html = await readFile(join(__dirname, '..', 'index.html'), 'utf8');
-  assert.doesNotMatch(html, /Project analysis failed/);
-  assert.doesNotMatch(html, /No code files found in the watched folder/);
-  assert.doesNotMatch(html, /Restart the CLI in that folder/);
-  // Accurate local-project messages are present.
-  assert.match(html, /The selected project folder is missing or was moved/);
-  assert.match(html, /No supported source files found in the selected project/);
-});

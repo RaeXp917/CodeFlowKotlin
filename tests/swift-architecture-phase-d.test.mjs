@@ -215,7 +215,7 @@ test('Phase D findings flow through buildAnalysisData', async () => {
   assert.ok(data.architectureInsights.some((i) => i.ruleId === 'swiftui-observedobject-ownership'));
 });
 
-test('the Swift Phase D analyzer lives in the shared worker/card block', () => {
+test('the Swift Phase D analyzer lives in the shared browser/worker block', () => {
   assert.ok(analyzerBlock.includes('function detectSwiftConstructs'));
   assert.ok(analyzerBlock.includes('swiftui-observableobject-in-state'));
   assert.ok(analyzerBlock.includes('function collectSwiftTypeSets'));

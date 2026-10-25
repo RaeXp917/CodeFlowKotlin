@@ -72,13 +72,6 @@
       "sha256": "98ccf17aa10c20bb1301762618fcc9b6ab3a4e7f26b6071d64d0b41154df3875"
     },
     {
-      "package": "jszip",
-      "version": "3.10.1",
-      "file": "jszip/jszip.min.js",
-      "source": "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
-      "sha256": "acc7e41455a80765b5fd9c7ee1b8078a6d160bbbca455aeae854de65c947d59e"
-    },
-    {
       "package": "react-dom",
       "version": "18.2.0",
       "file": "react-dom/react-dom.production.min.js",

@@ -28,9 +28,7 @@ vm.runInContext(
 
 const { Parser } = context;
 
-// README Supported Languages lists these extensions. Until they are in
-// codeExts they are neither code nor text, so folder/GitHub/ZIP analysis
-// drops them even though the CLI already watches them for live diffs.
+// The analyzer and watcher share every advertised source extension.
 const advertisedCodeExts = [
   'util.cxx',
   'types.hh',
@@ -53,7 +51,7 @@ test('README-advertised language extensions are analyzed as code', () => {
   }
 });
 
-test('CLI already watches the advertised extensions the analyzer used to drop', () => {
+test('file watching supports all advertised source extensions', () => {
   for (const name of advertisedCodeExts) {
     assert.equal(isWatchableFile(name), true, name);
   }

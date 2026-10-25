@@ -156,7 +156,7 @@ test('shared analyzer produces compact metadata before source disposal',async()=
 
 function navigationHost(files,excluded=[]){
  const state={selected:null,tab:'guide',preview:null,reads:0},ix=ctx.buildGuideIndex({files},ctx.compileExcludePatterns(excluded.join('\n')));
- const nav={data:{files},guideIndex:ix,repoInfo:{},localSourceKind:'local-project',isMobile:false,graphConfig:{vizType:'code'},useCallback:fn=>fn,
+ const nav={data:{files},guideIndex:ix,projectInfo:{},isMobile:false,graphConfig:{vizType:'code'},useCallback:fn=>fn,
  allowSourceNavigation:()=>true,setActiveSymbol(){},setSelected:f=>state.selected=f,setRightTab:fn=>state.tab=typeof fn==='function'?fn(state.tab):fn,setMobilePanel(){},setLegendCollapsed(){},calcBlast:()=>({}),setBlastRadius(){},setOwnership(){},setOwnerLoading(){},setExpandedFns(){},selectedPathRef:{},codeLinkParticlesHiddenRef:{},queueForceLinkVisuals(){},
  projectLiveByPath:{},filePreviewRequestRef:{current:0},setFilePreview:p=>state.preview=p,fileHasLoadedSource:f=>typeof f.content==='string',analysisHydrationIdRef:{current:'project-A:revision-1'},rememberHydratedSources(){},canReadLiveFileSource:()=>true,readLiveFileSource:()=>{state.reads++;return Promise.resolve('loaded source');}};
  vm.createContext(nav);
@@ -203,9 +203,9 @@ test('a slower preview cannot replace the most recently selected file',async()=>
 });
 test('late analyzer results cannot overwrite a newer project or reanalysis',async()=>{
  let release,started;const entered=new Promise(resolve=>started=resolve),runRef={current:0};const writes=[];
- const nav={console,projectStatus:{ok:true,pid:'A',root:'A'},projectRecordMatchesStatus:()=>true,projectWatchCacheMeta:()=>({title:'A',sourceKey:'A'}),analysisRunRef:runRef,activeExcludePatterns:[],
- projectWatchDuringRef:{},projectWatchReadRef:{},projectWatchSnapRevRef:{},projectAnalyzingRef:{},localFolderKeyRef:{},localFolderSelectionRef:{},zipArchiveRef:{},zipFileRef:{},zipKeyRef:{},
- discardSourceEdits:()=>true,setError(e){throw new Error(e);},resetAnalysisState(){runRef.current++;return true;},setData:data=>writes.push(data),setProjectStatus(){},setLocalDirHandle(){},setLocalSourceKind(){},setLoading(){},setProgress(){},
+ const nav={console,projectStatus:{ok:true,pid:'A',root:'A'},projectRecordMatchesStatus:()=>true,projectWatchCacheMeta:()=>({title:'A',sourceKey:'A'}),analysisRunRef:runRef,compileExcludePatterns:ctx.compileExcludePatterns,
+ projectWatchDuringRef:{},projectWatchReadRef:{},projectWatchSnapRevRef:{},projectAnalyzingRef:{},
+ discardSourceEdits:()=>true,setError(e){throw new Error(e);},resetAnalysisState(){runRef.current++;return true;},setData:data=>writes.push(data),setProjectStatus(){},setLoading(){},setProgress(){},
  Parser:{initTreeSitter:()=>Promise.resolve(),isCode:()=>true,isOversized:()=>false,isScriptContainer:()=>false,extract:()=>[],detectLayer:()=> 'ui'},
  fetch:async url=>({ok:true,status:200,json:async()=>({files:[file('A.kt')]}),text:async()=> 'class A {}'}),filterAnalyzableLocalFiles:files=>files,normalizeProjectWatchPath:p=>p,projectWatchSnapRevFromResponse:()=>null,
  yieldToBrowser:()=>Promise.resolve(),runAnalysisData:()=>{started();return new Promise(resolve=>release=resolve);}};

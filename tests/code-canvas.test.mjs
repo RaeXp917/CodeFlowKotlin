@@ -1263,14 +1263,14 @@ test('hydrating file contents does not change the graph structure key', () => {
     context.codeViewSceneKey(swapped, null, 'code')
   );
   assert.notEqual(
-    context.codeViewSceneKey(before, null, 'code', { sourceType: 'github', sourceKey: 'owner/alpha' }),
-    context.codeViewSceneKey(before, null, 'code', { sourceType: 'github', sourceKey: 'owner/beta' })
+    context.codeViewSceneKey(before, null, 'code', { sourceType: 'local-project', sourceKey: '/projects/alpha' }),
+    context.codeViewSceneKey(before, null, 'code', { sourceType: 'local-project', sourceKey: '/projects/beta' })
   );
   assert.notEqual(
-    context.analysisHydrationId({ sourceType: 'github', sourceKey: 'owner/alpha' }, before, null),
-    context.analysisHydrationId({ sourceType: 'github', sourceKey: 'owner/beta' }, before, null)
+    context.analysisHydrationId({ sourceType: 'local-project', sourceKey: '/projects/alpha' }, before, null),
+    context.analysisHydrationId({ sourceType: 'local-project', sourceKey: '/projects/beta' }, before, null)
   );
-  const source = { sourceType: 'github', sourceKey: 'owner/repo' };
+  const source = { sourceType: 'local-project', sourceKey: '/projects/sample' };
   assert.equal(context.analysisHydrationId(source, before, null), context.analysisHydrationId(source, before, 'src'));
   assert.equal(context.analysisGraphKey(before), context.analysisGraphKey(after));
   assert.notEqual(
@@ -1329,57 +1329,32 @@ test('code cards sit on the canvas transform, not a split pane', () => {
 });
 
 test('recent delete requires a second confirm click', () => {
-  assert.deepEqual(J(context.armRecentDelete(null, 'github:owner/repo')), { confirm: false, armedId: 'github:owner/repo' });
-  assert.deepEqual(J(context.armRecentDelete('github:owner/repo', 'github:owner/repo')), { confirm: true, armedId: null });
-  assert.deepEqual(J(context.armRecentDelete('github:owner/repo', 'zip:other')), { confirm: false, armedId: 'zip:other' });
+  assert.deepEqual(J(context.armRecentDelete(null, 'local-project:/projects/sample')), { confirm: false, armedId: 'local-project:/projects/sample' });
+  assert.deepEqual(J(context.armRecentDelete('local-project:/projects/sample', 'local-project:/projects/sample')), { confirm: true, armedId: null });
+  assert.deepEqual(J(context.armRecentDelete('local-project:/projects/sample', 'local-project:/projects/other')), { confirm: false, armedId: 'local-project:/projects/other' });
 });
 
 test('cache keys and records stay stable', () => {
-  assert.equal(context.analysisCacheKey('github', 'braedonsaunders/codeflow'), 'github:braedonsaunders/codeflow');
+  assert.equal(context.analysisCacheKey('local-project', '/projects/sample'), 'local-project:/projects/sample');
   const record = context.buildRecentAnalysisRecord({
-    sourceType: 'github',
-    sourceKey: 'owner/repo',
-    title: 'owner/repo',
+    sourceType: 'local-project',
+    sourceKey: '/projects/sample',
+    title: '/projects/sample',
     data: { files: [{ path: 'a.js' }] }
   });
-  assert.equal(record.id, 'github:owner/repo');
+  assert.equal(record.id, 'local-project:/projects/sample');
   assert.equal(record.fileCount, 1);
   assert.ok(record.savedAt > 0);
 });
 
-test('CLI path helper rejects traversal', () => {
-  assert.equal(context.resolveSafeProjectPath('/tmp/proj', '../etc/passwd'), null);
-  assert.equal(context.resolveSafeProjectPath('/tmp/proj', '/etc/passwd'), null);
-  assert.equal(context.resolveSafeProjectPath('/tmp/proj', 'src/app.js'), '/tmp/proj/src/app.js');
-});
-
-test('folder cache keys differ per selected directory', () => {
-  const samePaths = ['src/app.js', 'src/math.js'];
-  const a = context.localFolderCacheMeta({ title: 'project', paths: samePaths, selectionId: 'sel-a' });
-  const b = context.localFolderCacheMeta({ title: 'project', paths: samePaths, selectionId: 'sel-b' });
-  const again = context.localFolderCacheMeta({ title: 'project', paths: samePaths, selectionId: 'sel-a' });
-  assert.equal(a.title, 'project');
-  assert.notEqual(a.sourceKey, b.sourceKey);
-  assert.equal(a.sourceKey, again.sourceKey);
-  assert.equal(context.analysisCacheKey('folder', a.sourceKey), 'folder:' + a.sourceKey);
-});
-
-test('CLI re-analyze only matches the active watch root', () => {
-  const record = { sourceType: 'server', sourceKey: '/tmp/alpha' };
+test('Project re-analyze only matches the active watch root', () => {
+  const record = { sourceType: 'local-project', sourceKey: '/tmp/alpha' };
   assert.equal(context.projectRecordMatchesStatus(record, { ok: true, root: '/tmp/alpha' }), true);
   assert.equal(context.projectRecordMatchesStatus(record, { ok: true, root: '/tmp/beta' }), false);
   assert.equal(context.projectRecordMatchesStatus(record, null), false);
 });
 
-test('retained ZIP only matches its own recent record', () => {
-  const recordA = { sourceType: 'zip', sourceKey: 'main.zip|100|10|1|src/app.js' };
-  const recordB = { sourceType: 'zip', sourceKey: 'main.zip|200|20|1|src/app.js' };
-  assert.equal(context.retainedZipMatchesRecord(recordA, { identity: 'main.zip|100|10' }), true);
-  assert.equal(context.retainedZipMatchesRecord(recordB, { identity: 'main.zip|100|10' }), false);
-  assert.equal(context.retainedZipMatchesRecord(recordA, { sourceKey: recordA.sourceKey }), true);
-});
-
-test('CLI cache keys use the watched root instead of a shared fallback', () => {
+test('Project cache keys use the watched root instead of a shared fallback', () => {
   const a = context.projectWatchCacheMeta({ ok: true, root: '/tmp/alpha', name: 'alpha' });
   const b = context.projectWatchCacheMeta({ ok: true, root: '/tmp/beta', name: 'beta' });
   const missing = context.projectWatchCacheMeta(null);
@@ -1388,24 +1363,6 @@ test('CLI cache keys use the watched root instead of a shared fallback', () => {
   assert.notEqual(a.sourceKey, b.sourceKey);
   assert.equal(missing.sourceKey, 'local-project');
   assert.equal(context.analysisCacheKey('local-project', a.sourceKey), 'local-project:/tmp/alpha');
-});
-
-test('ZIP cache keys include archive metadata, not only the filename', () => {
-  const a = context.zipArchiveCacheMeta({ name: 'main.zip', size: 100, lastModified: 10, paths: ['repo-a/src/app.js'] });
-  const b = context.zipArchiveCacheMeta({ name: 'main.zip', size: 200, lastModified: 20, paths: ['repo-b/src/app.js'] });
-  const sameNameDifferentPaths = context.zipArchiveCacheMeta({ name: 'main.zip', size: 100, lastModified: 10, paths: ['other/src/app.js'] });
-  assert.equal(a.title, 'main.zip');
-  assert.notEqual(a.sourceKey, b.sourceKey);
-  assert.notEqual(a.sourceKey, sameNameDifferentPaths.sourceKey);
-  assert.equal(context.analysisCacheKey('zip', a.sourceKey), 'zip:' + a.sourceKey);
-});
-
-test('retained folder handle only matches its own recent record', () => {
-  const recordA = { sourceType: 'folder', sourceKey: 'alpha|1|src/app.js' };
-  const recordB = { sourceType: 'folder', sourceKey: 'beta|1|src/app.js' };
-  assert.equal(context.retainedFolderMatchesRecord(recordA, { sourceKey: recordA.sourceKey }), true);
-  assert.equal(context.retainedFolderMatchesRecord(recordB, { sourceKey: recordA.sourceKey }), false);
-  assert.equal(context.retainedFolderMatchesRecord(null, { sourceKey: recordA.sourceKey }), true);
 });
 
 test('compactAnalysisForCache drops raw source and keeps graph metadata', () => {
@@ -1539,8 +1496,8 @@ test('empty source files count as loaded after hydration', () => {
 });
 
 test('obsolete hydration results do not replace a new analysis file', () => {
-  const repoA = { sourceType: 'github', sourceKey: 'owner/alpha' };
-  const repoB = { sourceType: 'github', sourceKey: 'owner/beta' };
+  const repoA = { sourceType: 'local-project', sourceKey: '/projects/alpha' };
+  const repoB = { sourceType: 'local-project', sourceKey: '/projects/beta' };
   const data = { files: [{ path: 'src/index.js', name: 'index.js' }], connections: [] };
   const idA = context.analysisHydrationId(repoA, data, null);
   const idB = context.analysisHydrationId(repoB, data, null);
@@ -1553,8 +1510,8 @@ test('obsolete hydration results do not replace a new analysis file', () => {
 });
 
 test('obsolete source failures do not mark a new analysis path as failed', () => {
-  const repoA = { sourceType: 'github', sourceKey: 'owner/alpha' };
-  const repoB = { sourceType: 'github', sourceKey: 'owner/beta' };
+  const repoA = { sourceType: 'local-project', sourceKey: '/projects/alpha' };
+  const repoB = { sourceType: 'local-project', sourceKey: '/projects/beta' };
   const data = { files: [{ path: 'src/index.js', name: 'index.js' }], connections: [] };
   const idA = context.analysisHydrationId(repoA, data);
   const idB = context.analysisHydrationId(repoB, data);
@@ -1604,8 +1561,8 @@ test('selection reads the live body scrollTop of a previously scrolled card', ()
 test('hydration IDs follow the loaded analysis, not a live session', () => {
   const data = { files: [{ path: 'src/index.js', name: 'index.js' }], connections: [] };
   const graph = context.analysisGraphKey(data);
-  const alpha = context.loadedAnalysisSourceIdentity({ localSourceKind: 'local-project', projectOk: true, projectRoot: '/projects/alpha' });
-  const beta = context.loadedAnalysisSourceIdentity({ localSourceKind: 'local-project', projectOk: true, projectRoot: '/projects/beta' });
+  const alpha = context.loadedAnalysisSourceIdentity({ projectOk: true, projectRoot: '/projects/alpha' });
+  const beta = context.loadedAnalysisSourceIdentity({ projectOk: true, projectRoot: '/projects/beta' });
   assert.equal(alpha.sourceType, 'local-project');
   assert.equal(alpha.sourceKey, '/projects/alpha');
   assert.equal(beta.sourceKey, '/projects/beta');
@@ -1613,10 +1570,7 @@ test('hydration IDs follow the loaded analysis, not a live session', () => {
     context.analysisHydrationIdFromParts(alpha, graph),
     context.analysisHydrationIdFromParts(beta, graph)
   );
-  // Folder identities remain stable and distinct from local projects.
-  const folder = context.loadedAnalysisSourceIdentity({ localSourceKind: 'folder', folderKey: 'proj-x' });
-  assert.equal(folder.sourceType, 'folder');
-  assert.equal(folder.sourceKey, 'proj-x');
+  assert.equal(context.loadedAnalysisSourceIdentity({ projectOk: false, projectRoot: '/projects/alpha' }), null);
 });
 
 test('symbol list wheel stays native instead of panning the canvas', () => {
@@ -1875,11 +1829,11 @@ test('Project watch recovery skips already flushed and in-flight paths', () => {
 
 test('Project watch diffs only apply to the matching Project analysis', () => {
   const status = { ok: true, root: '/tmp/alpha', name: 'alpha' };
-  assert.equal(context.projectWatchAppliesToAnalysis('local-project', status, { sourceType: 'local-project', sourceKey: '/tmp/alpha' }), true);
-  assert.equal(context.projectWatchAppliesToAnalysis('local-project', status, { sourceType: 'local-project', sourceKey: '/tmp/beta' }), false);
-  assert.equal(context.projectWatchAppliesToAnalysis('folder', status, { sourceType: 'folder' }), false);
+  assert.equal(context.projectWatchAppliesToAnalysis(status, { sourceType: 'local-project', sourceKey: '/tmp/alpha' }), true);
+  assert.equal(context.projectWatchAppliesToAnalysis(status, { sourceType: 'local-project', sourceKey: '/tmp/beta' }), false);
+  assert.equal(context.projectWatchAppliesToAnalysis(status, { sourceType: 'folder' }), false);
   assert.equal(context.projectWatchAppliesToAnalysis('zip', status, { sourceType: 'zip' }), false);
-  assert.equal(context.projectWatchAppliesToAnalysis(null, status, { sourceType: 'github' }), false);
+  assert.equal(context.projectWatchAppliesToAnalysis(status, { sourceType: 'unsupported' }), false);
   assert.equal(context.projectWatchAppliesToAnalysis('local-project', { ok: false }, { sourceType: 'local-project', sourceKey: '/tmp/alpha' }), false);
 });
 
@@ -2009,8 +1963,6 @@ test('index.html ships a working Code view, not a stub', () => {
   assert.match(htmlSource, /Confirm\?/);
   assert.match(htmlSource, /__codeflow\/status/);
   assert.match(htmlSource, /analyzeLocalProject\(false,status\)/);
-  assert.match(htmlSource, /retainedFolderMatchesRecord/);
-  assert.match(htmlSource, /retainedZipMatchesRecord/);
   assert.match(htmlSource, /projectRecordMatchesStatus/);
   assert.match(htmlSource, /folderFilterAfterCodeNav/);
   assert.match(htmlSource, /setFolderFilter\(nextFilter\)/);
@@ -2027,7 +1979,7 @@ test('index.html ships a working Code view, not a stub', () => {
   assert.match(htmlSource, /startedProjectWatchDiffPaths\(projectDiffPendingRef\.current,projectDiffGenRef\.current\)/);
   assert.match(htmlSource, /pendingProjectWatchDiffPaths\(projectDirty,projectLiveByPath,started\)/);
   assert.match(htmlSource, /flushProjectWatchDiffs\(missing\)/);
-  assert.match(htmlSource, /projectWatchAppliesToAnalysis\(localSourceKind,projectStatus,currentAnalysisSource\(\)\)/);
+  assert.match(htmlSource, /projectWatchAppliesToAnalysis\(projectStatus,currentAnalysisSource\(\)\)/);
   assert.match(htmlSource, /function applyCachedAnalysis\(record\)\{[\s\S]*?setProjectDirty\(\[\]\);[\s\S]*?clearProjectLiveDiffs\(\);/);
   assert.match(htmlSource, /projectWatchDuringRef\.current=noteProjectWatchDuringEvent\(projectWatchDuringRef\.current,next,rev\)/);
   assert.match(htmlSource, /var keep=retainProjectWatchPathsAfterAnalysis\(projectWatchDuringRef\.current,projectWatchReadRef\.current,projectWatchSnapRevRef\.current\)/);
@@ -2055,7 +2007,6 @@ test('index.html ships a working Code view, not a stub', () => {
   assert.match(htmlSource, /var live=result\.kind==='missing'\?'':result\.content/);
   assert.match(htmlSource, /EventSource\('\/__codeflow\/events'\)/);
   assert.match(htmlSource, /PROJECT_WATCH_DIFF_MS/);
-  assert.match(htmlSource, /zipArchiveCacheMeta/);
   assert.match(htmlSource, /compactAnalysisForCache/);
   assert.match(htmlSource, /fileHasLoadedSource/);
   assert.match(htmlSource, /onPointerDown/);
@@ -2929,8 +2880,8 @@ test('named-group hulls win over directory hulls and drop only when dragged out'
 
 test('named groups persist per analysis session in localStorage', () => {
   const storage = memoryStorage();
-  const key = context.namedGroupsSessionKey('github', 'owner/repo');
-  assert.equal(key, 'github:owner/repo');
+  const key = context.namedGroupsSessionKey('local-project', '/projects/sample');
+  assert.equal(key, 'local-project:/projects/sample');
   const written = context.writeNamedGroupsForSession(storage, key, [
     { id: 'g1', name: ' Auth ', paths: ['src/a.js', 'src/a.js', ''], x: 120, y: -40 }
   ]);
@@ -2939,7 +2890,7 @@ test('named groups persist per analysis session in localStorage', () => {
   assert.equal(written[0].x, 120);
   assert.equal(written[0].y, -40);
   assert.deepEqual(J(context.readNamedGroupsForSession(storage, key)), J(written));
-  assert.deepEqual(J(context.readNamedGroupsForSession(storage, 'github:other/repo')), []);
+  assert.deepEqual(J(context.readNamedGroupsForSession(storage, 'local-project:other/repo')), []);
   assert.deepEqual(J(context.readNamedGroupsForSession(storage, '')), []);
   storage.setItem(context.NAMED_GROUPS_STORAGE_KEY, '{not-json');
   assert.deepEqual(J(context.readNamedGroupsForSession(storage, key)), []);

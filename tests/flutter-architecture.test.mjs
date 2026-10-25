@@ -245,7 +245,7 @@ test('architecture insights flow into buildAnalysisData output', async () => {
   assert.ok(data.architectureInsights.some((i) => i.ruleId === 'flutter-missing-dispose'));
 });
 
-test('the Dart analyzer lives in the shared worker/card analyzer block', () => {
+test('the Dart analyzer lives in the shared browser/worker analyzer block', () => {
   assert.ok(analyzerBlock.includes('function runDartArchitectureRules'), 'rules are in the shared block');
   assert.ok(analyzerBlock.includes('function maskDartLiterals'));
 });

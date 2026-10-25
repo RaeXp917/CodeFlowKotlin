@@ -276,7 +276,7 @@ false-positive guards (comments, strings, idiomatic patterns), identical
 filenames in different directories, accurate line numbers and snippets, and
 integration into `data.suggestions` and `data.architectureInsights`.
 
-## Interactive Architecture Guide (Phase E)
+## Interactive Architecture Guide
 
 The **GUIDE** tab lives in the existing right-hand details panel. Select a Code
 card, retained visualization node, Files entry, search match, or finding source
@@ -401,25 +401,3 @@ Riverpod classes. Type/receiver resolution, DI wiring and complete execution pat
 are unavailable; these are not guessed. Other source languages keep the existing
 canvas, functions and findings but have no specialized Guide role curriculum.
 This phase does not add a compiler, parser grammar or analyzer pipeline.
-
-### Phase E verification record (2026-10-25)
-
-Inspected base: `305327ec5ae379f69048ce98760be4e74166569c`, clean `main`.
-Guide/scope tests: 43 passed. Combined Guide/analyzer/security checks: 167 passed.
-Complete `npm test`: 480 tests, 465 passed, 14 failed, one skipped. All 14 failure
-names match the untouched baseline (437 tests, 422 passed, 14 failed, one skipped):
-13 debug-patch tests depend on Windows-incompatible paths/newline expectations;
-one existing vendored 3D graph asset hash differs from its manifest. Neither
-baseline issue was changed in Phase E. Both inline-script smoke checks and Node
-syntax checks passed; there is no build script or package installation step.
-
-Read-only MotoTelemetry smoke: 726 source files, 4,971 existing call connections,
-13 findings checked against real source lines/snippets. A Service with one finding
-and a real ViewModel were recognized; related-source endpoint navigation and
-one-based definition bounds were checked. Shared analysis took about 9 seconds;
-GUIDE indexing took about 4 ms. The 1,001-file/1,000-edge synthetic component
-render/index test took about 8–10 ms (Node, not a browser frame-time measurement).
-No registered project contained Swift/Dart source in the filename inventory;
-those ecosystems were verified with executable realistic fixtures. The browser
-control tool reported no available browser, so visual, mobile and real GUI
-interaction verification remain unperformed; HTTP success is not UI verification.

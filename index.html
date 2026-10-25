@@ -8,14 +8,6 @@
     <meta name="keywords" content="code visualization, architecture, local source, dependency graph, blast radius, code analysis, open source">
     <meta name="author" content="CodeFlow">
     <meta name="robots" content="index, follow">
-    <meta property="og:title" content="CodeFlow — Visualize Your Codebase Architecture">
-    <meta property="og:description" content="Explore local source architecture privately and offline.">
-    <meta property="og:type" content="website">
-    <meta property="og:image" content="codeflow-social.png">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="CodeFlow — Visualize Your Codebase Architecture">
-    <meta name="twitter:description" content="Explore local source architecture privately and offline.">
-    <meta name="twitter:image" content="codeflow-social.png">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300ff9d' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M13 2 4 14h6l-1 8 9-12h-6l1-8z'/></svg>">
     <script src="./vendor/react/react.production.min.js"></script>
     <script src="./vendor/react-dom/react-dom.production.min.js"></script>
@@ -23,7 +15,6 @@
     <script src="./vendor/d3/d3.min.js"></script>
     <script src="./vendor/d3-sankey/d3-sankey.min.js"></script>
     <script src="./vendor/acorn/acorn.min.js"></script>
-    <script src="./vendor/jszip/jszip.min.js"></script>
     <script src="./vendor/tree-sitter/tree-sitter.js"></script>
     <script src="./vendor/jspdf/jspdf.umd.min.js"></script>
     <script src="./vendor/3d-force-graph/3d-force-graph.min.js" defer></script>
@@ -49,13 +40,10 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .icon-xl{width:20px;height:20px}
 .icon-xxl{width:48px;height:48px}
 .status-dot{display:inline-block;width:8px;height:8px;border-radius:999px;flex-shrink:0}
-.repo-input-group{display:flex;gap:8px;flex:1;min-width:0}
-.repo-input-group>*{min-width:0}
-.repo-input{flex:1;padding:6px 12px;background:var(--bg0);border:1px solid var(--border);border-radius:6px;color:var(--t0);font-family:inherit;font-size:11px;min-width:0}
-.repo-input-group>.repo-input:first-child{min-width:220px}
-.repo-input-group>.top-btn,.repo-input-group>.refresh-btn,.repo-input-group>.reset-btn,.project-select{flex-shrink:0}
+.project-controls{display:flex;gap:8px;flex:1;min-width:0}
+.project-controls>*{min-width:0}
+.project-controls>.top-btn,.project-controls>.refresh-btn,.project-controls>.reset-btn,.project-select{flex-shrink:0}
 .project-selector-slot{display:contents}
-.repo-input:focus{outline:none;border-color:var(--acc)}
 .topbar-actions{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
 .top-btn{padding:6px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--t1);font-family:inherit;font-size:10px;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;min-height:32px;touch-action:manipulation}
 .top-btn:hover{background:var(--bg4);border-color:var(--acc);color:var(--acc)}
@@ -267,12 +255,6 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .modal-close{background:none;border:none;color:var(--t3);font-size:18px;cursor:pointer}
 .modal-body{flex:1;overflow-y:auto;padding:16px}
 .modal-footer{padding:16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
-.confirm-modal{max-width:460px}
-.confirm-content{display:flex;align-items:flex-start;gap:12px}
-.confirm-icon{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.confirm-copy{display:flex;flex-direction:column;gap:10px;min-width:0}
-.confirm-title{font-size:14px;font-weight:600;color:var(--t0)}
-.confirm-message{font-size:11px;line-height:1.6;color:var(--t2);white-space:pre-line}
 .form-group{margin-bottom:12px}
 .form-label{display:block;font-size:10px;color:var(--t2);margin-bottom:6px}
 .form-input{width:100%;padding:8px 10px;background:var(--bg0);border:1px solid var(--border);border-radius:6px;color:var(--t0);font-family:inherit;font-size:11px}
@@ -301,14 +283,6 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .export-option.disabled .export-option-icon{color:var(--t3)}
 .export-option-label{font-size:11px;color:var(--t1)}
 .export-option.disabled .export-option-label{color:var(--t3)}
-.pr-header{padding:12px;background:var(--bg0);border-radius:8px;margin-bottom:12px}
-.pr-title{font-size:12px;color:var(--t0);font-weight:500}
-.pr-stats{display:flex;gap:12px;margin-top:8px;font-size:11px}
-.pr-add{color:var(--green)}
-.pr-del{color:var(--red)}
-.pr-file{display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg0);border-radius:6px;margin-bottom:4px}
-.pr-file-name{flex:1;font-size:10px;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pr-file-impact{font-size:9px;padding:2px 6px;border-radius:4px}
 .panel-header{padding:12px;border-bottom:1px solid var(--border);background:var(--bg2)}
 .panel-title{font-size:12px;font-weight:600;color:var(--acc)}
 .panel-subtitle{font-size:10px;color:var(--t3);margin-top:4px}
@@ -371,34 +345,6 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .unused-summary-item{text-align:center}
 .unused-summary-value{font-size:16px;font-weight:700;color:var(--orange)}
 .unused-summary-label{font-size:9px;color:var(--t3);text-transform:uppercase}
-.pr-modal{max-width:900px;width:95vw}
-.pr-risk{display:flex;align-items:center;gap:16px;padding:16px;background:var(--bg0);border-radius:12px;margin-bottom:16px}
-.pr-risk-score{width:80px;height:80px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700}
-.pr-risk-value{font-size:28px}
-.pr-risk-label{font-size:9px;text-transform:uppercase;opacity:0.8}
-.pr-risk-details{flex:1}
-.pr-risk-title{font-size:14px;font-weight:600;color:var(--t0);margin-bottom:4px}
-.pr-risk-desc{font-size:11px;color:var(--t2);line-height:1.5}
-.pr-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px}
-.pr-card{background:var(--bg0);border:1px solid var(--border);border-radius:8px;padding:12px}
-.pr-card-title{font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:6px}
-.pr-reviewer{display:flex;align-items:center;gap:8px;padding:6px;border-radius:6px;margin-bottom:4px}
-.pr-reviewer:hover{background:var(--hover)}
-.pr-reviewer-avatar{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:white}
-.pr-reviewer-name{font-size:11px;color:var(--t1);flex:1}
-.pr-reviewer-pct{font-size:10px;color:var(--t3)}
-.pr-chain{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:8px}
-.pr-chain-file{font-size:9px;padding:3px 8px;background:var(--bg2);border-radius:4px;color:var(--t2)}
-.pr-chain-arrow{color:var(--t3);font-size:10px}
-.pr-files-list{max-height:250px;overflow-y:auto}
-.pr-file-row{display:flex;align-items:center;gap:8px;padding:8px;border-radius:6px;margin-bottom:4px;background:var(--bg0)}
-.pr-file-row:hover{background:var(--hover)}
-.pr-file-status{width:8px;height:8px;border-radius:50%}
-.pr-file-info{flex:1;min-width:0}
-.pr-file-path{font-size:11px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pr-file-folder{font-size:9px;color:var(--t3)}
-.pr-file-badges{display:flex;gap:4px}
-.pr-mini-badge{font-size:8px;padding:2px 5px;border-radius:3px}
 .graph3d-container{width:100%;height:100%;position:relative}
 .arc-container{width:100%;height:100%}
 .arc-node{cursor:pointer;transition:all 0.2s}
@@ -420,32 +366,6 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .treemap-tooltip{position:absolute;padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:6px;font-size:10px;pointer-events:none;z-index:100;max-width:200px}
 .treemap-tooltip-title{font-weight:600;color:var(--t0);margin-bottom:4px}
 .treemap-tooltip-stat{color:var(--t2);display:flex;justify-content:space-between;gap:12px}
-.pr-impact-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.pr-impact-card{background:var(--bg0);border:1px solid var(--border);border-radius:10px;padding:14px;overflow:hidden}
-.pr-impact-card-title{font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:6px}
-.pr-risk-meter{display:flex;flex-direction:column;align-items:center;padding:20px}
-.pr-risk-circle{width:100px;height:100px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;border:4px solid}
-.pr-risk-value{font-size:32px;font-weight:700}
-.pr-risk-text{font-size:10px;font-weight:600;text-transform:uppercase}
-.pr-metric-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border2)}
-.pr-metric-row:last-child{border-bottom:none}
-.pr-metric-label{font-size:10px;color:var(--t2)}
-.pr-metric-value{font-size:10px;font-weight:600;color:var(--t0)}
-.pr-dependency-chain{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
-.pr-chain-node{padding:4px 8px;background:var(--bg2);border-radius:4px;font-size:9px;color:var(--t1)}
-.pr-chain-node.changed{background:var(--accbg);color:var(--acc);border:1px solid var(--acc)}
-.pr-chain-arrow{color:var(--t3);font-size:10px}
-.pr-reviewer-card{display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;margin-bottom:6px;background:var(--bg2)}
-.pr-reviewer-avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:600;color:white}
-.pr-reviewer-info{flex:1}
-.pr-reviewer-name{font-size:11px;font-weight:600;color:var(--t0)}
-.pr-reviewer-reason{font-size:9px;color:var(--t3)}
-.pr-test-impact{display:flex;flex-direction:column;gap:6px}
-.pr-test-file{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bg2);border-radius:4px;font-size:10px}
-.pr-test-icon{font-size:12px}
-.pr-hotspot{display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg2);border-radius:6px;margin-bottom:6px}
-.pr-hotspot-bar{flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden}
-.pr-hotspot-fill{height:100%;border-radius:3px}
 .conn-item{border-bottom:1px solid var(--border2)}
 .conn-item:last-child{border-bottom:none}
 .conn-header{display:flex;align-items:center;gap:6px;padding:8px 12px;cursor:pointer;transition:background 0.15s}
@@ -625,11 +545,7 @@ svg.color-blocks text.node-label{display:none}
 .project-select option{background:var(--bg1);color:var(--t0);padding:8px}
 .exclude-note{font-size:10px;color:var(--t2);line-height:1.6;margin-bottom:12px}
 .exclude-note code{background:var(--bg0);padding:2px 5px;border-radius:4px;color:var(--acc)}
-.exclude-chip-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.exclude-chip{font-size:9px;padding:4px 8px;background:var(--bg0);border:1px solid var(--border);border-radius:999px;color:var(--t2)}
-.exclude-textarea{min-height:180px;font-family:'JetBrains Mono',monospace;font-size:10px;resize:vertical}
 .exclude-help{font-size:9px;color:var(--t3);line-height:1.5;margin-top:8px}
-.exclude-count{font-size:9px;color:var(--t3);margin-left:auto}
 .mobile-panel-actions{display:none}
 .mobile-panel-actions .top-btn.active{background:var(--accbg);border-color:var(--acc);color:var(--acc)}
 .mobile-brand-row,.mobile-source-controls,.mobile-primary-row,.mobile-secondary-row,.mobile-action-stack,.mobile-bottom-nav{display:none}
@@ -647,11 +563,9 @@ body{height:100dvh;min-height:100dvh}
 .logo{min-height:40px}
 .logo-mark{width:32px;height:32px}
 .logo-text{font-size:15px}
-.repo-input-group{order:2;flex:1 1 100%;max-width:none;flex-wrap:wrap}
-.repo-input-group>.repo-input:first-child{flex:1 1 100%}
-.repo-input,.project-select,.top-btn,.refresh-btn,.reset-btn,.view-file-btn{min-height:40px;font-size:11px}
+.project-controls{order:2;flex:1 1 100%;max-width:none;flex-wrap:wrap}
 .project-select{flex:1 1 150px}
-.repo-input-group .top-btn,.repo-input-group .refresh-btn,.repo-input-group .reset-btn{flex:1 1 calc(50% - 4px);justify-content:center}
+.project-controls .top-btn,.project-controls .refresh-btn,.project-controls .reset-btn{flex:1 1 calc(50% - 4px);justify-content:center}
 .mobile-panel-actions{display:flex;order:3;gap:8px;flex:1 1 100%}
 .mobile-panel-actions .top-btn{flex:1 1 0;justify-content:center}
 .topbar-actions{order:4;width:100%;margin-left:0;justify-content:flex-start}
@@ -678,8 +592,6 @@ body{height:100dvh;min-height:100dvh}
 .canvas-area:has(.canvas-minimap) .legend.with-color-by{bottom:148px}
 .canvas-area:has(.canvas-minimap) .color-by{bottom:198px}
 .info-chip{white-space:nowrap;flex:0 0 auto}
-.export-options,.pr-grid,.pr-impact-grid,.unused-summary{grid-template-columns:1fr}
-.pr-risk{flex-direction:column;align-items:flex-start}
 .file-preview-modal{width:calc(100vw - 12px);height:min(88dvh,760px)}
 .file-preview-header{flex-wrap:wrap;align-items:flex-start;gap:10px}
 .file-preview-actions{width:100%;justify-content:space-between}
@@ -690,15 +602,13 @@ body{height:100dvh;min-height:100dvh}
 .modal{width:calc(100vw - 20px);max-height:min(88dvh,800px)}
 .modal-footer{flex-wrap:wrap}
 .modal-footer .top-btn{flex:1 1 calc(50% - 4px);justify-content:center}
-.confirm-content{flex-direction:column}
-.confirm-icon{width:36px;height:36px}
 .tooltip{max-width:min(240px,calc(100vw - 24px))}
 .toast{width:calc(100vw - 24px);padding:12px 16px}
 }
 @media (max-width:640px){
 .topbar{padding-left:10px;padding-right:10px}
-.repo-input-group .top-btn,.repo-input-group .refresh-btn,.repo-input-group .reset-btn,.topbar-actions .top-btn{flex:1 1 calc(50% - 4px)}
-.repo-input-group .top-btn.primary{flex:1 1 100%}
+.project-controls .top-btn,.project-controls .refresh-btn,.project-controls .reset-btn,.topbar-actions .top-btn{flex:1 1 calc(50% - 4px)}
+.project-controls .top-btn.primary{flex:1 1 100%}
 .health-score{align-items:flex-start}
 .canvas-toolbar{top:64px}
 .graph-config{top:116px}
@@ -713,12 +623,11 @@ body{height:100dvh;min-height:100dvh}
 .file-preview-header{border-radius:0;padding:12px}
 .file-preview-content{padding-bottom:env(safe-area-inset-bottom)}
 .file-preview-text{font-size:10px}
-.modal,.pr-modal{width:100vw;max-width:none;max-height:100dvh;border-radius:0}
 .modal-header,.modal-body,.modal-footer{padding-left:14px;padding-right:14px}
 }
 @media (max-width:980px){
 .topbar{display:flex;flex-direction:column;align-items:stretch;height:auto;min-height:0;padding:calc(8px + env(safe-area-inset-top)) 10px 8px;gap:8px}
-.topbar>.logo,.topbar>.repo-input-group,.topbar>.topbar-actions{display:none}
+.topbar>.logo,.topbar>.project-controls,.topbar>.topbar-actions{display:none}
 .mobile-panel-actions{display:none!important}
 .mobile-brand-row{display:flex;align-items:center;gap:10px;width:100%;min-height:36px}
 .mobile-brand-row .logo{min-height:36px}
@@ -729,8 +638,6 @@ body{height:100dvh;min-height:100dvh}
 .mobile-icon-btn .icon{width:15px;height:15px}
 .mobile-source-controls{display:flex;flex-direction:column;gap:7px;width:100%;min-width:0}
 .mobile-primary-row{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:8px;width:100%}
-.mobile-primary-row .repo-input{height:42px;min-height:42px;border-radius:8px;font-size:12px}
-.mobile-primary-row .repo-input:first-child{min-width:0}
 .mobile-analyze-btn{width:44px;height:42px;min-height:42px;padding:0;justify-content:center;border-radius:8px}
 .mobile-analyze-btn .icon{width:16px;height:16px}
 .mobile-secondary-row{display:flex;align-items:stretch;gap:6px;width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;padding-bottom:2px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
@@ -797,8 +704,6 @@ const{useState,useEffect,useLayoutEffect,useRef,useMemo,useCallback}=React;
 const COLORS=['#4d9fff','#a78bfa','#22d3ee','#00ff9d','#ff9f43','#ec4899','#ff5f5f','#84cc16'];
 const LAYER_COLORS={ui:'#4d9fff',components:'#22d3ee',services:'#a78bfa',utils:'#00ff9d',data:'#ff9f43',config:'#ec4899',test:'#f59e0b',modules:'#a78bfa',forms:'#22d3ee',classes:'#ff9f43',note:'#c084fc'};
 const IGNORE=new Set(['node_modules','.git','vendor','dist','build','out','coverage','.next','.nuxt','.cache','.parcel-cache','.turbo','.vercel','.local','.artifacts','.playwright-cli','playwright-report','test-results','.claude','.codex','.idea','.vscode','.pnpm-store','.yarn','tmp','temp','target','bin','obj','__pycache__','.venv','venv','env','.env','.tox','.mypy_cache','.pytest_cache','.ruff_cache','__pypackages__','.eggs','__macosx']);
-const DEFAULT_EXCLUDE_CHIPS=['.git','node_modules','dist','build','coverage','.next','.turbo','.local','.venv','venv','.tox'];
-const ANALYSIS_LIMITS={repoSoft:300,repoMax:750,localSoft:500};
 
 // ---------------------------------------------------------------------------
 // Shared Helpers
@@ -925,42 +830,15 @@ function makeFetchFailedAnalysisFile(file){
     };
 }
 
-function getArchiveRootPrefix(paths){
-    var splitPaths=(paths||[]).map(function(path){return normalizeExcludePath(path).split('/').filter(Boolean);}).filter(function(parts){return parts.length>0;});
-    if(!splitPaths.length)return'';
-    var firstSegment=splitPaths[0][0];
-    var hasSingleRoot=splitPaths.every(function(parts){return parts.length>1&&parts[0]===firstSegment;});
-    return hasSingleRoot?firstSegment+'/':'';
-}
-
 function filterAnalyzableLocalFiles(files,compiledPatterns){
     var patterns=compiledPatterns||[];
-    var dirCache=new Map();
-    return (files||[]).filter(function(f){
-        var entryPath=normalizeExcludePath(f&&f.path);
+    return (files||[]).filter(function(file){
+        var entryPath=normalizeExcludePath(file&&file.path);
         if(!entryPath||entryPath.endsWith('/'))return false;
-        var name=(f&&f.name)||entryPath.split('/').filter(Boolean).pop()||'';
-        if(!name||name==='.DS_Store')return false;
-        if(shouldSkipArchivePath(entryPath,patterns,dirCache))return false;
-        if(shouldExcludeFile(entryPath,name,patterns))return false;
-        return true;
+        var parts=entryPath.split('/'),name=parts.pop();
+        if(!Parser.isCode(name)||shouldExcludeFile(entryPath,name,patterns))return false;
+        return !parts.some(function(part,i){return part==='..'||shouldIgnoreDirectory(parts.slice(0,i+1).join('/'),part,patterns);});
     });
-}
-
-function shouldSkipArchivePath(path,compiledPatterns,dirCache){
-    var segments=normalizeExcludePath(path).split('/').filter(Boolean);
-    var current='';
-    for(var i=0;i<segments.length-1;i++){
-        current=current?current+'/'+segments[i]:segments[i];
-        if(dirCache&&dirCache.has(current)){
-            if(dirCache.get(current))return true;
-            continue;
-        }
-        var ignored=shouldIgnoreDirectory(current,segments[i],compiledPatterns);
-        if(dirCache)dirCache.set(current,ignored);
-        if(ignored)return true;
-    }
-    return false;
 }
 
 function getSecurityScanContent(file){
@@ -3115,7 +2993,7 @@ const Parser={
         // exist to be matched, never executed), so flagging them measures the
         // tool instead of the scanned product. Blank the analyzer block out of
         // the scan copy while preserving line numbering. Marker strings are
-        // built via concatenation so slicing (worker/card) is unaffected.
+        // built via concatenation so slicing (browser/worker) is unaffected.
         // Mirrored for non-browser runtimes by tests/security-selfscan.test.mjs.
         var SELF_SCAN_FILE='index.html';
         var ANALYZER_START_MARK='// ===== CODEFLOW_'+'ANALYZER_START =====';
@@ -5186,14 +5064,7 @@ function inferTestTargetPaths(testPath){
 
 function architectureDependencyLabel(sourceRole,targetRole,importPath){
     if(sourceRole==='test')return'tests';
-    if(sourceRole==='renderer'&&targetRole==='render-support')return'uses visual helpers';
-    if(sourceRole==='render-support'&&targetRole==='render-support'){
-        if(/receipt-md/.test(importPath||''))return'exports markdown';
-        if(/theme/.test(importPath||''))return'uses';
-        return'uses';
-    }
     if(targetRole==='database')return'queries';
-    if(sourceRole==='browser-shell'&&targetRole==='api')return'calls';
     if(sourceRole==='app-shell'&&targetRole==='frontend-route')return'bootstraps';
     if(sourceRole==='frontend-route'&&targetRole==='frontend-component')return'renders';
     if(sourceRole==='frontend-component'&&targetRole==='platform-analyzer')return'calls';
@@ -5494,8 +5365,6 @@ function extractArchitectureFacts(files,framework){
             if(special.route)classified.route=special.route;
         }
         if(role==='fixture')classified={kind:'fixture',route:null};
-        else if(role==='browser-shell')classified={kind:'shell',route:inferGenericArchitectureRoute(path)||'/'};
-        else if(role==='action-entry')classified={kind:'action-entry',route:null};
         else if(role==='test')classified={kind:'test',route:null};
         else if(role==='build-output')classified={kind:'build-output',route:null};
         else if(role==='app-shell')classified={kind:'shell',route:null};
@@ -5553,7 +5422,7 @@ function extractArchitectureFacts(files,framework){
 }
 
 function shouldShowArchitectureBlock(fact){
-    return ['page','api','component','hook','service','database-adapter','module','utility','shell','fixture','action-entry','test','build-output'].includes(fact.kind);
+    return ['page','api','component','hook','service','database-adapter','module','utility','shell','fixture','test','build-output'].includes(fact.kind);
 }
 
 function architectureLayer(fact){
@@ -5568,11 +5437,11 @@ function architectureLayer(fact){
 function architectureTitle(fact){
     if(fact.displayTitle)return fact.displayTitle;
     if(fact.role==='app-shell')return'App Entry / Shell';
-    if(fact.kind==='shell'||fact.role==='browser-shell')return'Browser App Shell';
+    if(fact.kind==='shell')return'Browser App Shell';
     if(fact.role==='frontend-route')return fact.route==='/'?'/':fact.route;
     if(fact.role==='frontend-component')return inferPageComponentTitle(fact.path,fact.route,fact.content);
     if(fact.role==='platform-analyzer'){
-        var seg=(fact.path.match(/\/(youtube|reddit|twitter|github|tiktok|instagram)\b/i)||[])[1];
+        var seg=(fact.path.match(/\/(?:platforms|a-backend)\/([^/]+)\b/i)||[])[1];
         if(seg)return seg.charAt(0).toUpperCase()+seg.slice(1)+' Analyzer';
         return architectureFileBaseName(fact.path)+' Analyzer';
     }
@@ -5616,14 +5485,14 @@ function aggregateFrontendComponentKey(block){
 
 function getArchitectureAggregateKey(block,profile){
     if(block.isBuildOutput)return null;
-    if(block.role==='app-shell'||block.role==='browser-shell')return'agg:app-shell';
+    if(block.role==='app-shell')return'agg:app-shell';
     if(block.role==='frontend-route'&&block.route)return'agg:route:'+block.route;
     if(block.role==='frontend-component')return aggregateFrontendComponentKey(block);
     if(block.role==='platform-analyzer'){
         var sample=String((block.files&&block.files[0])||'').toLowerCase();
         var seg=sample.match(/\/platforms\/([^/]+)\//);
         if(seg)return'agg:analyzer:'+seg[1];
-        seg=sample.match(/\/(youtube|reddit|twitter|github|tiktok|instagram)\b/);
+        seg=sample.match(/\/(?:platforms|a-backend)\/([^/]+)\b/);
         return'agg:analyzer:'+(seg?seg[1]:block.title).toLowerCase();
     }
     if(block.role==='backend-middleware')return'agg:backend:middleware';
@@ -5816,7 +5685,7 @@ function makeArchitectureBlocks(facts,files,warnings){
         if(fact.isTest||fact.isFixture||fact.isBuildOutput)return true;
         return corePaths.has(fact.path)||visiblePaths.has(fact.path);
     });
-    var priority={shell:0,'action-entry':1,page:2,api:3,'database-adapter':4,service:5,component:6,hook:7,module:8,utility:9,test:10,fixture:11};
+    var priority={shell:0,page:2,api:3,'database-adapter':4,service:5,component:6,hook:7,module:8,utility:9,test:10,fixture:11};
     function blockPriority(kind){
         return priority[kind]!==undefined?priority[kind]:12;
     }
@@ -5930,7 +5799,6 @@ function buildImportBasedDependencies(facts,blocks,files){
 
 function buildSyntheticArchitectureDependencies(blocks,facts){
     var deps=[];
-    var shell=findBlockByRole(blocks,'browser-shell');
     var appShell=findBlockByRole(blocks,'app-shell');
     if(appShell){
         blocks.forEach(function(block){
@@ -5969,7 +5837,7 @@ function buildSyntheticArchitectureDependencies(blocks,facts){
         if(!source)return;
         var targets=[];
         if(testFileReferencesCore(fact.content)){
-            if(shell)targets.push(shell);
+            if(appShell)targets.push(appShell);
         }
         inferTestTargetPaths(fact.path).forEach(function(suffix){
             var target=findBlockByPathEnds(blocks,suffix);
@@ -6057,7 +5925,6 @@ function formatMermaidBlock(block){
     if(block.kind==='shell'||block.group==='App Entry / Shell'){
         if(filePath)label+='<br/>'+escapeMermaidLabel(filePath);
         if((block.files||[]).length>1)label+='<br/>'+((block.files||[]).length)+' shell files';
-        else if(block.role==='browser-shell'||block.group==='Browser App')label+='<br/>React UI + Worker + Visualization';
     }else if(filePath){
         label+='<br/>'+escapeMermaidLabel(filePath);
     }else if(block.route){
@@ -6211,7 +6078,6 @@ function buildArchitectureDiagram(files){
     diagram.mermaid=generateMermaidBlockDiagram(diagram,false,false);
     return diagram;
 }
-
 
 // Patch-only remove-debug-statement suggestions. Produces a unified diff the
 // user downloads and applies with git apply. This code never writes source files.
@@ -9103,7 +8969,6 @@ function isDigit(ch) { return ch >= '0' && ch <= '9'; }
 function isIdentStart(ch) { return /[A-Za-z_$]/.test(ch || '') || (ch && ch.charCodeAt(0) > 127); }
 function isIdentCont(ch) { return /[A-Za-z0-9_$]/.test(ch || '') || (ch && ch.charCodeAt(0) > 127); }
 
-
 function formatSecurityIssueExport(issue, suggestions){
     var row={severity:issue.severity,title:issue.title,description:issue.desc,file:issue.file,path:issue.path,line:issue.line,code:issue.code};
     var patch=suggestions&&suggestions.filePatches&&issue?suggestions.filePatches[issue.path]:'';
@@ -10403,23 +10268,6 @@ function safeSymbolKind(kind){
     return kind==='fn'||kind==='import'||kind==='export'||kind==='var'?kind:'var';
 }
 
-function newLocalSelectionId(){
-    return Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
-}
-
-function localFolderCacheMeta(options){
-    options=options||{};
-    var title=String(options.title||'').trim();
-    var paths=(options.paths||[]).map(function(p){return String(p||'').replace(/\\/g,'/');}).filter(Boolean).slice().sort();
-    if(!title){
-        var raw=String(options.rootPrefix||'').replace(/\\/g,'/');
-        title=(raw.split('/').filter(Boolean)[0]||'').trim();
-    }
-    if(!title)title='Local Folder';
-    var selectionId=String(options.selectionId||'').trim()||newLocalSelectionId();
-    return{sourceKey:title+'|sel:'+selectionId,title:title,selectionId:selectionId};
-}
-
 function projectWatchCacheMeta(status){
     status=status||{};
     var root=String(status.root||'').replace(/\\/g,'/');
@@ -10429,49 +10277,14 @@ function projectWatchCacheMeta(status){
     return{sourceKey:root||'local-project',title:title};
 }
 
-function zipArchiveCacheMeta(options){
-    options=options||{};
-    var title=String(options.name||options.title||'').trim()||'ZIP Archive';
-    var size=Number(options.size);
-    if(!isFinite(size)||size<0)size=0;
-    var modified=Number(options.lastModified);
-    if(!isFinite(modified)||modified<0)modified=0;
-    var paths=(options.paths||[]).map(function(p){return String(p||'').replace(/\\/g,'/');}).filter(Boolean).slice().sort();
-    return{sourceKey:title+'|'+size+'|'+modified+'|'+paths.length+'|'+paths.slice(0,12).join('|'),title:title};
-}
-
-function retainedFolderMatchesRecord(record,retained){
-    if(!record||!record.sourceKey)return true;
-    retained=retained||{};
-    return String(retained.sourceKey||'')===String(record.sourceKey);
-}
-
 function normalizeProjectRoot(root){
     return String(root||'').replace(/\\/g,'/').replace(/\/+$/,'');
 }
 
 function projectRecordMatchesStatus(record,status){
-    if(!record||!record.sourceKey)return true;
+    if(!record||!record.sourceKey)return false;
     if(!status||!status.ok)return false;
     return normalizeProjectRoot(status.root)===normalizeProjectRoot(record.sourceKey);
-}
-
-function zipFileIdentity(zipFile){
-    if(!zipFile)return'';
-    var title=String(zipFile.name||'').trim()||'ZIP Archive';
-    var size=Number(zipFile.size);
-    if(!isFinite(size)||size<0)size=0;
-    var modified=Number(zipFile.lastModified);
-    if(!isFinite(modified)||modified<0)modified=0;
-    return title+'|'+size+'|'+modified;
-}
-
-function retainedZipMatchesRecord(record,retained){
-    if(!record||!record.sourceKey)return true;
-    retained=retained||{};
-    if(retained.sourceKey&&String(retained.sourceKey)===String(record.sourceKey))return true;
-    var identity=String(retained.identity||'');
-    return!!identity&&String(record.sourceKey).indexOf(identity+'|')===0;
 }
 
 function normalizeExcludeKey(patterns){
@@ -10828,13 +10641,8 @@ function pendingProjectWatchDiffPaths(dirty,live,inflight){
     });
 }
 
-function projectWatchAppliesToAnalysis(localSourceKind,projectStatus,analysisSource){
-    if(!projectStatus||!projectStatus.ok)return false;
-    if(localSourceKind==='folder'||localSourceKind==='zip')return false;
-    if(analysisSource&&analysisSource.sourceType&&analysisSource.sourceType!=='local-project')return false;
-    if(localSourceKind&&localSourceKind!=='local-project')return false;
-    if(analysisSource&&analysisSource.sourceType==='local-project')return projectRecordMatchesStatus(analysisSource,projectStatus);
-    return localSourceKind==='local-project';
+function projectWatchAppliesToAnalysis(projectStatus,analysisSource){
+    return !!(analysisSource&&analysisSource.sourceType==='local-project'&&projectStatus&&projectStatus.ok&&projectRecordMatchesStatus(analysisSource,projectStatus));
 }
 
 function readableLabelScale(k){
@@ -11061,9 +10869,6 @@ function shouldSeedOpenedCodeCards(inCode,sessionActive,openedPaths,gateActive){
 
 function codeViewAnalysisRootFolder(data){
     if(!data||!data.files||!data.files.length)return'root';
-    // Folder and ZIP loaders already strip a common archive prefix before
-    // assigning folder. A remaining lone top-level directory (src/, lib/, …)
-    // is nested project structure, not an analysis-root wrapper.
     return'root';
 }
 
@@ -12379,11 +12184,7 @@ function analysisHydrationId(source,data){
 
 function loadedAnalysisSourceIdentity(options){
     options=options||{};
-    if(options.localSourceKind==='folder')return{sourceType:'folder',sourceKey:options.folderKey||'local-folder'};
-    if(options.localSourceKind==='zip')return{sourceType:'zip',sourceKey:options.zipKey||'zip'};
-    if(options.localSourceKind==='local-project')return{sourceType:'local-project',sourceKey:options.projectRoot||'local-project'};
-    if(options.projectOk)return{sourceType:'local-project',sourceKey:options.projectRoot||'local-project'};
-    return null;
+    return options.projectOk&&options.projectRoot?{sourceType:'local-project',sourceKey:options.projectRoot}:null;
 }
 
 function hydrationRequestIsCurrent(hydrationId,currentId){
@@ -13003,7 +12804,7 @@ function annotateHtmlWithSymbols(html,symbols,activeSymbol){
 
 function buildRecentAnalysisRecord(options){
     options=options||{};
-    var sourceType=options.sourceType||'unknown';
+    var sourceType='local-project';
     var sourceKey=options.sourceKey||'untitled';
     return{
         id:analysisCacheKey(sourceType,sourceKey),
@@ -13013,8 +12814,7 @@ function buildRecentAnalysisRecord(options){
         fileCount:options.data&&options.data.files?options.data.files.length:0,
         savedAt:options.savedAt||Date.now(),
         data:options.data||null,
-        repoInfo:options.repoInfo||null,
-        localSourceKind:options.localSourceKind||null
+        projectInfo:options.projectInfo||null,
     };
 }
 
@@ -13164,7 +12964,7 @@ function openAnalysisCacheDb(){
     });
 }
 
-function isLocalAnalysisRecord(record){return !!record&&['local-project','folder','zip'].indexOf(record.sourceType)>=0;}
+function isLocalAnalysisRecord(record){return !!record&&record.sourceType==='local-project';}
 
 function listRecentAnalyses(){
     return openAnalysisCacheDb().then(function(db){
@@ -13223,108 +13023,7 @@ function saveRecentAnalysis(record){
     }).catch(function(){return false;});
 }
 
-function resolveSafeProjectPath(root,relPath){
-    var rootPath=String(root||'').replace(/\\/g,'/').replace(/\/+$/,'');
-    var rel=String(relPath||'').replace(/\\/g,'/');
-    if(!rel||rel.charAt(0)==='/'||rel.indexOf('..')>=0)return null;
-    return rootPath+'/'+rel;
-}
 // ===== CODEFLOW_CANVAS_END =====
-
-function calcPRRisk(prData, repoData) {
-    if (!prData || !repoData) return { score: 0, level: 'low', factors: [] };
-    var score = 0;
-    var factors = [];
-    var changedFiles = prData.files || [];
-    var totalBlast = 0;
-    var hotspots = [];
-    changedFiles.forEach(function(f) {
-        var existing = repoData.files.find(function(df) { return df.path === f.filename; });
-        if (existing) {
-            var blast = calcBlast(f.filename, repoData.connections, repoData.files);
-            totalBlast += blast.count;
-            if (blast.count > 5) hotspots.push({ file: f.filename, blast: blast.count });
-        }
-    });
-    if (totalBlast > 50) { score += 30; factors.push('High blast radius (' + totalBlast + ' files)'); }
-    else if (totalBlast > 20) { score += 15; factors.push('Moderate blast radius'); }
-    if (changedFiles.length > 10) { score += 20; factors.push('Many files changed (' + changedFiles.length + ')'); }
-    else if (changedFiles.length > 5) { score += 10; factors.push('Several files changed'); }
-    var totalChanges = (prData.additions || 0) + (prData.deletions || 0);
-    if (totalChanges > 500) { score += 25; factors.push('Large changeset (' + totalChanges + ' lines)'); }
-    else if (totalChanges > 200) { score += 12; factors.push('Moderate changeset'); }
-    var coreFiles = changedFiles.filter(function(f) { return f.filename.includes('/core/') || f.filename.includes('/utils/') || f.filename.includes('/lib/'); });
-    if (coreFiles.length > 0) { score += 15; factors.push('Core files modified (' + coreFiles.length + ')'); }
-    var configFiles = changedFiles.filter(function(f) { return f.filename.match(/\.(json|yaml|yml|toml|env)$/); });
-    if (configFiles.length > 0) { score += 10; factors.push('Config files changed'); }
-    score = Math.min(100, score);
-    var level = score >= 70 ? 'critical' : score >= 40 ? 'high' : score >= 20 ? 'medium' : 'low';
-    return { score: score, level: level, factors: factors, totalBlast: totalBlast, hotspots: hotspots.sort(function(a,b){ return b.blast - a.blast; }).slice(0, 5) };
-}
-
-function findSuggestedReviewers(prData, repoData) {
-    if (!prData || !repoData) return [];
-    var changedPaths = (prData.files || []).map(function(f) { return f.filename; });
-    var authorCounts = {};
-    repoData.files.forEach(function(f) {
-        if (changedPaths.some(function(p) { return f.folder && p.startsWith(f.folder); })) {
-            var layer = f.layer || 'other';
-            if (!authorCounts[layer]) authorCounts[layer] = { count: 0, files: [] };
-            authorCounts[layer].count++;
-            authorCounts[layer].files.push(f.name);
-        }
-    });
-    var reviewers = [];
-    Object.entries(authorCounts).sort(function(a,b) { return b[1].count - a[1].count; }).slice(0, 3).forEach(function(entry, i) {
-        reviewers.push({ name: entry[0].charAt(0).toUpperCase() + entry[0].slice(1) + ' Expert', reason: 'Knows ' + entry[1].count + ' files in ' + entry[0], avatar: COLORS[i % COLORS.length] });
-    });
-    return reviewers;
-}
-
-function findTestImpact(prData, repoData) {
-    if (!prData || !repoData) return [];
-    var changedFiles = (prData.files || []).map(function(f) { return f.filename; });
-    var testFiles = repoData.files.filter(function(f) { return f.name.match(/\.test\.|\.spec\.|_test\.|test_/i); });
-    var impacted = [];
-    testFiles.forEach(function(tf) {
-        var shouldRun = changedFiles.some(function(cf) {
-            var cfBase = cf.replace(/\.[^.]+$/, '').split('/').pop();
-            return tf.name.toLowerCase().includes(cfBase.toLowerCase());
-        });
-        if (shouldRun) impacted.push({ file: tf.name, path: tf.path });
-    });
-    if (impacted.length === 0 && testFiles.length > 0) {
-        impacted = testFiles.slice(0, 3).map(function(tf) { return { file: tf.name, path: tf.path, suggested: true }; });
-    }
-    return impacted;
-}
-
-function findDependencyChains(prData, repoData) {
-    if (!prData || !repoData) return [];
-    var changedFiles = (prData.files || []).map(function(f) { return f.filename; });
-    var chains = [];
-    changedFiles.slice(0, 3).forEach(function(file) {
-        var chain = [file.split('/').pop()];
-        var visited = new Set([file]);
-        var queue = [file];
-        var depth = 0;
-        while (queue.length > 0 && depth < 3) {
-            var current = queue.shift();
-            repoData.connections.forEach(function(c) {
-                var src = typeof c.source === 'object' ? c.source.id : c.source;
-                var tgt = typeof c.target === 'object' ? c.target.id : c.target;
-                if (tgt === current && !visited.has(src)) {
-                    visited.add(src);
-                    chain.push(src.split('/').pop());
-                    queue.push(src);
-                }
-            });
-            depth++;
-        }
-        if (chain.length > 1) chains.push(chain.slice(0, 5));
-    });
-    return chains;
-}
 
 function Icon(props){
     var name=props.name||'file';
@@ -13385,9 +13084,6 @@ function Icon(props){
         case 'box':
             children=[React.createElement('path',Object.assign({key:'p1',d:'M21 8.5 12 3 3 8.5 12 14z'},common)),React.createElement('path',Object.assign({key:'p2',d:'M3 8.5V16l9 5 9-5V8.5'},common)),React.createElement('path',Object.assign({key:'p3',d:'M12 14v7'},common))];
             break;
-        case 'archive':
-            children=[React.createElement('rect',Object.assign({key:'r1',x:'3',y:'3',width:'18',height:'5',rx:'1'},common)),React.createElement('path',Object.assign({key:'p1',d:'M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8'},common)),React.createElement('path',Object.assign({key:'p2',d:'M10 12h4'},common))];
-            break;
         case 'building':
             children=[React.createElement('path',Object.assign({key:'p1',d:'M4 21h16'},common)),React.createElement('path',Object.assign({key:'p2',d:'M7 21V8l5-5 5 5v13'},common)),React.createElement('path',Object.assign({key:'p3',d:'M9 12h.01M12 12h.01M15 12h.01M9 16h.01M12 16h.01M15 16h.01'},common))];
             break;
@@ -13432,9 +13128,6 @@ function Icon(props){
             break;
         case 'key':
             children=[React.createElement('circle',Object.assign({key:'c1',cx:'8',cy:'15',r:'4'},common)),React.createElement('path',Object.assign({key:'p1',d:'M12 15h9'},common)),React.createElement('path',Object.assign({key:'p2',d:'M18 12v6'},common)),React.createElement('path',Object.assign({key:'p3',d:'M21 13v4'},common))];
-            break;
-        case 'pull-request':
-            children=[React.createElement('circle',Object.assign({key:'c1',cx:'6',cy:'5',r:'2'},common)),React.createElement('circle',Object.assign({key:'c2',cx:'18',cy:'7',r:'2'},common)),React.createElement('circle',Object.assign({key:'c3',cx:'18',cy:'19',r:'2'},common)),React.createElement('path',Object.assign({key:'p1',d:'M8 5h4a4 4 0 0 1 4 4v8'},common)),React.createElement('path',Object.assign({key:'p2',d:'M16 9V7'},common))];
             break;
         case 'export':
             children=[React.createElement('path',Object.assign({key:'p1',d:'M12 3v12'},common)),React.createElement('polyline',Object.assign({key:'p2',points:'8 7 12 3 16 7'},common)),React.createElement('path',Object.assign({key:'p3',d:'M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5'},common))];
@@ -13544,24 +13237,6 @@ function getFilePreviewIconName(filename){
         },extra||{});
     }
 
-function getDialogTone(tone){
-    if(tone==='danger')return{
-        color:'var(--red)',
-        borderColor:'rgba(255,95,95,0.34)',
-        background:'rgba(255,95,95,0.12)'
-    };
-    if(tone==='info')return{
-        color:'var(--blue)',
-        borderColor:'rgba(77,159,255,0.34)',
-        background:'rgba(77,159,255,0.12)'
-    };
-    return{
-        color:'var(--orange)',
-        borderColor:'rgba(255,159,67,0.34)',
-        background:'rgba(255,159,67,0.12)'
-    };
-}
-
 // Error boundary to prevent white screen crashes on large codebases
 class ErrorBoundary extends React.Component{
     constructor(props){super(props);this.state={hasError:false,error:null};}
@@ -13618,7 +13293,6 @@ function HealthRing(props){
 // ---------------------------------------------------------------------------
 // React Application
 // ---------------------------------------------------------------------------
-
 
 // ===== CODEFLOW_GUIDE_START =====
 function guideSafePath(path){
@@ -13772,7 +13446,6 @@ function ArchitectureGuide(props){
 }
 // ===== CODEFLOW_GUIDE_END =====
 
-
 // ===== CODEFLOW_SOURCE_EDITOR_START =====
 function sourceSessionDirty(session){return !!(session&&session.ready&&session.text!==session.original);}
 function sourceSessionsPending(sessions){return Array.from(sessions.values()).some(function(s){return s.saving||sourceSessionDirty(s);});}
@@ -13847,7 +13520,7 @@ function App(){
     var _e=useState(''),progress=_e[0],setProgress=_e[1];
     var _f=useState(null),error=_f[0],setError=_f[1];
     var _g=useState(null),data=_g[0],setData=_g[1];
-    var _h=useState(null),repoInfo=_h[0],setRepoInfo=_h[1];
+    var _h=useState(null),projectInfo=_h[0],setProjectInfo=_h[1];
     var _i=useState('folder'),colorMode=_i[0],setColorMode=_i[1];
     var _j=useState(null),selected=_j[0],setSelected=_j[1];
     var _k=useState(new Set([''])),expandedPaths=_k[0],setExpandedPaths=_k[1];
@@ -13885,12 +13558,7 @@ function App(){
     var _ad=useState(360),rightPanelWidth=_ad[0],setRightPanelWidth=_ad[1];
     var _ae=useState(true),legendCollapsed=_ae[0],setLegendCollapsed=_ae[1];
     var _af=useState(null),filePreview=_af[0],setFilePreview=_af[1];// {path, content, line, filename, loading, error}
-    var _ag=useState(null),localDirHandle=_ag[0],setLocalDirHandle=_ag[1];
-    var _ap=useState(null),localSourceKind=_ap[0],setLocalSourceKind=_ap[1];// null | 'folder' | 'zip'
-    var _ah=useState(false),showExcludeModal=_ah[0],setShowExcludeModal=_ah[1];
-    var _ai=useState(''),excludePatternInput=_ai[0],setExcludePatternInput=_ai[1];
-    var _aj=useState(''),excludePatternDraft=_aj[0],setExcludePatternDraft=_aj[1];
-    var _al=useState(null),confirmDialog=_al[0],setConfirmDialog=_al[1];
+
     var _am=useState(window.innerWidth),viewportWidth=_am[0],setViewportWidth=_am[1];
     var _an=useState(null),mobilePanel=_an[0],setMobilePanel=_an[1];
     var _ao=useState(48),topbarHeight=_ao[0],setTopbarHeight=_ao[1];
@@ -13898,9 +13566,9 @@ function App(){
     var _cachedId=useState(null),cachedFromId=_cachedId[0],setCachedFromId=_cachedId[1];
     var _activeSym=useState(null),activeSymbol=_activeSym[0],setActiveSymbol=_activeSym[1];
     var _pendingDel=useState(null),pendingRecentDelete=_pendingDel[0],setPendingRecentDelete=_pendingDel[1];
-    var _cli=useState(null),projectStatus=_cli[0],setProjectStatus=_cli[1];
-    var _cliDirty=useState([]),projectDirty=_cliDirty[0],setProjectDirty=_cliDirty[1];
-    var _cliLive=useState(Object.create(null)),projectLiveByPath=_cliLive[0],setProjectLiveByPath=_cliLive[1];
+    var _projectStatus=useState(null),projectStatus=_projectStatus[0],setProjectStatus=_projectStatus[1];
+    var _projectDirty=useState([]),projectDirty=_projectDirty[0],setProjectDirty=_projectDirty[1];
+    var _projectLive=useState(Object.create(null)),projectLiveByPath=_projectLive[0],setProjectLiveByPath=_projectLive[1];
     var _editing=useState(new Set()),editingPaths=_editing[0],setEditingPaths=_editing[1];
     var _editRevision=useState(0),setEditRevision=_editRevision[1];
     var sourceSessionsRef=useRef(new Map());
@@ -13990,32 +13658,13 @@ function App(){
     var lineThicknessRef=useRef(lineThickness);
     lineThicknessRef.current=lineThickness;
     var pendingRecentDeleteTimerRef=useRef(null);
-    var zipInputRef=useRef(null);
-    var zipArchiveRef=useRef(null);
-    var zipFileRef=useRef(null);
-    var folderInputRef=useRef(null);
-    var localFilesRef=useRef(null);
-    var localFolderKeyRef=useRef(null);
-    var localFolderSelectionRef=useRef(null);
-    var zipKeyRef=useRef(null);
-    var pendingExcludePatternsRef=useRef(null);
-    var confirmResolverRef=useRef(null);
-    var forceRefreshRef=useRef(false);
+
     var persistTimerRef=useRef(null);
-    var activeExcludePatterns=useMemo(function(){return compileExcludePatterns(excludePatternInput);},[excludePatternInput]);
-    var customExcludeCount=activeExcludePatterns.length;
+    var activeExcludePatterns=useMemo(function(){return compileExcludePatterns((projectStatus&&projectStatus.exclusions||[]).join('\n'));},[projectStatus]);
 
     useEffect(function(){
         document.body.className=theme==='light'?'light':'';
     },[theme]);
-
-    useEffect(function(){
-        var el=folderInputRef.current;
-        if(!el)return;
-        el.setAttribute('webkitdirectory','');
-        el.setAttribute('directory','');
-        el.setAttribute('mozdirectory','');
-    },[]);
 
     useEffect(function(){
         function onResize(){setViewportWidth(window.innerWidth);}
@@ -14058,28 +13707,13 @@ function App(){
 
     useEffect(function(){
         return function(){
-            if(confirmResolverRef.current){
-                confirmResolverRef.current(false);
-                confirmResolverRef.current=null;
-            }
+
             if(pendingRecentDeleteTimerRef.current){
                 clearTimeout(pendingRecentDeleteTimerRef.current);
                 pendingRecentDeleteTimerRef.current=null;
             }
         };
     },[]);
-
-    useEffect(function(){
-        if(!confirmDialog)return;
-        function onKeyDown(e){
-            if(e.key==='Escape'){
-                e.preventDefault();
-                closeConfirmDialog(false);
-            }
-        }
-        document.addEventListener('keydown',onKeyDown);
-        return function(){document.removeEventListener('keydown',onKeyDown);};
-    },[confirmDialog]);
 
     useEffect(function(){
         if(!namedGroupNameDialog)return;
@@ -14116,28 +13750,22 @@ function App(){
     },[]);
 
     function currentAnalysisSource(){
-        if(localSourceKind==='folder')return{sourceType:'folder',sourceKey:(repoInfo&&(repoInfo.folderKey||repoInfo.name))||'local-folder',title:(repoInfo&&repoInfo.name)||'Local Folder',localSourceKind:'folder'};
-        if(localSourceKind==='zip')return{sourceType:'zip',sourceKey:(repoInfo&&(repoInfo.zipKey||repoInfo.name))||'zip',title:(repoInfo&&repoInfo.name)||'ZIP Archive',localSourceKind:'zip'};
-        if(localSourceKind==='local-project')return{sourceType:'local-project',sourceKey:(repoInfo&&repoInfo.projectRoot)||(projectStatus&&projectStatus.root)||'local-project',title:(projectStatus&&projectStatus.name)||(repoInfo&&repoInfo.name)||'Local watch',localSourceKind:'local-project'};
-        if(projectStatus&&projectStatus.ok)return{sourceType:'local-project',sourceKey:projectStatus.root||'local-project',title:projectStatus.name||'Local watch',localSourceKind:'local-project'};
-        return null;
+        if(!projectInfo||!projectStatus||!projectStatus.ok||!projectRecordMatchesStatus({sourceKey:projectInfo.projectRoot},projectStatus))return null;
+        return {sourceType:'local-project',sourceKey:projectInfo.projectRoot,title:projectInfo.name||projectStatus.name||'Local project'};
     }
     var analysisGraphIdentity=useMemo(function(){return analysisGraphKey(data);},[data]);
     var loadedSourceIdentity=useMemo(function(){
         return loadedAnalysisSourceIdentity({
-            localSourceKind:localSourceKind,
-            folderKey:repoInfo&&(repoInfo.folderKey||repoInfo.name),
-            zipKey:repoInfo&&(repoInfo.zipKey||repoInfo.name),
-            projectRoot:(repoInfo&&repoInfo.projectRoot)||(projectStatus&&projectStatus.root),
+            projectRoot:(projectInfo&&projectInfo.projectRoot)||(projectStatus&&projectStatus.root),
             projectOk:!!(projectStatus&&projectStatus.ok)
         });
-    },[localSourceKind,repoInfo,data,projectStatus]);
+    },[projectInfo,data,projectStatus]);
     var currentHydrationId=useMemo(function(){
         return analysisHydrationIdFromParts(loadedSourceIdentity,analysisGraphIdentity);
     },[loadedSourceIdentity,analysisGraphIdentity]);
     analysisHydrationIdRef.current=currentHydrationId;
-    var guideScopeValid=localSourceKind!=='local-project'||!!(repoInfo&&repoInfo.projectRoot&&projectStatus&&projectStatus.ok&&projectRecordMatchesStatus({sourceKey:repoInfo.projectRoot},projectStatus));
-    var guideIndex=useMemo(function(){return buildGuideIndex(guideScopeValid?data:null,activeExcludePatterns.concat(compileExcludePatterns((projectStatus&&projectStatus.exclusions||[]).join('\n'))));},[data&&data.architectureInsights,data&&data.connections,activeExcludePatterns,projectStatus,guideScopeValid]);
+    var guideScopeValid=!!(projectInfo&&projectInfo.projectRoot&&projectStatus&&projectStatus.ok&&projectRecordMatchesStatus({sourceKey:projectInfo.projectRoot},projectStatus));
+    var guideIndex=useMemo(function(){return buildGuideIndex(guideScopeValid?data:null,activeExcludePatterns);},[data&&data.architectureInsights,data&&data.connections,activeExcludePatterns,projectStatus,guideScopeValid]);
     var guideRevisionRef=useRef({insights:null,revision:0});
     if(guideRevisionRef.current.insights!==(data&&data.architectureInsights))guideRevisionRef.current={insights:data&&data.architectureInsights,revision:guideRevisionRef.current.revision+1};
     // Always resolve the selected path against this analysis, never a retained file object.
@@ -14174,7 +13802,7 @@ function App(){
         return function(){window.removeEventListener('beforeunload',beforeUnload);if(window.codeflowBeforeProjectChange===beforeProjectChange)delete window.codeflowBeforeProjectChange;};
     },[]);
     function beginSourceEdit(path){
-        if(localSourceKind!=='local-project'||!guideScopeValid||!guideIndex.files.has(path)||!projectStatus||!projectStatus.pid)return;
+        if(!guideScopeValid||!guideIndex.files.has(path)||!projectStatus||!projectStatus.pid)return;
         if(!selectFile(path))return;
         setEditingPaths(function(prev){var next=new Set(prev);next.add(path);return next;});
     }
@@ -14214,8 +13842,7 @@ function App(){
             sourceKey:source.sourceKey,
             title:source.title,
             data:compactAnalysisForCache(dataObj),
-            repoInfo:source.repoInfo||repoInfo,
-            localSourceKind:source.localSourceKind
+            projectInfo:source.projectInfo||projectInfo,
         });
         if(persistTimerRef.current)clearTimeout(persistTimerRef.current);
         persistTimerRef.current=setTimeout(function(){
@@ -14224,40 +13851,15 @@ function App(){
     }
 
     function applyCachedAnalysis(record){
-        if(!isLocalAnalysisRecord(record)||!record.data||!discardSourceEdits())return;
+        if(!isLocalAnalysisRecord(record)||!record.data||!projectRecordMatchesStatus(record,projectStatus)||!cachedAnalysisMatchesExcludes(record,projectStatus.exclusions||[])){
+            showNotification('Select this registered project before opening its cached analysis.','warning');return;
+        }
+        if(!discardSourceEdits())return;
         analysisRunRef.current++;
-        setData(compactAnalysisForCache(record.data));
-        setExpandedPaths(new Set(['']));
-        setSelected(null);
-        setBlastRadius(null);
-        setFolderFilter(null);
-        setCachedFromId(record.id);
-        setActiveSymbol(null);
-        setProjectDirty([]);
-        clearProjectLiveDiffs();
-        if(record.repoInfo)setRepoInfo(record.repoInfo);
-        var folderMatches=record.sourceType==='folder'&&retainedFolderMatchesRecord(record,{sourceKey:localFolderKeyRef.current});
-        var zipMatches=record.sourceType==='zip'&&retainedZipMatchesRecord(record,{
-            sourceKey:zipKeyRef.current,
-            identity:zipFileIdentity(zipFileRef.current)
-        });
-        if(!folderMatches){
-            setLocalDirHandle(null);
-            localFolderKeyRef.current=null;
-            localFolderSelectionRef.current=null;
-            localFilesRef.current=null;
-        }
-        if(!zipMatches){
-            zipArchiveRef.current=null;
-            zipFileRef.current=null;
-            zipKeyRef.current=null;
-        }
-        if(record.sourceType==='local-project'){
-            setLocalSourceKind('local-project');
-            setLocalDirHandle(null);
-        }else{
-            setLocalSourceKind(record.localSourceKind||record.sourceType);
-        }
+        setData(compactAnalysisForCache(record.data));setExpandedPaths(new Set(['']));
+        setSelected(null);setBlastRadius(null);setFolderFilter(null);setCachedFromId(record.id);setActiveSymbol(null);
+        setProjectDirty([]);clearProjectLiveDiffs();
+        setProjectInfo({name:record.title,projectRoot:record.sourceKey});
         setGraphConfig(function(cfg){return Object.assign({},cfg,{vizType:normalizeVizType(cfg.vizType)});});
         showNotification('Loaded cached analysis. Re-analyze to refresh.','success');
     }
@@ -14318,7 +13920,7 @@ function App(){
     }
 
     function flushProjectWatchDiffs(paths){
-        if(!projectWatchAppliesToAnalysis(localSourceKind,projectStatus,currentAnalysisSource()))return;
+        if(!projectWatchAppliesToAnalysis(projectStatus,currentAnalysisSource()))return;
         var wanted=projectWatchDiffPaths(dataRef.current&&dataRef.current.files,paths);
         if(!wanted.length)return;
         wanted.forEach(function(path){
@@ -14344,7 +13946,7 @@ function App(){
         var next=normalizeProjectWatchPath(path);
         if(!next)return;
         if(projectAnalyzingRef.current)projectWatchDuringRef.current=noteProjectWatchDuringEvent(projectWatchDuringRef.current,next,rev);
-        if(!projectWatchAppliesToAnalysis(localSourceKind,projectStatus,currentAnalysisSource()))return;
+        if(!projectWatchAppliesToAnalysis(projectStatus,currentAnalysisSource()))return;
         setProjectDirty(function(prev){return noteProjectWatchPath(prev,next);});
         projectDiffPendingRef.current=noteProjectWatchPath(projectDiffPendingRef.current,next);
         if(projectDiffTimerRef.current)clearTimeout(projectDiffTimerRef.current);
@@ -14376,13 +13978,13 @@ function App(){
     }
 
     useEffect(function(){
-        if(!projectWatchAppliesToAnalysis(localSourceKind,projectStatus,currentAnalysisSource()))return;
+        if(!projectWatchAppliesToAnalysis(projectStatus,currentAnalysisSource()))return;
         if(!data||!data.files||!projectDirty.length)return;
         var started=startedProjectWatchDiffPaths(projectDiffPendingRef.current,projectDiffGenRef.current);
         var missing=pendingProjectWatchDiffPaths(projectDirty,projectLiveByPath,started);
         if(!missing.length)return;
         flushProjectWatchDiffs(missing);
-    },[currentHydrationId,projectDirty,localSourceKind,projectStatus,projectLiveByPath]);
+    },[currentHydrationId,projectDirty,projectStatus,projectLiveByPath]);
 
     async function analyzeLocalProject(force,statusHint,wantedRoot){
         if(!discardSourceEdits())return false;
@@ -14406,19 +14008,14 @@ function App(){
         // Per-project server-side exclusions participate in the analysis cache key,
         // so changing a project's excluded folders invalidates its cached analysis.
         var serverExcludes=(status&&Array.isArray(status.exclusions))?status.exclusions:[];
+        var runExcludePatterns=compileExcludePatterns(serverExcludes.join('\n'));
         projectWatchDuringRef.current=[];
         projectWatchReadRef.current=Object.create(null);
         projectWatchSnapRevRef.current=Object.create(null);
         projectAnalyzingRef.current=true;
         if(!resetAnalysisState())return false;
         var analysisRun=analysisRunRef.current;
-        setLocalDirHandle(null);
-        localFolderKeyRef.current=null;
-        localFolderSelectionRef.current=null;
-        setLocalSourceKind('local-project');
-        zipArchiveRef.current=null;
-        zipFileRef.current=null;
-        zipKeyRef.current=null;
+
         setLoading(true);
         setProgress('Reading local folder from local server...');
         try{
@@ -14429,8 +14026,8 @@ function App(){
             if(!listRes.ok)throw new Error('Could not read the selected project’s files.');
             var list=await listRes.json();
             if(analysisRun!==analysisRunRef.current)return false;
-            var files=filterAnalyzableLocalFiles(list&&list.files?list.files:[],activeExcludePatterns);
-            if(!files.length)throw new Error(activeExcludePatterns.length?'No supported source files found in the selected project after applying exclude patterns.':'No supported source files found in the selected project.');
+            var files=filterAnalyzableLocalFiles(list&&list.files?list.files:[],runExcludePatterns);
+            if(!files.length)throw new Error(runExcludePatterns.length?'No supported source files found in the selected project after applying exclude patterns.':'No supported source files found in the selected project.');
             var analyzed=[];
             var allFns=[];
             for(var i=0;i<files.length;i++){
@@ -14467,7 +14064,7 @@ function App(){
             var dataObj=await runAnalysisData({
                 analyzed:analyzed,
                 allFns:allFns,
-                excludePatterns:activeExcludePatterns.map(function(x){return x.raw;}).concat(serverExcludes),
+                excludePatterns:serverExcludes,
                 progress:setProgress,
                 yieldFn:yieldToBrowser
             });
@@ -14480,11 +14077,11 @@ function App(){
             projectWatchSnapRevRef.current=Object.create(null);
             setData(dataObj);
             setExpandedPaths(new Set(['']));
-            setRepoInfo(projectInfo);
+            setProjectInfo(projectInfo);
             setCachedFromId(null);
             setProjectDirty(keep);
             clearProjectLiveDiffs();
-            persistCurrentAnalysis(dataObj,{sourceType:'local-project',sourceKey:projectMeta.sourceKey,title:projectMeta.title,repoInfo:projectInfo,localSourceKind:'local-project'});
+            persistCurrentAnalysis(dataObj,{sourceType:'local-project',sourceKey:projectMeta.sourceKey,title:projectMeta.title,projectInfo:projectInfo});
             setLoading(false);
             return true;
         }catch(err){
@@ -14516,526 +14113,17 @@ function App(){
         return true;
     }
 
-    function openExcludeModal(){
-        setExcludePatternDraft(excludePatternInput);
-        setShowExcludeModal(true);
-    }
-
-    function closeExcludeModal(){
-        setShowExcludeModal(false);
-    }
-
-    function saveExcludePatterns(){
-        setExcludePatternInput(excludePatternDraft);
-        setShowExcludeModal(false);
-    }
-
-    function closeConfirmDialog(result){
-        setConfirmDialog(null);
-        if(confirmResolverRef.current){
-            var resolve=confirmResolverRef.current;
-            confirmResolverRef.current=null;
-            resolve(!!result);
-        }
-    }
-
-    function requestConfirm(options){
-        return new Promise(function(resolve){
-            if(confirmResolverRef.current){
-                confirmResolverRef.current(false);
-            }
-            confirmResolverRef.current=resolve;
-            setConfirmDialog(Object.assign({
-                tone:'warning',
-                icon:'warning',
-                title:'Please confirm',
-                message:'',
-                confirmLabel:'Continue',
-                cancelLabel:'Cancel'
-            },options||{}));
-        });
-    }
-
     function toggleMobilePanel(panel){
         setMobilePanel(function(prev){return prev===panel?null:panel;});
     }
 
-    function launchLocalFolderPicker(compiledPatterns){
-        pendingExcludePatternsRef.current=compiledPatterns||activeExcludePatterns;
-        if(!window.showDirectoryPicker){
-            if(folderInputRef.current){
-                folderInputRef.current.value='';
-                folderInputRef.current.click();
-            }
-            return;
-        }
-        window.showDirectoryPicker().then(function(dirHandle){
-            if(!resetAnalysisState())return false;
-            setRepoInfo(null);
-            localFolderKeyRef.current=null;
-            localFolderSelectionRef.current=newLocalSelectionId();
-            setLocalDirHandle(dirHandle);
-            setLocalSourceKind('folder');
-            zipArchiveRef.current=null;
-            zipFileRef.current=null;
-            setLoading(true);
-            setProgress('Reading local folder...');
-            readLocalFolder(dirHandle,compiledPatterns||activeExcludePatterns);
-        }).catch(function(e){
-            if(e.name!=='AbortError'){
-                setError('Failed to open folder: '+(e.message||e));
-            }
-        });
-    }
-
-    function openLocalFolder(){
-        launchLocalFolderPicker();
-    }
-
-    function openLocalZip(){
-        if(!window.JSZip){
-            setError('ZIP support failed to load. Check your network connection and try again.');
-            return;
-        }
-        if(zipInputRef.current){
-            zipInputRef.current.value='';
-            zipInputRef.current.click();
-        }
-    }
-
-    function handleZipSelected(e){
-        var file=e.target.files&&e.target.files[0];
-        if(!file)return;
-        if(!resetAnalysisState())return false;
-        setRepoInfo(null);
-        setLocalDirHandle(null);
-        setLocalSourceKind('zip');
-        zipArchiveRef.current=null;
-        zipFileRef.current=file;
-        zipKeyRef.current=null;
-        setLoading(true);
-        setProgress('Reading ZIP archive...');
-        readZipArchive(file,activeExcludePatterns);
-    }
-
-    function handleFolderSelected(e){
-        var fileList=e.target.files;
-        if(!fileList||fileList.length===0)return;
-        var files=Array.from(fileList);
-        localFilesRef.current=files;
-        if(!resetAnalysisState())return false;
-        setRepoInfo(null);
-        localFolderKeyRef.current=null;
-        localFolderSelectionRef.current=newLocalSelectionId();
-        setLocalDirHandle(null);
-        setLocalSourceKind('folder');
-        zipArchiveRef.current=null;
-        zipFileRef.current=null;
-        setLoading(true);
-        setProgress('Reading local folder...');
-        readLocalFolderFromFiles(files,pendingExcludePatternsRef.current||activeExcludePatterns);
-    }
-
     function refreshAnalysis(record){
         var source=record&&record.sourceType?record:null;
-        var kind=source?source.sourceType:localSourceKind;
+        if(source&&(!isLocalAnalysisRecord(source)||!projectRecordMatchesStatus(source,projectStatus))){
+            showNotification('Select this registered project before re-analyzing.','warning');return;
+        }
         setCachedFromId(null);
-        if(kind==='local-project'||(!source&&projectStatus&&projectStatus.ok&&localSourceKind==='local-project')){
-            var wantedRoot=source&&source.sourceType==='local-project'?source.sourceKey:'';
-            if(wantedRoot&&projectStatus&&projectStatus.ok&&!projectRecordMatchesStatus(source,projectStatus)){
-                applyCachedAnalysis(source);
-                showNotification('That project is no longer the selected project. Pick it again in the Project dropdown to re-analyze.','warning');
-                return;
-            }
-            Promise.resolve(analyzeLocalProject(true,projectStatus,wantedRoot||null)).then(function(ok){
-                if(ok===false&&source)applyCachedAnalysis(source);
-            });
-            return;
-        }
-        if(kind==='folder'){
-            var retained={sourceKey:localFolderKeyRef.current};
-            var handleMatches=!source||retainedFolderMatchesRecord(source,retained);
-            if(localDirHandle&&handleMatches){
-                if(!resetAnalysisState())return false;
-                setLoading(true);
-                setProgress('Reading local folder...');
-                readLocalFolder(localDirHandle,activeExcludePatterns);
-                return;
-            }
-            if(localFilesRef.current&&handleMatches){
-                if(!resetAnalysisState())return false;
-                setLoading(true);
-                setProgress('Reading local folder...');
-                readLocalFolderFromFiles(localFilesRef.current,activeExcludePatterns);
-                return;
-            }
-            if(source)applyCachedAnalysis(source);
-            showNotification('Open Folder again to re-analyze this local tree.','warning');
-            return;
-        }
-        if(kind==='zip'){
-            var zipMatches=!source||retainedZipMatchesRecord(source,{
-                sourceKey:zipKeyRef.current,
-                identity:zipFileIdentity(zipFileRef.current)
-            });
-            if(!zipFileRef.current||!zipMatches){
-                if(source)applyCachedAnalysis(source);
-                showNotification('Open ZIP again to re-analyze this archive.','warning');
-                return;
-            }
-            if(!resetAnalysisState())return false;
-            setLocalDirHandle(null);
-            setLocalSourceKind('zip');
-            zipArchiveRef.current=null;
-            setLoading(true);
-            setProgress('Reading ZIP archive...');
-            readZipArchive(zipFileRef.current,activeExcludePatterns);
-            return;
-        }
-    }
-
-    async function readLocalFolder(dirHandle, compiledPatterns, path=''){
-        var files=[];
-        var SOFT_LIMIT=ANALYSIS_LIMITS.localSoft;
-        var fileCount=0;
-        setProgress('Loading language parsers...');
-        await Parser.initTreeSitter().catch(function(){return null;});
-        setProgress('Scanning local folder...');
-
-        async function readDirectory(handle, currentPath){
-            for await (const entry of handle.values()){
-                var entryPath=currentPath?currentPath+'/'+entry.name:entry.name;
-                if(entry.kind==='directory'){
-                    if(!shouldIgnoreDirectory(entryPath,entry.name,compiledPatterns)){
-                        await readDirectory(entry,entryPath);
-                    }
-                }else if(entry.kind==='file'){
-                    var name=entry.name;
-                    if(shouldExcludeFile(entryPath,name,compiledPatterns))continue;
-                    var folder=currentPath||'root';
-                    fileCount++;
-                    files.push({path:entryPath,name:name,folder:folder,size:0,isCode:Parser.isCode(name),handle:entry});
-                    if(fileCount%50===0){
-                        setProgress('Scanning files... '+fileCount+' found');
-                    }
-                }
-            }
-        }
-
-        await readDirectory(dirHandle,'');
-        
-        if(fileCount>SOFT_LIMIT){
-            var proceed=await requestConfirm({
-                tone:'warning',
-                icon:'folder',
-                title:'Analyze '+fileCount+' files?',
-                message:
-                    'This folder has '+fileCount+' analyzable files.\n\n'+
-                    'CodeFlow will analyze every eligible file. Large folders can take minutes and use significant browser memory.\n\n'+
-                    'Continue with all '+fileCount+' files?',
-                confirmLabel:'Analyze all files'
-            });
-            if(!proceed){setLoading(false);return;}
-        }
-        var max=files.length;
-        var analyzed=[];
-        var allFns=[];
-
-        async function processFile(i){
-            if(i>=max){await finishAnalysis();return;}
-            var f=files[i];
-            // Yield to browser every 50 files to keep UI responsive
-            if(i>0&&i%50===0)await yieldToBrowser();
-            setProgress('Analyzing '+(i+1)+'/'+max+': '+f.name);
-            var isCodeFile=f.isCode!==false&&Parser.isCode(f.name);
-            
-            try{
-                var fileHandle=f.handle;
-                if(isCodeFile){
-                    var fileObj=await fileHandle.getFile();
-                    if(Parser.isOversized(fileObj.size)){
-                        analyzed.push(makeOversizedAnalysisFile(f,fileObj.size,isCodeFile));
-                        processFile(i+1);
-                        return;
-                    }
-                    var content=await fileObj.text();
-                    var layer=Parser.detectLayer(f.path);
-                    var actualIsCode=!Parser.isScriptContainer(f.path)||Parser.hasEmbeddedCode(content,f.path);
-                    var fns=actualIsCode?Parser.extract(content,f.path):[];
-                    analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content,functions:fns,lines:content.split('\n').length,layer:layer,churn:0,isCode:actualIsCode});
-                    if(actualIsCode){
-                        fns.forEach(function(fn){allFns.push(Object.assign({},fn,{folder:f.folder,layer:layer}));});
-                    }
-                    processFile(i+1);
-                }else{
-                    var fileObj=await fileHandle.getFile();
-                    if(Parser.isOversized(fileObj.size)){
-                        analyzed.push(makeOversizedAnalysisFile(f,fileObj.size,isCodeFile));
-                        processFile(i+1);
-                        return;
-                    }
-                    var content=await fileObj.text();
-                    var layer=Parser.detectLayer(f.path);
-                    var lines=content?content.split('\n').length:0;
-                    analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content||'',functions:[],lines:lines,layer:layer,churn:0,isCode:false});
-                    processFile(i+1);
-                }
-            }catch(e){
-                analyzed.push({path:f.path,name:f.name,folder:f.folder,content:'',functions:[],lines:0,layer:Parser.detectLayer(f.path),churn:0,isCode:false});
-                processFile(i+1);
-            }
-        }
-
-        async function finishAnalysis(){
-            try{
-                var dataObj=await runAnalysisData({
-                    analyzed:analyzed,
-                    allFns:allFns,
-                    excludePatterns:(compiledPatterns||[]).map(function(x){return x.raw;}),
-                    progress:setProgress,
-                    yieldFn:yieldToBrowser
-                });
-                if(!localFolderSelectionRef.current)localFolderSelectionRef.current=newLocalSelectionId();
-                var folderMeta=localFolderCacheMeta({title:dirHandle&&dirHandle.name,paths:analyzed.map(function(af){return af.path;}),selectionId:localFolderSelectionRef.current});
-                var folderInfo={name:folderMeta.title,folderKey:folderMeta.sourceKey,folderSelectionId:folderMeta.selectionId};
-                localFolderKeyRef.current=folderMeta.sourceKey;
-                setData(dataObj);
-                setExpandedPaths(new Set(['']));
-                setRepoInfo(folderInfo);
-                setCachedFromId(null);
-                persistCurrentAnalysis(dataObj,{sourceType:'folder',sourceKey:folderMeta.sourceKey,title:folderMeta.title,repoInfo:folderInfo,localSourceKind:'folder'});
-                setLoading(false);
-            }catch(err){
-                setError('Analysis failed: '+(err.message||err)+'. Try a smaller folder or subfolder.');
-                setLoading(false);
-            }
-        }
-
-        if(files.length===0){
-            setError((compiledPatterns&&compiledPatterns.length)?'No code files found in the selected folder after applying exclude patterns':'No code files found in the selected folder');
-            setLoading(false);
-            return;
-        }
-
-        processFile(0);
-    }
-
-    async function readLocalFolderFromFiles(fileObjs,compiledPatterns){
-        var patterns=compiledPatterns||activeExcludePatterns;
-        var SOFT_LIMIT=ANALYSIS_LIMITS.localSoft;
-        try{
-            setProgress('Loading language parsers...');
-            await Parser.initTreeSitter().catch(function(){return null;});
-            setProgress('Scanning local folder...');
-            var rawPaths=fileObjs.map(function(f){return f.webkitRelativePath||f.name;});
-            var rootPrefix=getArchiveRootPrefix(rawPaths);
-            var files=[];
-            var fileCount=0;
-            var dirCache=new Map();
-
-            fileObjs.forEach(function(fileObj){
-                var rawPath=normalizeExcludePath(fileObj.webkitRelativePath||fileObj.name);
-                if(!rawPath||rawPath.endsWith('/'))return;
-                var entryPath=rootPrefix&&rawPath.indexOf(rootPrefix)===0?rawPath.slice(rootPrefix.length):rawPath;
-                entryPath=normalizeExcludePath(entryPath);
-                if(!entryPath||shouldSkipArchivePath(entryPath,patterns,dirCache))return;
-                var parts=entryPath.split('/').filter(Boolean);
-                var name=parts[parts.length-1]||'';
-                if(!name||name==='.DS_Store'||shouldExcludeFile(entryPath,name,patterns))return;
-                var folder=parts.length>1?parts.slice(0,-1).join('/'):'root';
-                fileCount++;
-                files.push({path:entryPath,name:name,folder:folder,size:fileObj.size||0,isCode:Parser.isCode(name),file:fileObj});
-                if(fileCount%50===0){
-                    setProgress('Scanning files... '+fileCount+' found');
-                }
-            });
-
-            if(fileCount===0){
-                setError(patterns&&patterns.length?'No code files found in the selected folder after applying exclude patterns':'No code files found in the selected folder');
-                setLoading(false);
-                return;
-            }
-
-            if(fileCount>SOFT_LIMIT){
-                var proceed=await requestConfirm({
-                    tone:'warning',
-                    icon:'folder',
-                    title:'Analyze '+fileCount+' files?',
-                    message:
-                        'This folder has '+fileCount+' analyzable files.\n\n'+
-                        'CodeFlow will analyze every eligible file. Large folders can take minutes and use significant browser memory.\n\n'+
-                        'Continue with all '+fileCount+' files?',
-                    confirmLabel:'Analyze all files'
-                });
-                if(!proceed){setLoading(false);return;}
-            }
-
-            var max=files.length;
-            var analyzed=[];
-            var allFns=[];
-            for(var i=0;i<max;i++){
-                var f=files[i];
-                if(i>0&&i%50===0)await yieldToBrowser();
-                setProgress('Analyzing '+(i+1)+'/'+max+': '+f.name);
-                var isCodeFile=f.isCode!==false&&Parser.isCode(f.name);
-                try{
-                    if(Parser.isOversized(f.size)){
-                        analyzed.push(makeOversizedAnalysisFile(f,f.size,isCodeFile));
-                        continue;
-                    }
-                    var content=await f.file.text();
-                    var layer=Parser.detectLayer(f.path);
-                    if(isCodeFile){
-                        var actualIsCode=!Parser.isScriptContainer(f.path)||Parser.hasEmbeddedCode(content,f.path);
-                        var fns=actualIsCode?Parser.extract(content,f.path):[];
-                        analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content,functions:fns,lines:content.split('\n').length,layer:layer,churn:0,isCode:actualIsCode});
-                        if(actualIsCode){
-                            fns.forEach(function(fn){allFns.push(Object.assign({},fn,{folder:f.folder,layer:layer}));});
-                        }
-                    }else{
-                        analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content||'',functions:[],lines:content?content.split('\n').length:0,layer:layer,churn:0,isCode:false});
-                    }
-                }catch(e){
-                    analyzed.push({path:f.path,name:f.name,folder:f.folder,content:'',functions:[],lines:0,layer:Parser.detectLayer(f.path),churn:0,isCode:false});
-                }
-            }
-
-            var dataObj=await runAnalysisData({
-                analyzed:analyzed,
-                allFns:allFns,
-                excludePatterns:(patterns||[]).map(function(x){return x.raw;}),
-                progress:setProgress,
-                yieldFn:yieldToBrowser
-            });
-            if(!localFolderSelectionRef.current)localFolderSelectionRef.current=newLocalSelectionId();
-            var folderMeta=localFolderCacheMeta({title:'',rootPrefix:rootPrefix,paths:analyzed.map(function(af){return af.path;}),selectionId:localFolderSelectionRef.current});
-            var folderInfo={name:folderMeta.title,folderKey:folderMeta.sourceKey,folderSelectionId:folderMeta.selectionId};
-            localFolderKeyRef.current=folderMeta.sourceKey;
-            setData(dataObj);
-            setExpandedPaths(new Set(['']));
-            setRepoInfo(folderInfo);
-            setCachedFromId(null);
-            persistCurrentAnalysis(dataObj,{sourceType:'folder',sourceKey:folderMeta.sourceKey,title:folderMeta.title,repoInfo:folderInfo,localSourceKind:'folder'});
-            setLoading(false);
-        }catch(err){
-            setError('Analysis failed: '+(err.message||err)+'. Try a smaller folder or subfolder.');
-            setLoading(false);
-        }
-    }
-
-    async function readZipArchive(zipFile,compiledPatterns){
-        var patterns=compiledPatterns||activeExcludePatterns;
-        var SOFT_LIMIT=ANALYSIS_LIMITS.localSoft;
-        try{
-            if(!window.JSZip)throw new Error('ZIP support failed to load');
-            setProgress('Loading language parsers...');
-            await Parser.initTreeSitter().catch(function(){return null;});
-            setProgress('Reading ZIP archive...');
-            var zip=await JSZip.loadAsync(zipFile);
-            var rawEntries=Object.keys(zip.files).sort().map(function(name){return zip.files[name];}).filter(function(entry){return entry&&!entry.dir;});
-            var rootPrefix=getArchiveRootPrefix(rawEntries.map(function(entry){return entry.name;}));
-            var files=[];
-            var entriesByPath=Object.create(null);
-            var fileCount=0;
-            var dirCache=new Map();
-
-            rawEntries.forEach(function(entry){
-                var rawPath=normalizeExcludePath(entry.name);
-                if(!rawPath||rawPath.endsWith('/'))return;
-                var entryPath=rootPrefix&&rawPath.indexOf(rootPrefix)===0?rawPath.slice(rootPrefix.length):rawPath;
-                entryPath=normalizeExcludePath(entryPath);
-                if(!entryPath||shouldSkipArchivePath(entryPath,patterns,dirCache))return;
-                var parts=entryPath.split('/').filter(Boolean);
-                var name=parts[parts.length-1]||'';
-                if(!name||name==='.DS_Store'||shouldExcludeFile(entryPath,name,patterns))return;
-                var folder=parts.length>1?parts.slice(0,-1).join('/'):'root';
-                fileCount++;
-                files.push({path:entryPath,name:name,folder:folder,size:entry._data&&entry._data.uncompressedSize?entry._data.uncompressedSize:0,isCode:Parser.isCode(name),entry:entry});
-                entriesByPath[entryPath]=entry;
-            });
-
-            if(fileCount===0){
-                setError(patterns&&patterns.length?'No code files found in the ZIP archive after applying exclude patterns':'No code files found in the ZIP archive');
-                setLoading(false);
-                return;
-            }
-
-            if(fileCount>SOFT_LIMIT){
-                var proceed=await requestConfirm({
-                    tone:'warning',
-                    icon:'archive',
-                    title:'Analyze '+fileCount+' files?',
-                    message:
-                        'This ZIP archive has '+fileCount+' analyzable files.\n\n'+
-                        'CodeFlow will analyze every eligible file. Large archives can take minutes and use significant browser memory.\n\n'+
-                        'Continue with all '+fileCount+' files?',
-                    confirmLabel:'Analyze all files'
-                });
-                if(!proceed){setLocalSourceKind(null);zipFileRef.current=null;setLoading(false);return;}
-            }
-
-            zipArchiveRef.current={zip:zip,entriesByPath:entriesByPath,name:zipFile.name};
-            zipFileRef.current=zipFile;
-            setLocalDirHandle(null);
-            setLocalSourceKind('zip');
-
-            var max=files.length;
-            var analyzed=[];
-            var allFns=[];
-            for(var i=0;i<max;i++){
-                var f=files[i];
-                if(i>0&&i%50===0)await yieldToBrowser();
-                setProgress('Analyzing '+(i+1)+'/'+max+': '+f.name);
-                var isCodeFile=f.isCode!==false&&Parser.isCode(f.name);
-                try{
-                    if(Parser.isOversized(f.size)){
-                        analyzed.push(makeOversizedAnalysisFile(f,f.size,isCodeFile));
-                        continue;
-                    }
-                    var content=await f.entry.async('string');
-                    var layer=Parser.detectLayer(f.path);
-                    if(isCodeFile){
-                        var actualIsCode=!Parser.isScriptContainer(f.path)||Parser.hasEmbeddedCode(content,f.path);
-                        var fns=actualIsCode?Parser.extract(content,f.path):[];
-                        analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content,functions:fns,lines:content.split('\n').length,layer:layer,churn:0,isCode:actualIsCode});
-                        if(actualIsCode){
-                            fns.forEach(function(fn){allFns.push(Object.assign({},fn,{folder:f.folder,layer:layer}));});
-                        }
-                    }else{
-                        analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content||'',functions:[],lines:content?content.split('\n').length:0,layer:layer,churn:0,isCode:false});
-                    }
-                }catch(e){
-                    analyzed.push({path:f.path,name:f.name,folder:f.folder,content:'',functions:[],lines:0,layer:Parser.detectLayer(f.path),churn:0,isCode:false});
-                }
-            }
-
-            var dataObj=await runAnalysisData({
-                analyzed:analyzed,
-                allFns:allFns,
-                excludePatterns:(patterns||[]).map(function(x){return x.raw;}),
-                progress:setProgress,
-                yieldFn:yieldToBrowser
-            });
-            var zipMeta=zipArchiveCacheMeta({
-                name:zipFile.name,
-                size:zipFile.size,
-                lastModified:zipFile.lastModified,
-                paths:analyzed.map(function(af){return af.path;})
-            });
-            var zipInfo={name:zipMeta.title,zipKey:zipMeta.sourceKey};
-            zipKeyRef.current=zipMeta.sourceKey;
-            setData(dataObj);
-            setExpandedPaths(new Set(['']));
-            setRepoInfo(zipInfo);
-            setCachedFromId(null);
-            persistCurrentAnalysis(dataObj,{sourceType:'zip',sourceKey:zipMeta.sourceKey,title:zipMeta.title,repoInfo:zipInfo,localSourceKind:'zip'});
-            setLoading(false);
-        }catch(err){
-            setLocalSourceKind(null);
-            zipArchiveRef.current=null;
-            setError('Failed to analyze ZIP archive: '+(err.message||err));
-            setLoading(false);
-        }
+        return analyzeLocalProject(true,projectStatus,source?source.sourceKey:null);
     }
 
     var selectFile=useCallback(function(path,alreadyAllowed){
@@ -15059,7 +14147,7 @@ function App(){
             return true;
         }
         return false;
-    },[data,guideIndex,repoInfo,localSourceKind,isMobile,graphConfig.vizType]);
+    },[data,guideIndex,projectInfo,isMobile,graphConfig.vizType]);
     selectFileRef.current=selectFile;
     function openCodeFile(path,replace){
         if(!guideIndex.files.has(path)||!allowSourceNavigation(path))return;
@@ -15157,40 +14245,7 @@ function App(){
         return result;
     }
 
-    function folderSourceIsLive(){
-        var currentSource=currentAnalysisSource();
-        return !!(localSourceKind==='folder'&&localDirHandle&&(!currentSource||currentSource.sourceType!=='folder'||retainedFolderMatchesRecord(currentSource,{sourceKey:localFolderKeyRef.current})));
-    }
-
-    function zipSourceIsLive(){
-        var currentSource=currentAnalysisSource();
-        return !!(localSourceKind==='zip'&&zipFileRef.current&&(!currentSource||currentSource.sourceType!=='zip'||retainedZipMatchesRecord(currentSource,{sourceKey:zipKeyRef.current,identity:zipFileIdentity(zipFileRef.current)})));
-    }
-
-    function liveSourceKindForRead(){
-        if(localSourceKind==='local-project'&&projectStatus&&projectStatus.ok&&guideScopeValid)return 'local-project';
-        if(folderSourceIsLive())return 'folder';
-        if(zipSourceIsLive())return 'zip';
-        if(projectStatus&&projectStatus.ok&&guideScopeValid&&localSourceKind!=='folder'&&localSourceKind!=='zip')return 'local-project';
-        return null;
-    }
-
-    function canReadLiveFileSource(){
-        return !!liveSourceKindForRead();
-    }
-
-    function readFolderFileByPath(rootHandle,filePath){
-        var parts=String(filePath||'').split('/').filter(Boolean);
-        if(!parts.length||!rootHandle)return Promise.reject(new Error('File is not available in the open folder'));
-        var dirPromise=Promise.resolve(rootHandle);
-        var fileName=parts.pop();
-        parts.forEach(function(part){
-            dirPromise=dirPromise.then(function(dir){return dir.getDirectoryHandle(part);});
-        });
-        return dirPromise.then(function(dir){return dir.getFileHandle(fileName);})
-            .then(function(handle){return handle.getFile();})
-            .then(function(fileObj){return fileObj.text();});
-    }
+    function canReadLiveFileSource(){return !!(guideScopeValid&&projectStatus&&projectStatus.ok);}
 
     function readProjectWatchLiveSource(path){
         if(!path)return Promise.resolve({kind:'error'});
@@ -15206,23 +14261,9 @@ function App(){
     }
 
     function readLiveFileSource(path){
-        var kind=liveSourceKindForRead();
-        if(!path||!kind)return Promise.resolve(null);
-        if(kind==='local-project'){
-            return fetch('/__codeflow/file?path='+encodeURIComponent(path)+'&pid='+encodeURIComponent(projectStatus&&projectStatus.pid||''))
-                .then(function(res){return res.ok?res.text():null;})
-                .catch(function(){return null;});
-        }
-        if(kind==='folder'){
-            return readFolderFileByPath(localDirHandle,path).catch(function(){return null;});
-        }
-        if(kind==='zip'){
-            var archive=zipArchiveRef.current;
-            var entry=archive&&archive.entriesByPath?archive.entriesByPath[path]:null;
-            if(!entry||typeof entry.async!=='function')return Promise.resolve(null);
-            return entry.async('string').catch(function(){return null;});
-        }
-        return Promise.resolve(null);
+        if(!path||!canReadLiveFileSource()||!guideIndex.files.has(path))return Promise.resolve(null);
+        return fetch('/__codeflow/file?path='+encodeURIComponent(path)+'&pid='+encodeURIComponent(projectStatus.pid))
+            .then(function(res){return res.ok?res.text():null;}).catch(function(){return null;});
     }
 
     function rememberHydratedSources(updates){
@@ -15232,7 +14273,7 @@ function App(){
 
     // Open file preview
     function openFilePreview(path,line){
-        if(!repoInfo||!guideIndex.files.has(path))return;
+        if(!projectInfo||!guideIndex.files.has(path))return;
         var previewRequest=++filePreviewRequestRef.current;
         if(!selectFile(path))return;
         var filename=path.split('/').pop();
@@ -15274,7 +14315,7 @@ function App(){
     // authorized currentRoot. Results are tagged with a sequence number so a
     // superseded (or project-switched) response can never overwrite newer state.
     function searchIsAvailable(){
-        return !!(localSourceKind==='local-project'&&projectStatus&&projectStatus.ok&&projectStatus.pid);
+        return !!(projectStatus&&projectStatus.ok&&projectStatus.pid);
     }
     function clearSearch(){
         searchSeqRef.current++;
@@ -15950,7 +14991,7 @@ function App(){
                 setCodeSourceFailed(function(prev){return recordCodeSourceFailureIfCurrent(prev,path,hydrationId,analysisHydrationIdRef.current);});
             });
         });
-    },[codeViewFiles,localSourceKind,projectStatus,repoInfo,localDirHandle,codeSourceFailed]);
+    },[codeViewFiles,projectStatus,projectInfo,codeSourceFailed]);
 
     useEffect(function(){
         if(!data||!svgRef.current)return;
@@ -16586,7 +15627,7 @@ function App(){
                 var r=getR(node);
                 var color=getC(node);
                 var group=new THREE.Group();
-                
+
                 // Sphere mesh
                 var sphereGeo=new THREE.SphereGeometry(r,24,24);
                 var sphereMat=new THREE.MeshPhongMaterial({
@@ -16595,7 +15636,7 @@ function App(){
                 });
                 var sphereMesh=new THREE.Mesh(sphereGeo,sphereMat);
                 group.add(sphereMesh);
-                
+
                 // Text canvas label
                 var labelText=node.name;
                 var canvas=document.createElement('canvas');
@@ -16603,13 +15644,13 @@ function App(){
                 var scale=4;
                 ctx.font=(10*scale)+'px "JetBrains Mono", monospace';
                 var textWidth=ctx.measureText(labelText).width;
-                
+
                 canvas.width=textWidth+(16*scale);
                 canvas.height=24*scale;
-                
+
                 ctx.font=(10*scale)+'px "JetBrains Mono", monospace';
                 ctx.fillStyle=theme==='light'?'rgba(255,255,255,0.9)':'rgba(10,10,12,0.9)';
-                
+
                 // Draw rounded rectangle label boundary
                 var w_rect=canvas.width;
                 var h_rect=canvas.height;
@@ -16626,26 +15667,26 @@ function App(){
                 ctx.quadraticCurveTo(0,0,r_rect,0);
                 ctx.closePath();
                 ctx.fill();
-                
+
                 ctx.strokeStyle=theme==='light'?'rgba(0,0,0,0.15)':'rgba(255,255,255,0.15)';
                 ctx.lineWidth=1*scale;
                 ctx.stroke();
-                
+
                 ctx.fillStyle=color;
                 ctx.textAlign='center';
                 ctx.textBaseline='middle';
                 ctx.fillText(labelText,canvas.width/2,canvas.height/2);
-                
+
                 var texture=new THREE.CanvasTexture(canvas);
                 var labelMaterial=new THREE.SpriteMaterial({map:texture,depthWrite:false});
                 var labelSprite=new THREE.Sprite(labelMaterial);
-                
+
                 var spriteWidth=(canvas.width/scale)*0.15;
                 var spriteHeight=(canvas.height/scale)*0.15;
                 labelSprite.scale.set(spriteWidth,spriteHeight,1);
                 labelSprite.position.set(0,r+spriteHeight/2+2,0);
                 group.add(labelSprite);
-                
+
                 return group;
             });
             graph.nodeThreeObjectExtend(false);
@@ -17233,19 +16274,17 @@ function App(){
     function downloadTextFile(filename,text,mime){if(!text)return;var blob=new Blob([text],{type:mime||'text/plain'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);}
     function patchDownloadName(filePath){var base=String(filePath||'analysis').replace(/[^A-Za-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'');if(!base)base='analysis';return 'codeflow-remove-debug-'+base+'.patch';}
     function renderPatchPreview(patch){if(!patch)return null;var lines=patch.split('\n');if(lines.length&&lines[lines.length-1]==='')lines.pop();return React.createElement('pre',{className:'patch-preview'},lines.map(function(line,idx){var cls='patch-line-ctx';if(line.indexOf('diff --git ')===0||line.indexOf('--- ')===0||line.indexOf('+++ ')===0||line.indexOf('@@')===0||line.charAt(0)==='\\')cls='patch-line-meta';else if(line.charAt(0)==='-')cls='patch-line-del';return React.createElement('div',{key:idx,className:cls},line.length?line:' ');}));}
-    function renderDebugPatchSites(filePath){var pack=data&&data.refactorSuggestions;if(!pack||!pack.sites||!pack.sites.length)return null;var sites=pack.sites.filter(function(site){return !filePath||site.filePath===filePath;});if(!sites.length)return null;var fileKeys=[];var grouped={};sites.forEach(function(site){if(!grouped[site.filePath]){grouped[site.filePath]=[];fileKeys.push(site.filePath);}grouped[site.filePath].push(site);});var appliable=sites.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{className:'debug-patch-panel'},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:12,fontWeight:600}},'Debug statement patches'),!filePath&&pack.combinedPatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile('codeflow-remove-debug-statement.patch',pack.combinedPatch,'text/x-diff');}},'Download all .patch'):null),React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginBottom:8,lineHeight:1.4}},appliable+' safe removal'+(appliable===1?'':'s')+' · '+(sites.length-appliable)+' report-only. Codeflow does not modify your files. Apply a downloaded patch from the repo root with git apply. A single-statement patch targets the original file; the combined patch removes every safe statement together.'),fileKeys.map(function(path){var group=grouped[path];var filePatch=pack.filePatches&&pack.filePatches[path];var safeCount=group.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{key:path,style:{marginBottom:12}},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:10,fontFamily:'monospace',color:'var(--t1)',wordBreak:'break-all'}},path),filePatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(path),filePatch,'text/x-diff');}},'Download file .patch'):null),safeCount>1?React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:6}},'Remove '+safeCount+' standalone debug statements in '+path+'. This patch removes code.'):null,group.map(function(site){return React.createElement('div',{key:site.findingId,className:'debug-patch-card'},React.createElement('div',{style:{fontSize:10,color:'var(--t1)',marginBottom:4,lineHeight:1.4}},site.summary),site.status==='report-only'?React.createElement('div',{className:'debug-patch-reason'},'Report only: '+site.reason):null,site.snippet?React.createElement('div',{className:'security-code'},site.snippet):null,site.status==='appliable'?renderPatchPreview(site.patch):null,site.status==='appliable'&&site.patch?React.createElement('button',{className:'view-file-btn',style:{marginTop:8},onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(site.filePath+'-L'+site.line),site.patch,'text/x-diff');}},'Download .patch'):null);}));}));}
+    function renderDebugPatchSites(filePath){var pack=data&&data.refactorSuggestions;if(!pack||!pack.sites||!pack.sites.length)return null;var sites=pack.sites.filter(function(site){return !filePath||site.filePath===filePath;});if(!sites.length)return null;var fileKeys=[];var grouped={};sites.forEach(function(site){if(!grouped[site.filePath]){grouped[site.filePath]=[];fileKeys.push(site.filePath);}grouped[site.filePath].push(site);});var appliable=sites.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{className:'debug-patch-panel'},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:12,fontWeight:600}},'Debug statement patches'),!filePath&&pack.combinedPatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile('codeflow-remove-debug-statement.patch',pack.combinedPatch,'text/x-diff');}},'Download all .patch'):null),React.createElement('div',{style:{fontSize:10,color:'var(--t3)',marginBottom:8,lineHeight:1.4}},appliable+' safe removal'+(appliable===1?'':'s')+' · '+(sites.length-appliable)+' report-only. Apply downloaded patches explicitly from the project root with git apply. A single-statement patch targets the original file; the combined patch removes every safe statement together.'),fileKeys.map(function(path){var group=grouped[path];var filePatch=pack.filePatches&&pack.filePatches[path];var safeCount=group.filter(function(site){return site.status==='appliable';}).length;return React.createElement('div',{key:path,style:{marginBottom:12}},React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}},React.createElement('div',{style:{fontSize:10,fontFamily:'monospace',color:'var(--t1)',wordBreak:'break-all'}},path),filePatch?React.createElement('button',{className:'view-file-btn',onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(path),filePatch,'text/x-diff');}},'Download file .patch'):null),safeCount>1?React.createElement('div',{style:{fontSize:10,color:'var(--t2)',marginBottom:6}},'Remove '+safeCount+' standalone debug statements in '+path+'. This patch removes code.'):null,group.map(function(site){return React.createElement('div',{key:site.findingId,className:'debug-patch-card'},React.createElement('div',{style:{fontSize:10,color:'var(--t1)',marginBottom:4,lineHeight:1.4}},site.summary),site.status==='report-only'?React.createElement('div',{className:'debug-patch-reason'},'Report only: '+site.reason):null,site.snippet?React.createElement('div',{className:'security-code'},site.snippet):null,site.status==='appliable'?renderPatchPreview(site.patch):null,site.status==='appliable'&&site.patch?React.createElement('button',{className:'view-file-btn',style:{marginTop:8},onClick:function(e){e.stopPropagation();downloadTextFile(patchDownloadName(site.filePath+'-L'+site.line),site.patch,'text/x-diff');}},'Download .patch'):null);}));}));}
     function exportJSON(){if(!data)return;var blob=new Blob([JSON.stringify({stats:data.stats,files:data.files.map(function(f){return{path:f.path,fns:f.functions.length,layer:f.layer,lines:f.lines,dependencies:f.dependencies||[]};}),connections:data.connections,issues:data.issues,patterns:data.patterns,security:data.securityIssues,architectureDiagram:data.architectureDiagram,refactorSuggestions:data.refactorSuggestions||null},null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='codeflow-analysis.json';a.click();URL.revokeObjectURL(url);}
     function getAnalysisSourceLabel(){
-        if(localSourceKind==='folder')return(repoInfo&&repoInfo.name)||'Local Folder';
-        if(localSourceKind==='zip')return repoInfo&&repoInfo.name?repoInfo.name:'ZIP Archive';
-        return repoInfo?repoInfo.name:'Local project';
+                return projectInfo?projectInfo.name:'Local project';
     }
     function generateReport(format){
         if(!data)return;
-        var repo=getAnalysisSourceLabel();
+        var projectLabel=getAnalysisSourceLabel();
         var h=calcHealth(data);
         var report={
-            repository:repo,
+            project:projectLabel,
             analyzedAt:new Date().toISOString(),
             codeflowVersion:'1.0',
             summary:{
@@ -17334,7 +16373,7 @@ function App(){
             var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='codeflow-report.json';a.click();URL.revokeObjectURL(url);
         }else if(format==='md'){
             var md='# CodeFlow Analysis Report\n\n';
-            md+='**Repository:** '+repo+'\n';
+            md+='**Project:** '+projectLabel+'\n';
             md+='**Analyzed:** '+new Date().toLocaleString()+'\n\n';
             md+='## Summary\n\n';
             md+='| Metric | Value |\n|--------|-------|\n';
@@ -17405,7 +16444,7 @@ function App(){
         }else if(format==='txt'){
             var txt='CODEFLOW ANALYSIS REPORT\n';
             txt+='========================\n\n';
-            txt+='Repository: '+repo+'\n';
+            txt+='Project: '+projectLabel+'\n';
             txt+='Analyzed: '+new Date().toLocaleString()+'\n\n';
             txt+='SUMMARY\n-------\n';
             txt+='Health Score: '+h.score+'/100 (Grade: '+h.grade+')\n';
@@ -17470,7 +16509,11 @@ function App(){
         showNotification('Report exported as '+format.toUpperCase(),'success');
     }
     function showNotification(msg,type){setToast({msg:msg,type:type||'success'});setTimeout(function(){setToast(null);},3000);}
-    function resetAnalysis(){if(!discardSourceEdits())return;analysisRunRef.current++;setData(null);setSelected(null);setBlastRadius(null);setRepoInfo(null);setFolderFilter(null);setLocalDirHandle(null);setLocalSourceKind(null);setCachedFromId(null);setActiveSymbol(null);setProjectDirty([]);clearProjectLiveDiffs();localFolderKeyRef.current=null;localFolderSelectionRef.current=null;localFilesRef.current=null;zipKeyRef.current=null;zipArchiveRef.current=null;zipFileRef.current=null;window.history.replaceState({},'',window.location.pathname);}
+    function resetAnalysis(){
+        if(!discardSourceEdits())return;
+        analysisRunRef.current++;setData(null);setSelected(null);setBlastRadius(null);setProjectInfo(null);
+        setFolderFilter(null);setCachedFromId(null);setActiveSymbol(null);setProjectDirty([]);clearProjectLiveDiffs();
+    }
     function filterByFolder(path){setFolderFilter(function(prev){return prev===path?null:path;});}
     function renderRecentsList(){
         return React.createElement('div',{className:'sidebar-scroll'},
@@ -17657,7 +16700,7 @@ function App(){
         );
     }
     function renderOverviewPane(){
-        if(!data)return renderSidebarEmpty('No Project','Select a local project from the Project dropdown, or open a folder or ZIP archive');
+        if(!data)return renderSidebarEmpty('No Project','Select a registered local project from the Project dropdown');
         return React.createElement('div',{className:'sidebar-scroll'},
             React.createElement('div',{className:'health-score',style:{marginBottom:10}},
                 React.createElement(HealthRing,{score:health.score,grade:health.grade}),
@@ -17694,7 +16737,7 @@ function App(){
         );
     }
     function renderFilesPane(){
-        if(!data)return renderSidebarEmpty('No Files','Analyze a repository to browse its folder tree');
+        if(!data)return renderSidebarEmpty('No Files','Select a registered project to browse its source tree');
         return React.createElement(React.Fragment,null,
             folderFilter&&React.createElement('div',{className:'sidebar-filter'},
                 React.createElement('button',{className:'top-btn',style:{width:'100%'},onClick:function(){setFolderFilter(null);}},
@@ -18039,7 +17082,7 @@ function App(){
                             })
                         )
                     ):null,
-                    !editing&&localSourceKind==='local-project'&&guideScopeValid&&!file.analysisSkipped&&React.createElement('button',{className:'view-file-btn','aria-label':'Edit '+file.path,onPointerDown:function(e){e.stopPropagation();},onClick:function(e){e.stopPropagation();beginSourceEdit(file.path);}},'Edit'),
+                    !editing&&guideScopeValid&&!file.analysisSkipped&&React.createElement('button',{className:'view-file-btn','aria-label':'Edit '+file.path,onPointerDown:function(e){e.stopPropagation();},onClick:function(e){e.stopPropagation();beginSourceEdit(file.path);}},'Edit'),
                     React.createElement('span',{className:'badge badge-default'},isPrimary?'selected':'open')
                 )
             ),
@@ -18094,8 +17137,7 @@ function App(){
     }
     var health=useMemo(function(){return calcHealth(data);},[data]);
     return React.createElement('div',{className:'app',style:{'--topbar-height':topbarHeight+'px'}},
-        React.createElement('input',{ref:zipInputRef,type:'file',accept:'.zip,application/zip,application/x-zip-compressed',style:{display:'none'},onChange:handleZipSelected}),
-        React.createElement('input',{ref:folderInputRef,type:'file',webkitdirectory:'',directory:'',mozdirectory:'',multiple:true,style:{display:'none'},onChange:handleFolderSelected}),
+
         React.createElement('div',{className:'topbar',ref:topbarRef},
             isMobile&&React.createElement(React.Fragment,null,
                 React.createElement('div',{className:'mobile-brand-row'},
@@ -18112,19 +17154,7 @@ function App(){
                     React.createElement('div',{className:'mobile-secondary-row'},
                         React.createElement('div',{className:'project-selector-slot','data-codeflow-project-slot':'mobile'}),
                         renderTopbarSearch('mobile'),
-                        React.createElement('button',{className:'top-btn','aria-label':'Edit exclude patterns',onClick:function(){openExcludeModal();},disabled:loading,type:'button',style:customExcludeCount?{borderColor:'var(--acc)',color:'var(--acc)'}:null},
-                            React.createElement(Icon,{name:'ban',size:'m'}),
-                            'Excludes',
-                            customExcludeCount>0?' ('+customExcludeCount+')':''
-                        ),
-                        React.createElement('button',{className:'top-btn','aria-label':'Open local folder',onClick:function(){openLocalFolder();},disabled:loading,type:'button'},
-                            React.createElement(Icon,{name:'folder',size:'m'}),
-                            'Folder'
-                        ),
-                        React.createElement('button',{className:'top-btn','aria-label':'Open ZIP archive',onClick:function(){openLocalZip();},disabled:loading,type:'button'},
-                            React.createElement(Icon,{name:'archive',size:'m'}),
-                            'ZIP'
-                        ),
+
                         data&&React.createElement('button',{className:'refresh-btn','aria-label':'Re-analyze',onClick:refreshAnalysis,disabled:loading,title:'Re-analyze',type:'button'},
                             React.createElement(Icon,{name:'refresh',size:'m'}),
                             cachedFromId||projectDirty.length?'Re-analyze':'Refresh'
@@ -18140,25 +17170,13 @@ function App(){
                 React.createElement('div',{className:'logo-mark'},React.createElement(Icon,{name:'logo',size:'l'})),
                 React.createElement('span',{className:'logo-text'},'CODEFLOW')
             ),
-            React.createElement('div',{className:'repo-input-group'},
+            React.createElement('div',{className:'project-controls'},
                 React.createElement('div',{className:'project-selector-slot','data-codeflow-project-slot':'desktop'}),
                 renderTopbarSearch('desktop'),
-                React.createElement('button',{className:'top-btn','aria-label':'Edit exclude patterns',title:'Edit exclude patterns'+(customExcludeCount>0?' ('+customExcludeCount+')':''),onClick:function(){openExcludeModal();},disabled:loading,style:customExcludeCount?{borderColor:'var(--acc)',color:'var(--acc)'}:null},
-                    React.createElement(Icon,{name:'ban',size:'m'}),
-                    !data&&'Excludes',
-                    (!data&&customExcludeCount>0)?' ('+customExcludeCount+')':''
-                ),
-                React.createElement('button',{className:'top-btn','aria-label':'Open local folder',title:'Open local folder',onClick:function(){openLocalFolder();},disabled:loading},
-                    React.createElement(Icon,{name:'folder',size:'m'}),
-                    !data&&'Open Folder'
-                ),
-                React.createElement('button',{className:'top-btn','aria-label':'Open ZIP archive',title:'Open ZIP archive',onClick:function(){openLocalZip();},disabled:loading},
-                    React.createElement(Icon,{name:'archive',size:'m'}),
-                    !data&&'Open ZIP'
-                ),
+
                 data&&React.createElement('button',{className:'refresh-btn','aria-label':'Re-analyze',onClick:refreshAnalysis,disabled:loading,title:'Re-analyze the selected project'},
                     React.createElement(Icon,{name:'refresh',size:'m'}),
-                    localSourceKind==='local-project'&&' Re-analyze'
+                    ' Re-analyze'
                 ),
                 data&&React.createElement('button',{className:'reset-btn','aria-label':'Reset analysis',onClick:resetAnalysis,title:'Clear & Reset'},
                     React.createElement(Icon,{name:'close',size:'m'})
@@ -18185,7 +17203,7 @@ function App(){
                 isMobile&&React.createElement('div',{className:'mobile-panel-header'},
                     React.createElement('div',{className:'mobile-panel-meta'},
                         React.createElement('div',{className:'mobile-panel-title'},leftTab==='overview'?'Overview':leftTab==='files'?'Files':leftTab==='search'?'Search':'Recents'),
-                        React.createElement('div',{className:'mobile-panel-subtitle'},leftTab==='recents'?(recentAnalyses.length?recentAnalyses.length+' cached analyses':'No cached analyses'):data?(folderFilter?'Filtered by '+folderFilter:data.files.length+' files ready to browse'):'Analyze a repo or open a folder')
+                        React.createElement('div',{className:'mobile-panel-subtitle'},leftTab==='recents'?(recentAnalyses.length?recentAnalyses.length+' cached analyses':'No cached analyses'):data?(folderFilter?'Filtered by '+folderFilter:data.files.length+' files ready to browse'):'Select a registered project')
                     ),
                     React.createElement('button',{className:'mobile-panel-close',type:'button','aria-label':'Close explorer panel',onClick:function(){setMobilePanel(null);}},
                         React.createElement(Icon,{name:'close',size:'m'})
@@ -18216,7 +17234,7 @@ function App(){
                 !data?React.createElement('div',{className:'empty-state'},
                     React.createElement(Icon,{name:'logo',size:'xxl',className:'empty-icon'}),
                     React.createElement('div',{className:'empty-title'},'CodeFlow'),
-                    React.createElement('div',{className:'empty-desc'},'Visualize architecture, blast radius, patterns & security\n\nSelect a local project from the Project dropdown (or open a folder or ZIP) to begin'),
+                    React.createElement('div',{className:'empty-desc'},'Visualize architecture, blast radius, patterns & security\n\nRegister or select a local project from the Project dropdown to begin'),
                     projectStatus&&projectStatus.ok&&React.createElement('div',{className:'project-chip',style:{marginTop:10}},'Watching ',projectStatus.name||projectStatus.root)
                 ):
                 React.createElement(React.Fragment,null,
@@ -18606,7 +17624,7 @@ function App(){
                 ):React.createElement('div',{className:'empty-state'},
                     React.createElement(Icon,{name:'chart',size:'xxl',className:'empty-icon'}),
                     React.createElement('div',{className:'empty-title'},'Analysis'),
-                    React.createElement('div',{className:'empty-desc'},'Select a local project, open a folder, or load a ZIP archive to see insights')
+                    React.createElement('div',{className:'empty-desc'},'Register or select a local project to see insights')
                 )
             )
         ),
@@ -18636,43 +17654,7 @@ function App(){
                 )
             )
         ),
-        showExcludeModal&&React.createElement('div',{className:'modal-overlay',onClick:closeExcludeModal},
-            React.createElement('div',{className:'modal',onClick:function(e){e.stopPropagation();},style:{maxWidth:540}},
-                React.createElement('div',{className:'modal-header'},
-                    React.createElement('div',{className:'modal-title'},iconLabel('ban','Exclude Patterns','m')),
-                    React.createElement('div',{style:{display:'flex',alignItems:'center',gap:12}},
-                        React.createElement('div',{className:'exclude-count'},parseExcludePatterns(excludePatternDraft).length,' custom'),
-                        React.createElement('button',{className:'modal-close',onClick:closeExcludeModal},'×')
-                    )
-                ),
-                React.createElement('div',{className:'modal-body'},
-                    React.createElement('div',{className:'exclude-note'},
-                        'Common build and cache folders are already excluded by default. Add project-specific patterns here before scanning a repo or opening a local folder.'
-                    ),
-                    React.createElement('div',{className:'exclude-note'},
-                        'Supports exact names like ',React.createElement('code',null,'.git'),' or ',React.createElement('code',null,'attachments'),
-                        ', file globs like ',React.createElement('code',null,'*.png'),
-                        ', and path globs like ',React.createElement('code',null,'uploads/**'),' or ',React.createElement('code',null,'**/cache/**'),'.'
-                    ),
-                    React.createElement('div',{className:'form-group'},
-                        React.createElement('label',{className:'form-label'},'Always Excluded'),
-                        React.createElement('div',{className:'exclude-chip-list'},
-                            DEFAULT_EXCLUDE_CHIPS.map(function(pattern){return React.createElement('div',{key:pattern,className:'exclude-chip'},pattern);})
-                        )
-                    ),
-                    React.createElement('div',{className:'form-group'},
-                        React.createElement('label',{className:'form-label'},'Custom Patterns'),
-                        React.createElement('textarea',{className:'form-input exclude-textarea','aria-label':'Custom exclude patterns',placeholder:'attachments\nuploads/**\n**/cache/**\n*.png\n*.log',value:excludePatternDraft,onChange:function(e){setExcludePatternDraft(e.target.value);},rows:8}),
-                        React.createElement('div',{className:'exclude-help'},'Use one pattern per line, or separate patterns with commas. Changes apply to the next analysis or refresh.')
-                    )
-                ),
-                React.createElement('div',{className:'modal-footer'},
-                    excludePatternDraft&&React.createElement('button',{className:'top-btn',onClick:function(){setExcludePatternDraft('');},style:{marginRight:'auto'}},'Clear Custom'),
-                    React.createElement('button',{className:'top-btn',onClick:closeExcludeModal},'Cancel'),
-                    React.createElement('button',{className:'top-btn primary',onClick:saveExcludePatterns},'Save')
-                )
-            )
-        ),
+
         isMobile&&React.createElement('div',{className:'mobile-bottom-nav'},
             React.createElement('button',{className:'top-btn'+(mobilePanel==='explorer'?' active':''),'aria-label':'Open explorer panel',onClick:function(){toggleMobilePanel('explorer');},type:'button'},
                 React.createElement(Icon,{name:'folder',size:'m'}),
@@ -18790,7 +17772,7 @@ function App(){
                             drillDown.data.title==='SQL Injection Risk'?'Use parameterized queries or prepared statements. Never concatenate user input directly into SQL strings.':
                             drillDown.data.title==='XSS Vulnerability'?'Sanitize user input before rendering. Use textContent instead of innerHTML, or use a sanitization library like DOMPurify.':
                             drillDown.data.title==='Dynamic Code Execution'?'Avoid eval() entirely. Use JSON.parse() for JSON, or Function constructor only with trusted input.':
-                            drillDown.data.title==='Debug Statements'?'Download a .patch and apply it yourself from the repo root with git apply. Codeflow never modifies your files. Only a standalone console.log, console.debug, console.info, or debugger statement is included.':
+                            drillDown.data.title==='Debug Statements'?'Download a .patch and apply it explicitly from the project root with git apply. Only a standalone console.log, console.debug, console.info, or debugger statement is included.':
                             'Review the flagged code and apply security best practices.'
                         ),
                         drillDown.data.title==='Debug Statements'&&renderDebugPatchSites(drillDown.data.path)
@@ -18830,7 +17812,7 @@ function App(){
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'ban',size:'l'})),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'No External Services'),React.createElement('div',{className:'privacy-text'},'There is no GitHub integration and no remote repository analysis. Analyzing a local project makes no external network requests; source reads and explicit saves stay on the local server. (Official documentation links open only when you click them.)'))
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'No External Services'),React.createElement('div',{className:'privacy-text'},'Analysis, search and explicit source saves use the selected registered project through the localhost server. (Official documentation links open only when you click them.)'))
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'key',size:'l'})),
@@ -18838,7 +17820,7 @@ function App(){
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'lock',size:'l'})),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Locally Stored Settings'),React.createElement('div',{className:'privacy-text'},'Your project configuration and the analysis cache are stored locally on your machine so your selection persists across restarts. They are never sent to a remote server.'))
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Locally Stored Settings'),React.createElement('div',{className:'privacy-text'},'Your project configuration and the analysis cache are stored locally on your machine so your selection persists across restarts. Settings stay on this computer.'))
                     ),
                     React.createElement('div',{style:{marginTop:16,padding:12,background:'var(--accbg)',borderRadius:8,fontSize:10,color:'var(--t1)'}},
                         React.createElement(Icon,{name:'spark',size:'s'}),
@@ -18936,28 +17918,7 @@ function App(){
                 )
             )
         ),
-        confirmDialog&&(function(){
-            var tone=getDialogTone(confirmDialog.tone);
-            return React.createElement('div',{className:'modal-overlay',style:{zIndex:1200},onClick:function(){closeConfirmDialog(false);}},
-                React.createElement('div',{className:'modal confirm-modal',onClick:function(e){e.stopPropagation();}},
-                    React.createElement('div',{className:'modal-body'},
-                        React.createElement('div',{className:'confirm-content'},
-                            React.createElement('div',{className:'confirm-icon',style:{color:tone.color,background:tone.background,border:'1px solid '+tone.borderColor}},
-                                React.createElement(Icon,{name:confirmDialog.icon||'warning',size:'l'})
-                            ),
-                            React.createElement('div',{className:'confirm-copy'},
-                                React.createElement('div',{className:'confirm-title'},confirmDialog.title),
-                                React.createElement('div',{className:'confirm-message'},confirmDialog.message)
-                            )
-                        )
-                    ),
-                    React.createElement('div',{className:'modal-footer'},
-                        React.createElement('button',{className:'top-btn',onClick:function(){closeConfirmDialog(false);}},confirmDialog.cancelLabel||'Cancel'),
-                        React.createElement('button',{className:'top-btn primary',style:{background:tone.color,borderColor:tone.color,color:'var(--bg0)'},onClick:function(){closeConfirmDialog(true);}},confirmDialog.confirmLabel||'Continue')
-                    )
-                )
-            );
-        })(),
+
         toast&&React.createElement('div',{className:'toast '+(toast.type||'success'),'role':'alert'},toast.msg),
         filePreview&&React.createElement('div',{className:'file-preview-overlay',onClick:function(){setFilePreview(null);}},
             React.createElement('div',{className:'file-preview-modal',onClick:function(e){e.stopPropagation();}},

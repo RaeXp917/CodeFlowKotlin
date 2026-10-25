@@ -1,11 +1,9 @@
 // Shared local-server utilities for the CodeFlowKotlin local application server
 // (server/projects-server.mjs): secure path resolution, project source enumeration,
-// file watching, revision tracking, localhost request validation and the browser
-// launcher. These were previously housed in the now-removed standalone CLI.
+// file watching, revision tracking and localhost request validation.
 
 import { promises as fs, watch } from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 
 const IGNORE = new Set([
   'node_modules', '.git', 'vendor', 'dist', 'build', 'out', 'coverage',
@@ -367,20 +365,4 @@ export function startFileWatchers(root, onRelPath, watchFn, isExcluded) {
       watching = false;
     }
   };
-}
-
-export function openBrowser(url, spawnFn) {
-  const platform = process.platform;
-  const cmd = platform === 'darwin' ? 'open' : platform === 'win32' ? 'cmd' : 'xdg-open';
-  const args = platform === 'win32' ? ['/c', 'start', '', url] : [url];
-  const run = typeof spawnFn === 'function' ? spawnFn : spawn;
-  try {
-    const child = run(cmd, args, { detached: true, stdio: 'ignore' });
-    child.on('error', () => {
-      console.log('Could not open a browser automatically. Open this URL manually: ' + url);
-    });
-    if (typeof child.unref === 'function') child.unref();
-  } catch {
-    console.log('Could not open a browser automatically. Open this URL manually: ' + url);
-  }
 }

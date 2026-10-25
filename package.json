@@ -11,10 +11,6 @@
   "engines": {
     "node": ">=18"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/RaeXp917/CodeFlowKotlin.git"
-  },
   "scripts": {
     "start": "node server/projects-server.mjs .",
     "test": "node --test tests/*.test.mjs tests/*.smoke.js"

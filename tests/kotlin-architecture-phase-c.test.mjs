@@ -272,7 +272,7 @@ test('Phase C findings flow through buildAnalysisData', async () => {
   assert.ok(data.architectureInsights.some((i) => i.ruleId === 'android-viewmodel-exposed-mutable-state'));
 });
 
-test('the Kotlin Phase C analyzer lives in the shared worker/card block', () => {
+test('the Kotlin Phase C analyzer lives in the shared browser/worker block', () => {
   assert.ok(analyzerBlock.includes('android-viewmodel-exposed-mutable-state'));
   assert.ok(analyzerBlock.includes('function detectKotlinConstructs'));
   assert.ok(analyzerBlock.includes('function kotlinFunctionBodyRanges'));

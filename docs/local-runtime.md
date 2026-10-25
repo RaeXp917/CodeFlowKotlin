@@ -4,24 +4,18 @@ CodeFlowKotlin has one local runtime: `server/projects-server.mjs`. It serves th
 existing browser application, discovered and registered projects, source reads,
 watch events, search and native Add Folder. `npm start` points to that server.
 
-Legacy remote analysis, the Card GitHub Action/gallery, standalone headless
-analysis, ownership display, remote source cache compatibility and unused signing
-and Mermaid browser packages were removed. Generic architecture modeling remains;
-only the old Card-specific self-model and synthetic Card edges were retired.
-Git history, remotes, licenses for retained dependencies and Git CI are preserved.
+Register or select a local project, read its eligible source, analyze and visualize
+it, then search or edit existing source. Add Folder uses the native picker. Project
+identity, exclusions and saved selection live in the local registry.
 
-Browser requests go to `/__codeflow/*` or checked-in assets on the same local
-origin. Worker source comes from the local page and all parser assets are local.
-Official lesson links are user initiated. No GitHub API or source upload runs.
+Browser requests use `/__codeflow/*` and checked-in assets on the same origin.
+Worker source comes from the local page. Lessons are bundled; documentation links
+open only on user interaction. Cached analysis belongs to a registered project and
+is usable only when that project is selected. Source reads require its active id.
 
-Watch and hydration helpers use project terminology. Existing local cache records
-are preserved; obsolete source modes are rejected and purged from the recents
-store when enumerated. Local Folder/ZIP input is retained as local-only reading;
-source editing is restricted to registered projects.
-
-Verification: `node --test tests/local-only-runtime.test.mjs`, project/server/search
-regression tests, `npm test`, and inline-script syntax checks. HTTP checks alone do
-not establish visual or interactive browser correctness.
+Verification uses project/server/search tests, the full `npm test` suite and
+inline-script syntax checks. HTTP checks alone do not establish visual browser
+correctness.
 
 ## Code canvas wheel zoom
 
@@ -35,10 +29,8 @@ overrides that to zoom the canvas. The non-passive canvas listener prevents page
 scrolling only when it handles canvas zoom; it does not intercept ordinary browser
 wheel events outside the Code canvas.
 
-Root cause: the old Code listener deliberately mapped ordinary wheel to pan,
-while D3's Code filter rejected wheel. The listener now calls the existing
-pointer-anchored `scaleBy` for ordinary wheel too. Executable listener tests plus
-the real vendored D3 verify anchoring, limits and native editor scrolling:
+The existing pointer-anchored D3 `scaleBy` handles wheel input. Executable
+listener and transform checks:
 `node --test tests/code-wheel-zoom.test.mjs tests/code-canvas.test.mjs`.
 
 ## Source editing
@@ -116,26 +108,6 @@ junctions, origin/CSRF, LF/CRLF/BOM, modes/read-only files, write/flush/rename f
 watch/Search freshness, analyzer parsing of saved source, keyboard/Cancel/dirty
 handlers, multiple buffers, unload protection and late response rejection.
 
-## Verification for cleanup, zoom and editing (2026-10-25)
-
-Base inspected: Phase E `f814463a759e5467b9a52c97ce41aa8fba3f3ed0` on clean main.
-Cleanup focused checks: 76 passed; full suite after removal: 465 tests, 451 passed,
-14 established baseline failures. Zoom/canvas/Guide/syntax checks: 155 passed.
-Final combined editor/local-only/zoom/canvas/Guide/architecture/security/project/
-Search/syntax checks: 259 passed. Final complete `npm test`: 494 tests, 480 passed,
-14 failed, none skipped. The 14 failure names exactly match the pre-existing
-Windows baseline: 13 debug-patch path/newline tests and one untouched vendored 3D
-asset hash mismatch. Node syntax checks and `git diff --check` passed.
-
-Editor HTTP tests save and re-read real files on disk in temporary projects and
-verify that local search, source revisions and the shared analyzer see saved text.
-Registered application projects are not modified. GUI inventory returned no apps
-or browsers; handler/React-element/D3 tests are executable but do not constitute
-visual or real browser interaction verification. Native clipboard/Undo UX and
-custom Windows ACL configurations still need interactive verification. Draft text
-survives a card remount, but native textarea Undo history is limited to its mount.
-
-
 ## Manual Windows desktop launcher
 
 Use the **CodeFlowKotlin** desktop shortcut or `Open CodeFlow.cmd`. Both call
@@ -147,12 +119,8 @@ unknown process. Logs are under `%LOCALAPPDATA%/CodeFlowKotlin/`. Its default
 project discovery parent is `%USERPROFILE%/AndroidStudioProjects`; registered
 projects and the saved selection are restored as before.
 
-The Node server no longer opens the browser automatically. There is no IDE or
-Windows-login auto-start registration added by this launcher. Android Studio
-shortcuts, startup tasks, global settings and registered project IDE settings
-were checked; no CodeFlow auto-launch hook was found. The previous server had
-been started manually during development. A direct server start now also remains
-browser-silent, so browser opening is controlled by the manual launcher.
+The Node server starts without opening a browser. Browser opening belongs to the
+manual launcher; it creates no IDE or Windows-login startup registration.
 
 For a noninteractive launch/reuse check, run
 `powershell.exe -NoProfile -File scripts/start-codeflow.ps1 -NoBrowser`.

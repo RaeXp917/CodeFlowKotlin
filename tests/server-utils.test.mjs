@@ -1,8 +1,4 @@
-// Shared local-server utilities (server/server-utils.mjs) — the filesystem,
-// path-security, watch-revision, request-guard and browser-launcher helpers used
-// by the local project server. (Formerly tests/cli-codeflow.test.mjs; the
-// standalone-CLI server tests were retired with the CLI and replaced by
-// equivalents against the retained project server in local-project-states.)
+// Local server path security, request guards, exclusions and file watchers.
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, mkdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -16,7 +12,6 @@ import {
   resolveSafeProjectPath,
   resolveSafeExistingPath,
   shouldSkipName,
-  openBrowser,
   SOURCE_FILE_MAX_BYTES,
   isMissingFsError,
   bumpWatchRev,
@@ -142,15 +137,4 @@ test('mutation guard requires same-origin Origin and a matching CSRF token', () 
   assert.equal(isValidCsrf({ headers: { 'x-codeflow-csrf': 'nope' } }, 'tok'), false);
   assert.equal(isValidCsrf({ headers: {} }, 'tok'), false);
   assert.equal(isValidCsrf({ headers: { 'x-codeflow-csrf': 'tok' } }, ''), false);
-});
-
-test('openBrowser keeps running when the opener is missing', () => {
-  const events = {};
-  const fakeSpawn = () => ({
-    on(name, fn) { events[name] = fn; return this; },
-    unref() {},
-  });
-  assert.doesNotThrow(() => openBrowser('http://127.0.0.1:4173/', fakeSpawn));
-  assert.equal(typeof events.error, 'function');
-  assert.doesNotThrow(() => events.error(Object.assign(new Error('spawn xdg-open ENOENT'), { code: 'ENOENT' })));
 });

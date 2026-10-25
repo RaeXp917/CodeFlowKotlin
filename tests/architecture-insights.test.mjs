@@ -330,7 +330,7 @@ test('Existing non-architecture analysis is preserved (security still runs)', as
   assert.equal((data.securityIssues || []).some((i) => i.title === 'Command Execution'), true);
 });
 
-test('Architecture functions are present inside the shared analyzer block (worker/card parity)', () => {
+test('Architecture functions are present inside the shared analyzer block (browser/worker parity)', () => {
   const block = htmlSource.slice(parserStart, parserEnd);
   assert.ok(block.includes('function computeArchitectureInsights'));
   assert.ok(block.includes('detectArchitectureInsights:function'));

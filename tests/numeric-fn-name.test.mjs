@@ -29,12 +29,7 @@ vm.createContext(context);
 vm.runInContext(`${htmlSource.slice(parserStart, parserEnd)}\nthis.Parser = Parser; this.buildAnalysisData = buildAnalysisData;`, context);
 const { Parser, buildAnalysisData } = context;
 
-// Regression for issues #54 and #52: a numeric object-literal key like
-// `{ 42: function () {} }` made the JS AST walker push a number into
-// `fn.name`. Downstream `buildFunctionNameIndex` then called
-// `fn.indexOf('.')` and threw "fn.indexOf is not a function", aborting the
-// entire analysis ("Analysis failed: fn.indexOf is not a function" /
-// "Failed to analyze ZIP archive: fn.indexOf is not a function").
+// Numeric object keys must not break function-name indexing.
 test('buildFunctionNameIndex tolerates non-string entries', () => {
   const index = Parser.buildFunctionNameIndex([42, null, undefined, '', 'foo', 'Bar.baz']);
   assert.ok(index.exact.has('foo'));
