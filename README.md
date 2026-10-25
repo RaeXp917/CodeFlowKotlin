@@ -67,7 +67,7 @@ are labeled inferred. No fixed MVVM chain is fabricated.
 **Architecture findings** uses the complete per-file insight list, with severity,
 confidence, classification, source expression, remediation and linked lessons.
 **Learn** contains bundled offline explanations and clearly illustrative examples;
-official documentation opens only when clicked. No source is uploaded or edited.
+official documentation opens only when clicked. GUIDE never uploads or edits source.
 Watch changes require **Re-analyze** before showing refreshed guide analysis;
 project switches and exclusions clear invalid context. Older caches need a
 Re-analyze to populate component metadata.
@@ -122,6 +122,33 @@ strings and Pascal comment forms; unsupported language features fall back gracef
 
 ---
 
+
+## Edit existing source in a Code card
+
+Select a file in a registered local project and click **Edit** on its existing
+Code card. The card switches to a plain multiline textarea. Use **Save** or
+**Ctrl+S** while focused to write that real file; **Cancel** leaves disk unchanged.
+Native text selection, clipboard and Undo/Redo remain available. Resize the card
+for more editing space. Ordinary wheel scrolls its editor; Ctrl+Wheel zooms.
+
+Unsaved buffers show an indicator and remain separate per path, including across
+card/view navigation. Return controls reopen hidden editing cards. Navigation
+warns while drafts exist; project changes, exclusions, Re-analyze and page unload
+protect unsaved work. Saving is explicit. Draft text is kept only in memory.
+
+The server requires the active registered project ID, same-origin/CSRF protection,
+an eligible relative source path and the opened file version. External changes
+produce a conflict and keep your draft; **Reload from disk** asks before discarding
+it. Writes prepare a complete same-directory temporary copy, flush it, recheck
+version/path/scope, then replace the original. Only existing UTF-8 source files up
+to 2 MiB are editable. UTF-8 BOM and consistent LF/CRLF are retained. Binary
+containers, mixed/CR-only line endings, hard links and symlinks/junctions are refused.
+Folder/ZIP browser inputs remain read-only; use Add Folder for editing.
+
+After saving, source previews update and Search/dependency/security/architecture
+analysis becomes stale. Use Refresh Search or **Re-analyze** to recompute it. Other
+unsaved buffers survive watch events. No source is compiled, executed, formatted,
+renamed, created or deleted by Save. See [write safety and limitations](docs/local-runtime.md#source-editing).
 
 ## Tests and architecture
 

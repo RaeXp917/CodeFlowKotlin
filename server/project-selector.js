@@ -73,6 +73,7 @@
   function csrf() { return (model && model.csrf) || ''; }
 
   function mutate(path, body) {
+    if(path!=='/__codeflow/pick-folder' && window.codeflowBeforeProjectChange && !window.codeflowBeforeProjectChange())return Promise.reject(new Error('Unsaved source edits kept; project change cancelled.'));
     return fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Codeflow-CSRF': csrf() },

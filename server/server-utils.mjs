@@ -123,7 +123,9 @@ export function isSameOriginMutation(req) {
   if (origin == null || origin === '') return false; // Origin is mandatory for mutations
   let originHost;
   try {
-    originHost = new URL(String(origin)).host.toLowerCase();
+    const parsedOrigin = new URL(String(origin));
+    if (parsedOrigin.protocol !== 'http:') return false;
+    originHost = parsedOrigin.host.toLowerCase();
   } catch {
     return false;
   }

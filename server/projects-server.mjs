@@ -7,6 +7,7 @@
  * Start: node server/projects-server.mjs "C:\\Users\\MainPc\\AndroidStudioProjects"
  */
 import http from 'node:http';
+import { createSourceEditor, SourceEditError, EDIT_BODY_MAX_BYTES } from './source-editor.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
@@ -90,15 +91,22 @@ async function sendFile(res, fullPath, { contentType, maxBytes, revision } = {})
   }
 }
 
-async function parseJson(req, limit = MAX_JSON_BYTES) {
-  const buffers = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > limit) throw new Error('Payload too large');
-    buffers.push(chunk);
-  }
-  return JSON.parse(Buffer.concat(buffers).toString('utf8'));
+function parseJson(req, limit = MAX_JSON_BYTES) {
+  return new Promise((resolve, reject) => {
+    const buffers = []; let size = 0, rejected = false;
+    req.on('data', (chunk) => {
+      if (rejected) return;
+      size += chunk.length;
+      if (size > limit) { rejected = true; buffers.length = 0; reject(new Error('Payload too large')); return; }
+      buffers.push(chunk);
+    });
+    req.on('end', () => {
+      if (rejected) return;
+      try { resolve(JSON.parse(Buffer.concat(buffers).toString('utf8'))); } catch (error) { reject(error); }
+    });
+    req.on('error', reject);
+    req.on('aborted', () => reject(new Error('Request aborted')));
+  });
 }
 
 export function parseArguments(argv) {
@@ -154,6 +162,7 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
   let revisions = new Map();
   let switching = Promise.resolve();
   let pickerBusy = false;
+  const sourceEditor = createSourceEditor(() => ({ projectId: currentId, root: currentRoot, exclusions: currentExclusions, generation }));
 
   async function persistConfig() {
     if (!persist) return;
@@ -429,6 +438,25 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
           .filter((childRel) => !isExcluded(childRel))
           .sort((a, b) => a.localeCompare(b));
         return json(res, 200, { rel, dirs });
+      }
+
+      if (pathname === '/__codeflow/edit-source') {
+        if (req.method !== 'GET' && req.method !== 'POST') return plain(res, 405, 'Method not allowed');
+        if (req.method === 'POST' && !mutationGuard(req, res)) return;
+        try {
+          if (req.method === 'GET') return json(res, 200, sourceEditor.read(url.searchParams.get('pid'), url.searchParams.get('path')));
+          let input;
+          try { input = await parseJson(req, EDIT_BODY_MAX_BYTES); }
+          catch (error) { return json(res, error.message === 'Payload too large' ? 413 : 400, { error: 'Invalid or oversized source payload' }); }
+          const saved = sourceEditor.save(input);
+          const rev = bumpWatchRev(revisions, saved.path);
+          const event = 'data: ' + JSON.stringify({ type: 'change', path: saved.path, rev }) + '\n\n';
+          for (const client of clients) { try { client.write(event); } catch { clients.delete(client); } }
+          return json(res, 200, saved);
+        } catch (error) {
+          if (error instanceof SourceEditError) return json(res, error.status, { code: error.code, error: error.message });
+          throw error;
+        }
       }
 
       if (pathname === '/__codeflow/status') {

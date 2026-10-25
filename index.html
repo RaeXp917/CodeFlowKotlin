@@ -548,6 +548,12 @@ path.force-link-particle.is-on{animation:none;stroke-dasharray:none;display:none
 .code-card-name{font-size:11px;font-weight:600;color:var(--t0);transform-origin:left center;display:inline-block;white-space:nowrap}
 .code-card-path{font-size:9px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px}
 .code-card-body{flex:1;overflow:hidden;min-height:0;user-select:text;content-visibility:auto;contain-intrinsic-size:220px 480px}
+.source-editor{display:flex;flex-direction:column;gap:6px;padding:8px;min-height:0;height:100%;box-sizing:border-box;overflow:auto;user-select:text;color:var(--t1);background:var(--bg0)}
+.source-editor-controls{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px}
+.source-editor p{font-size:11px;margin:0;overflow-wrap:anywhere}
+.code-source-editor{width:100%;flex:1;min-height:80px;height:100%;box-sizing:border-box;resize:none;overflow:auto;white-space:pre;tab-size:4;font:12px/1.6 'JetBrains Mono',monospace;background:var(--bg0);color:var(--t1);border:1px solid var(--border);border-radius:4px;padding:8px;user-select:text;touch-action:pan-x pan-y}
+.code-source-editor:focus-visible{outline:2px solid var(--acc)}
+.source-draft-bar{position:fixed;bottom:8px;left:8px;z-index:30;background:var(--bg1);color:var(--t1);border:1px solid var(--border);border-radius:6px;padding:6px;max-width:calc(100% - 16px);max-height:100px;overflow:auto;font-size:11px}
 .code-card-source-status{padding:12px;display:flex;flex-direction:column;align-items:flex-start;gap:10px}
 .code-card-retry{background:transparent;border:1px solid var(--border);color:var(--t2);padding:4px 8px;border-radius:4px;font-size:10px;cursor:pointer}
 .code-card-retry:hover{border-color:var(--acc);color:var(--acc)}
@@ -12941,7 +12947,7 @@ function isCodeCanvasDeselectTarget(target,svg){
 
 function isCodeCanvasNativeScrollTarget(target){
     if(!target||!target.closest)return false;
-    if(target.closest('.code-source-editor'))return true;
+    if(target.closest('.code-source-editor')||target.closest('.source-editor'))return true;
     if(target.closest('.code-sym-list'))return true;
     var body=target.closest('.code-card-body');
     if(body&&(body.scrollHeight>body.clientHeight||body.scrollWidth>body.clientWidth)&&!target.closest('.code-card.code-far'))return true;
@@ -13766,6 +13772,75 @@ function ArchitectureGuide(props){
 }
 // ===== CODEFLOW_GUIDE_END =====
 
+
+// ===== CODEFLOW_SOURCE_EDITOR_START =====
+function sourceSessionDirty(session){return !!(session&&session.ready&&session.text!==session.original);}
+function sourceSessionsPending(sessions){return Array.from(sessions.values()).some(function(s){return s.saving||sourceSessionDirty(s);});}
+function sourceSessionGuard(sessions,confirm,discard){
+    if(Array.from(sessions.values()).some(function(s){return s.saving;}))return false;
+    return !sourceSessionsPending(sessions)||confirm(discard?'Discard unsaved source edits and continue?':'Unsaved source edits will remain open. Continue to another file?');
+}
+function sourceEditorSaveKey(event,save){
+    if((event.ctrlKey||event.metaKey)&&String(event.key).toLowerCase()==='s'){
+        event.preventDefault();event.stopPropagation();save();return true;
+    }
+    return false;
+}
+function sourceEditorDiskText(saved){return (saved.bom?'\uFEFF':'')+saved.content.replace(/\n/g,saved.lineEnding==='CRLF'?'\r\n':'\n');}
+function SourceCardEditor(props){
+    var h=React.createElement;
+    var session=props.sessions.get(props.path);
+    if(!session){session={path:props.path,projectId:props.projectId,text:'',original:'',ready:false,saving:false,error:'',message:'',version:null};props.sessions.set(props.path,session);}
+    var _revision=useState(0),refresh=_revision[1],mounted=useRef(true),input=useRef(null);
+    function current(){return props.sessions.get(props.path)===session;}
+    function paint(){if(mounted.current&&current())refresh(function(n){return n+1;});}
+    async function load(reload){
+        if(session.saving)return;
+        if(reload&&sourceSessionDirty(session)&&!window.confirm('Reload from disk and discard this unsaved draft?'))return;
+        var loadId=(session.loadId||0)+1;session.loadId=loadId;
+        function activeLoad(){return current()&&mounted.current&&session.loadId===loadId;}
+        session.loading=true;session.error='';session.message='';paint();
+        try{
+            var response=await fetch('/__codeflow/edit-source?pid='+encodeURIComponent(session.projectId)+'&path='+encodeURIComponent(session.path),{cache:'no-store'});
+            var body=await response.json();if(!response.ok)throw new Error(body.error||'Could not open source for editing');
+            if(!activeLoad())return;
+            if(body.projectId!==session.projectId||body.path!==session.path)throw new Error('Source scope changed. Reopen this file.');
+            session.text=body.content;session.original=body.content;session.version=body.version;session.ready=true;session.error='';session.conflict=false;
+            props.onStatus();
+        }catch(error){if(activeLoad())session.error=error.message;}
+        finally{if(activeLoad()){session.loading=false;paint();}}
+    }
+    async function save(){
+        if(!session.ready||session.loading||session.saving||!sourceSessionDirty(session))return;
+        session.saving=true;session.error='';session.message='';paint();props.onStatus();
+        try{
+            var authResponse=await fetch('/__codeflow/projects',{cache:'no-store'}),auth=await authResponse.json();
+            if(!authResponse.ok||auth.selected!==session.projectId||!auth.csrf)throw new Error('Active project changed. Your draft is preserved.');
+            if(!current())return;
+            var response=await fetch('/__codeflow/edit-source',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Codeflow-CSRF':auth.csrf},body:JSON.stringify({projectId:session.projectId,path:session.path,version:session.version,content:session.text})});
+            var body=await response.json();if(!current())return;
+            if(!response.ok){session.conflict=response.status===409;throw new Error(body.error||'Could not save local source');}
+            if(body.projectId!==session.projectId||body.path!==session.path)throw new Error('Source response scope changed. Reload before another save.');
+            session.text=body.content;session.original=body.content;session.version=body.version;session.message='Saved locally. Analysis needs Re-analyze.';session.conflict=false;
+            props.onSaved(body);
+        }catch(error){if(current())session.error=error.message;}
+        finally{session.saving=false;paint();if(current())props.onStatus();}
+    }
+    useEffect(function(){mounted.current=true;if(!session.ready)load(false);return function(){mounted.current=false;};},[]);
+    useEffect(function(){if(session.ready&&input.current)input.current.focus();},[session.ready]);
+    return h('div',{className:'source-editor',onPointerDown:function(e){e.stopPropagation();},onClick:function(e){e.stopPropagation();},onKeyDown:function(e){sourceEditorSaveKey(e,save);}},
+        h('div',{className:'source-editor-controls'},
+            h('button',{className:'view-file-btn',disabled:!session.ready||session.saving||session.loading||!sourceSessionDirty(session),onClick:save,'aria-label':'Save '+props.path},session.saving?'Saving…':'Save'),
+            h('button',{className:'view-file-btn',disabled:session.saving,onClick:function(){if(!sourceSessionDirty(session)||window.confirm('Discard unsaved changes in '+session.path+'?'))props.onCancel(session.path);},'aria-label':'Cancel editing '+props.path},'Cancel'),
+            h('span',{'aria-live':'polite'},sourceSessionDirty(session)?'Unsaved changes':session.ready?'Saved version loaded':'Opening source…'),
+            session.conflict&&h('button',{className:'view-file-btn',onClick:function(){load(true);},'aria-label':'Reload source and resolve conflict'},'Reload from disk')),
+        session.error&&h('p',{role:'alert'},session.error),
+        session.message&&h('p',{role:'status'},session.message),
+        session.ready&&h('textarea',{ref:input,className:'code-source-editor','aria-label':'Edit source '+props.path,value:session.text,spellCheck:false,autoCapitalize:'off',autoCorrect:'off',wrap:'off',readOnly:session.saving,onChange:function(e){var was=sourceSessionDirty(session);session.text=e.target.value;session.message='';paint();if(was!==sourceSessionDirty(session))props.onStatus();},onPointerDown:function(e){e.stopPropagation();},onKeyDown:function(e){if(!sourceEditorSaveKey(e,save))e.stopPropagation();}})
+    );
+}
+// ===== CODEFLOW_SOURCE_EDITOR_END =====
+
 function App(){
     var _a=useState(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'),theme=_a[0],setTheme=_a[1];
     var _d=useState(false),loading=_d[0],setLoading=_d[1];
@@ -13826,6 +13901,10 @@ function App(){
     var _cli=useState(null),projectStatus=_cli[0],setProjectStatus=_cli[1];
     var _cliDirty=useState([]),projectDirty=_cliDirty[0],setProjectDirty=_cliDirty[1];
     var _cliLive=useState(Object.create(null)),projectLiveByPath=_cliLive[0],setProjectLiveByPath=_cliLive[1];
+    var _editing=useState(new Set()),editingPaths=_editing[0],setEditingPaths=_editing[1];
+    var _editRevision=useState(0),setEditRevision=_editRevision[1];
+    var sourceSessionsRef=useRef(new Map());
+    var sourceGuardRef=useRef(null);
     var isMobile=viewportWidth<=980;
     var svgRef=useRef(null);
     var graph3dRef=useRef(null);
@@ -14080,6 +14159,37 @@ function App(){
         setArmedNamedGroupId(null);
     },[namedGroupsSession]);
 
+    function updateSourceEditStatus(){setEditRevision(function(n){return n+1;});}
+    function discardSourceEdits(){
+        if(!sourceSessionGuard(sourceSessionsRef.current,function(message){return window.confirm(message);},true))return false;
+        sourceSessionsRef.current.clear();setEditingPaths(new Set());updateSourceEditStatus();return true;
+    }
+    function allowSourceNavigation(path){return path===selectedPathRef.current||sourceSessionGuard(sourceSessionsRef.current,function(message){return window.confirm(message);},false);}
+    sourceGuardRef.current=discardSourceEdits;
+    useEffect(function(){
+        function beforeUnload(event){if(sourceSessionsPending(sourceSessionsRef.current)){event.preventDefault();event.returnValue='';}}
+        function beforeProjectChange(){return sourceGuardRef.current?sourceGuardRef.current():true;}
+        window.addEventListener('beforeunload',beforeUnload);
+        window.codeflowBeforeProjectChange=beforeProjectChange;
+        return function(){window.removeEventListener('beforeunload',beforeUnload);if(window.codeflowBeforeProjectChange===beforeProjectChange)delete window.codeflowBeforeProjectChange;};
+    },[]);
+    function beginSourceEdit(path){
+        if(localSourceKind!=='local-project'||!guideScopeValid||!guideIndex.files.has(path)||!projectStatus||!projectStatus.pid)return;
+        if(!selectFile(path))return;
+        setEditingPaths(function(prev){var next=new Set(prev);next.add(path);return next;});
+    }
+    function cancelSourceEdit(path){sourceSessionsRef.current.delete(path);setEditingPaths(function(prev){var next=new Set(prev);next.delete(path);return next;});updateSourceEditStatus();}
+    function savedSourceEdit(saved){
+        var content=sourceEditorDiskText(saved);
+        setProjectLiveByPath(function(prev){return mergeProjectLiveContents(prev,[{path:saved.path,content:content}]);});
+        setProjectDirty(function(prev){return noteProjectWatchPath(prev,saved.path);});
+        searchSeqRef.current++;
+        if(searchAbortRef.current){searchAbortRef.current.abort();searchAbortRef.current=null;}
+        setSearchLoading(false);setSearchStats(null);setSearchStale(true);setSearchResults([]);
+        setFilePreview(function(prev){if(!prev||prev.path!==saved.path)return prev;filePreviewRequestRef.current++;return Object.assign({},prev,{content:content,loading:false,error:null});});
+        updateSourceEditStatus();
+    }
+
     function refreshRecentList(){
         listRecentAnalyses().then(function(rows){
             setRecentAnalyses((rows||[]).map(function(row){
@@ -14114,7 +14224,7 @@ function App(){
     }
 
     function applyCachedAnalysis(record){
-        if(!isLocalAnalysisRecord(record)||!record.data)return;
+        if(!isLocalAnalysisRecord(record)||!record.data||!discardSourceEdits())return;
         analysisRunRef.current++;
         setData(compactAnalysisForCache(record.data));
         setExpandedPaths(new Set(['']));
@@ -14275,6 +14385,7 @@ function App(){
     },[currentHydrationId,projectDirty,localSourceKind,projectStatus,projectLiveByPath]);
 
     async function analyzeLocalProject(force,statusHint,wantedRoot){
+        if(!discardSourceEdits())return false;
         var status=statusHint||projectStatus;
         if(!status||!status.ok){
             try{
@@ -14299,7 +14410,7 @@ function App(){
         projectWatchReadRef.current=Object.create(null);
         projectWatchSnapRevRef.current=Object.create(null);
         projectAnalyzingRef.current=true;
-        resetAnalysisState();
+        if(!resetAnalysisState())return false;
         var analysisRun=analysisRunRef.current;
         setLocalDirHandle(null);
         localFolderKeyRef.current=null;
@@ -14388,6 +14499,7 @@ function App(){
     }
 
     function resetAnalysisState(){
+        if(!discardSourceEdits())return false;
         analysisRunRef.current++;
         setError(null);
         setData(null);
@@ -14401,6 +14513,7 @@ function App(){
         setActiveSymbol(null);
         setProjectDirty([]);
         clearProjectLiveDiffs();
+        return true;
     }
 
     function openExcludeModal(){
@@ -14457,7 +14570,7 @@ function App(){
             return;
         }
         window.showDirectoryPicker().then(function(dirHandle){
-            resetAnalysisState();
+            if(!resetAnalysisState())return false;
             setRepoInfo(null);
             localFolderKeyRef.current=null;
             localFolderSelectionRef.current=newLocalSelectionId();
@@ -14493,7 +14606,7 @@ function App(){
     function handleZipSelected(e){
         var file=e.target.files&&e.target.files[0];
         if(!file)return;
-        resetAnalysisState();
+        if(!resetAnalysisState())return false;
         setRepoInfo(null);
         setLocalDirHandle(null);
         setLocalSourceKind('zip');
@@ -14510,7 +14623,7 @@ function App(){
         if(!fileList||fileList.length===0)return;
         var files=Array.from(fileList);
         localFilesRef.current=files;
-        resetAnalysisState();
+        if(!resetAnalysisState())return false;
         setRepoInfo(null);
         localFolderKeyRef.current=null;
         localFolderSelectionRef.current=newLocalSelectionId();
@@ -14543,14 +14656,14 @@ function App(){
             var retained={sourceKey:localFolderKeyRef.current};
             var handleMatches=!source||retainedFolderMatchesRecord(source,retained);
             if(localDirHandle&&handleMatches){
-                resetAnalysisState();
+                if(!resetAnalysisState())return false;
                 setLoading(true);
                 setProgress('Reading local folder...');
                 readLocalFolder(localDirHandle,activeExcludePatterns);
                 return;
             }
             if(localFilesRef.current&&handleMatches){
-                resetAnalysisState();
+                if(!resetAnalysisState())return false;
                 setLoading(true);
                 setProgress('Reading local folder...');
                 readLocalFolderFromFiles(localFilesRef.current,activeExcludePatterns);
@@ -14570,7 +14683,7 @@ function App(){
                 showNotification('Open ZIP again to re-analyze this archive.','warning');
                 return;
             }
-            resetAnalysisState();
+            if(!resetAnalysisState())return false;
             setLocalDirHandle(null);
             setLocalSourceKind('zip');
             zipArchiveRef.current=null;
@@ -14925,8 +15038,8 @@ function App(){
         }
     }
 
-    var selectFile=useCallback(function(path){
-        if(!data||!guideIndex.files.has(path))return;
+    var selectFile=useCallback(function(path,alreadyAllowed){
+        if(!data||!guideIndex.files.has(path)||(!alreadyAllowed&&!allowSourceNavigation(path)))return false;
         var file=data.files.find(function(f){return f.path===path;});
         if(file){
             if(selectedPathRef.current!==path)setActiveSymbol(null);
@@ -14943,11 +15056,13 @@ function App(){
             codeLinkParticlesHiddenRef.current=false;
             if(graphConfig.vizType!=='code')updateGraphHighlight(path,blast);
             else queueForceLinkVisuals();
+            return true;
         }
+        return false;
     },[data,guideIndex,repoInfo,localSourceKind,isMobile,graphConfig.vizType]);
     selectFileRef.current=selectFile;
     function openCodeFile(path,replace){
-        if(!guideIndex.files.has(path))return;
+        if(!guideIndex.files.has(path)||!allowSourceNavigation(path))return;
         var nextFilter=folderFilterAfterCodeNav(path,data,folderFilter);
         var reveal=nextFilter!==folderFilter;
         if(reveal)setFolderFilter(nextFilter);
@@ -14957,7 +15072,7 @@ function App(){
         if(!resolved.opened)return;
         setOpenedCodePaths(function(prev){return openCodeCardPaths(prev,path,null,allowReplace,hiddenOpenedCodePaths(prev,data,nextFilter));});
         if(resolved.inserted)pendingFlyToRef.current=path;
-        selectFile(path);
+        selectFile(path,true);
     }
     function retryCodeSource(path){
         if(!path)return;
@@ -15119,7 +15234,7 @@ function App(){
     function openFilePreview(path,line){
         if(!repoInfo||!guideIndex.files.has(path))return;
         var previewRequest=++filePreviewRequestRef.current;
-        selectFile(path);
+        if(!selectFile(path))return;
         var filename=path.split('/').pop();
         setFilePreview({path:path,filename:filename,content:null,line:line||null,loading:true,error:null});
         var existingFile=data&&data.files?data.files.find(function(f){return f.path===path;}):null;
@@ -15127,8 +15242,9 @@ function App(){
             setFilePreview({path:path,filename:filename,content:'',line:line||null,loading:false,error:existingFile.analysisSkipped==='oversized'?'Skipped during analysis (file too large)':'File was not fetched during analysis'});
             return;
         }
-        if(existingFile&&fileHasLoadedSource(existingFile)){
-            setFilePreview({path:path,filename:filename,content:existingFile.content,line:line||null,loading:false,error:null});
+        var liveSource=projectLiveByPath[path];
+        if(typeof liveSource==='string'||(existingFile&&fileHasLoadedSource(existingFile))){
+            setFilePreview({path:path,filename:filename,content:typeof liveSource==='string'?liveSource:existingFile.content,line:line||null,loading:false,error:null});
             return;
         }
         var previewId=analysisHydrationIdRef.current;
@@ -17354,7 +17470,7 @@ function App(){
         showNotification('Report exported as '+format.toUpperCase(),'success');
     }
     function showNotification(msg,type){setToast({msg:msg,type:type||'success'});setTimeout(function(){setToast(null);},3000);}
-    function resetAnalysis(){analysisRunRef.current++;setData(null);setSelected(null);setBlastRadius(null);setRepoInfo(null);setFolderFilter(null);setLocalDirHandle(null);setLocalSourceKind(null);setCachedFromId(null);setActiveSymbol(null);setProjectDirty([]);clearProjectLiveDiffs();localFolderKeyRef.current=null;localFolderSelectionRef.current=null;localFilesRef.current=null;zipKeyRef.current=null;zipArchiveRef.current=null;zipFileRef.current=null;window.history.replaceState({},'',window.location.pathname);}
+    function resetAnalysis(){if(!discardSourceEdits())return;analysisRunRef.current++;setData(null);setSelected(null);setBlastRadius(null);setRepoInfo(null);setFolderFilter(null);setLocalDirHandle(null);setLocalSourceKind(null);setCachedFromId(null);setActiveSymbol(null);setProjectDirty([]);clearProjectLiveDiffs();localFolderKeyRef.current=null;localFolderSelectionRef.current=null;localFilesRef.current=null;zipKeyRef.current=null;zipArchiveRef.current=null;zipFileRef.current=null;window.history.replaceState({},'',window.location.pathname);}
     function filterByFolder(path){setFolderFilter(function(prev){return prev===path?null:path;});}
     function renderRecentsList(){
         return React.createElement('div',{className:'sidebar-scroll'},
@@ -17830,6 +17946,7 @@ function App(){
     }
     function renderCodeFileCard(file,isPrimary){
         if(!file)return null;
+        var editing=editingPaths.has(file.path);
         var sourceState=fileSourceDisplayState(file,canReadLiveFileSource(),codeSourceFailed);
         var body;
         if(sourceState==='ready'){
@@ -17892,7 +18009,7 @@ function App(){
                 });
             })
         ):null;
-        body=React.createElement('div',{className:'code-card-source'},body,blockLayer);
+        body=editing?React.createElement(SourceCardEditor,{key:projectStatus.pid+':'+file.path,path:file.path,projectId:projectStatus.pid,sessions:sourceSessionsRef.current,onSaved:savedSourceEdit,onCancel:cancelSourceEdit,onStatus:updateSourceEditStatus}):React.createElement('div',{className:'code-card-source'},body,blockLayer);
         return React.createElement('div',{key:file.path,'data-code-card':file.path,className:'code-card'+(isPrimary?' primary':' linked')+(cardSize.clipped?' clipped':'')+(cardSize.expand?' expand':'')+(cardSize.wrap?' wrap':''),onClick:function(e){
             var taken=consumeCodeCardClick(codeCardIgnoreClickRef.current);
             codeCardIgnoreClickRef.current=taken.ignoreNextClick;
@@ -17922,6 +18039,7 @@ function App(){
                             })
                         )
                     ):null,
+                    !editing&&localSourceKind==='local-project'&&guideScopeValid&&!file.analysisSkipped&&React.createElement('button',{className:'view-file-btn','aria-label':'Edit '+file.path,onPointerDown:function(e){e.stopPropagation();},onClick:function(e){e.stopPropagation();beginSourceEdit(file.path);}},'Edit'),
                     React.createElement('span',{className:'badge badge-default'},isPrimary?'selected':'open')
                 )
             ),
@@ -17933,7 +18051,7 @@ function App(){
                     setActiveSymbol(function(prev){return prev===name?null:name;});
                 }
             },onScroll:isPrimary&&cardSize.clipped?function(e){setCodePillScroll(e.currentTarget.scrollTop);}:undefined},body),
-            pills.map(function(pill){
+            (editing?[]:pills).map(function(pill){
                 var top=codeCardPillViewTop(pill.top,isPrimary?codePillScroll:0,cardSize.height,CODE_CARD_HEAD_HEIGHT);
                 if(top==null)return null;
                 return React.createElement('button',{
@@ -18712,7 +18830,7 @@ function App(){
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'ban',size:'l'})),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'No External Services'),React.createElement('div',{className:'privacy-text'},'There is no GitHub integration and no remote repository analysis. Analyzing a local project makes no external network requests; nothing is fetched from or sent to any server. (Official documentation links open only when you click them.)'))
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'No External Services'),React.createElement('div',{className:'privacy-text'},'There is no GitHub integration and no remote repository analysis. Analyzing a local project makes no external network requests; source reads and explicit saves stay on the local server. (Official documentation links open only when you click them.)'))
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},React.createElement(Icon,{name:'key',size:'l'})),
@@ -18874,6 +18992,8 @@ function App(){
                 )
             )
         ),
+        editingPaths.size>0&&React.createElement('div',{className:'source-draft-bar','aria-label':'Open source editing buffers'},
+            React.createElement('span',null,'Source buffers: '),Array.from(editingPaths).map(function(path){var session=sourceSessionsRef.current.get(path);return React.createElement('button',{key:path,className:'view-file-btn',onClick:function(){setGraphConfig(function(cfg){return Object.assign({},cfg,{vizType:'code'});});goToFile(path);}},path.split('/').pop()+(sourceSessionDirty(session)?' • unsaved':''));})),
         error&&React.createElement('div',{style:{position:'fixed',bottom:20,right:20,background:'var(--red)',color:'white',padding:'12px 20px',borderRadius:8,zIndex:1000,maxWidth:350},'role':'alert'},[error,React.createElement('button',{'aria-label':'Dismiss error','onClick':function(){setError(null);},style:{marginLeft:12,background:'none',border:'none',color:'white',cursor:'pointer',fontSize:16}},'×')])
     );
 }
