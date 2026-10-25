@@ -141,11 +141,24 @@ problem, remediation, docUrl, file, path, line, code }`.
 | `android-viewmodel-holds-ui-reference` | high / high | A `ViewModel`/`AndroidViewModel` with a `Context`/`Activity`/`Fragment`/`View` (etc.) field — a leak. `Application` in `AndroidViewModel` is allowed | [ViewModel best practices](https://developer.android.com/topic/libraries/architecture/viewmodel#best-practices) |
 | `compose-state-without-remember` | high / medium | `mutableStateOf(...)` **inside a `@Composable`** without `remember`/`rememberSaveable` — state resets every recomposition. ViewModel state properties are not flagged | [State in Compose](https://developer.android.com/develop/ui/compose/state#state-in-composables) |
 | `android-ui-builds-data-layer` | medium / medium | A UI/presentation file constructing the data layer directly (`Retrofit.Builder()`, `Room.databaseBuilder()`) | [Data layer](https://developer.android.com/topic/architecture/data-layer) |
+| `android-viewmodel-exposed-mutable-state` | medium / high | A ViewModel exposing a **public** `MutableStateFlow`/`MutableLiveData` property (breaks single-source-of-truth). Private backing state + `asStateFlow()` and function-locals are not flagged | [UI state](https://developer.android.com/topic/architecture/ui-layer#define-ui-state) |
+| `android-flow-collect-without-lifecycle` | low / medium (recommendation) | `collectAsState()` inside a `@Composable` when the file does not use `collectAsStateWithLifecycle()`. A preference for screen-level state, never a high-severity issue | [Lifecycle-aware collection](https://developer.android.com/topic/libraries/architecture/coroutines#lifecycle-aware) |
+| `android-unstructured-coroutine-scope` | medium / medium (potential) | An ad-hoc `CoroutineScope(...).launch/async` or `MainScope().launch/async` with no retained, cancelled scope. `viewModelScope`/`lifecycleScope`/`rememberCoroutineScope` are not flagged | [Coroutines best practices](https://developer.android.com/kotlin/coroutines/coroutines-best-practices) |
+| `android-hardcoded-dispatcher` | low / medium (recommendation) | `withContext(Dispatchers.X)` / `flowOn(Dispatchers.X)` inside a repository/service/data-source — a testability recommendation. An **injected** dispatcher default (`= Dispatchers.IO`) and non-data-layer code are not flagged | [Inject dispatchers](https://developer.android.com/kotlin/coroutines/coroutines-best-practices#inject-dispatchers) |
 
 Android guidance intentionally avoids dogma: CodeFlow does not require Clean
 Architecture, UseCases or a fixed layer stack, and does not flag a ViewModel
-merely for being large. See the official
-[architecture recommendations](https://developer.android.com/topic/architecture/recommendations).
+merely for being large. The Phase C rules are deliberately conservative — they
+honour `private`/`asStateFlow()` encapsulation, managed coroutine scopes, injected
+dispatchers, and multiline `remember`/`rememberSaveable` — and lifecycle/dispatcher
+preferences are reported as low-severity recommendations, never as confirmed bugs.
+Construct recognition (`Parser.detectKotlinConstructs`) identifies Activities,
+Fragments, Composables, ViewModels, repositories, services, Room DAOs, Retrofit
+APIs, Hilt/Koin DI, StateFlow/SharedFlow usage, suspend functions and coroutine
+scopes from source evidence. See the official
+[architecture recommendations](https://developer.android.com/topic/architecture/recommendations),
+[state hoisting](https://developer.android.com/develop/ui/compose/state-hoisting) and
+[side effects](https://developer.android.com/develop/ui/compose/side-effects).
 
 ### Swift / SwiftUI
 

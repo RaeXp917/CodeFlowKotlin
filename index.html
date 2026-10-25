@@ -1323,6 +1323,54 @@ var ARCHITECTURE_RULE_CATALOG={
         docUrl:'https://developer.android.com/topic/architecture/data-layer',
         learnTopicId:'kotlin-mvvm-layers'
     },
+    'android-viewmodel-exposed-mutable-state':{
+        ruleId:'android-viewmodel-exposed-mutable-state',ecosystem:'kotlin',languages:['kotlin'],frameworks:['android'],
+        kind:'issue',severity:'medium',confidence:'high',
+        title:'ViewModel exposes mutable state publicly',
+        explanation:'Exposing a public MutableStateFlow/MutableLiveData lets the UI mutate state directly, breaking the single source of truth and unidirectional data flow. The ViewModel should own writes and expose read-only state.',
+        evidence:'A non-private MutableStateFlow/MutableLiveData property on a ViewModel class.',
+        badExample:'val items = MutableStateFlow<List<Item>>(emptyList())',
+        goodExample:'private val _items = MutableStateFlow(...)\nval items = _items.asStateFlow()',
+        exclusions:['Private backing state is not flagged.','Read-only StateFlow/LiveData exposure (asStateFlow()) is correct.','Locals inside functions are ignored.'],
+        docUrl:'https://developer.android.com/topic/architecture/ui-layer#define-ui-state',
+        learnTopicId:'android-ui-state'
+    },
+    'android-flow-collect-without-lifecycle':{
+        ruleId:'android-flow-collect-without-lifecycle',ecosystem:'kotlin',languages:['kotlin'],frameworks:['android','compose'],
+        kind:'recommendation',severity:'low',confidence:'medium',
+        title:'Flow collected without lifecycle awareness',
+        explanation:'collectAsState() keeps collecting while the screen is stopped. For screen-level state, collectAsStateWithLifecycle() pauses collection with the lifecycle. This is a recommendation, not an error — plain collectAsState() is fine for composition-scoped state.',
+        evidence:'collectAsState() inside a @Composable, where the file does not use collectAsStateWithLifecycle().',
+        badExample:'val s by vm.state.collectAsState()',
+        goodExample:'val s by vm.state.collectAsStateWithLifecycle()',
+        exclusions:['Not flagged if the file already uses collectAsStateWithLifecycle().','Never reported as a high-severity issue.'],
+        docUrl:'https://developer.android.com/topic/libraries/architecture/coroutines#lifecycle-aware',
+        learnTopicId:'android-lifecycle-flow'
+    },
+    'android-unstructured-coroutine-scope':{
+        ruleId:'android-unstructured-coroutine-scope',ecosystem:'kotlin',languages:['kotlin'],frameworks:['android'],
+        kind:'potential',severity:'medium',confidence:'medium',
+        title:'Coroutine launched on an unmanaged ad-hoc scope',
+        explanation:'Creating a CoroutineScope/MainScope inline and launching on it leaves no handle to cancel, so the work is unstructured and can outlive its owner — the same class of problem as GlobalScope.',
+        evidence:'CoroutineScope(...).launch/async or MainScope().launch/async with no retained, cancelled scope.',
+        badExample:'CoroutineScope(Dispatchers.IO).launch { sync() }',
+        goodExample:'viewModelScope.launch { sync() }',
+        exclusions:['viewModelScope/lifecycleScope/rememberCoroutineScope are not flagged.','A scope held in a property and cancelled in onCleared() is the managed form.'],
+        docUrl:'https://developer.android.com/kotlin/coroutines/coroutines-best-practices',
+        learnTopicId:'kotlin-coroutine-scope'
+    },
+    'android-hardcoded-dispatcher':{
+        ruleId:'android-hardcoded-dispatcher',ecosystem:'kotlin',languages:['kotlin'],frameworks:['android'],
+        kind:'recommendation',severity:'low',confidence:'medium',
+        title:'Hardcoded Dispatcher in the data layer',
+        explanation:'A repository/service that references Dispatchers.* directly fixes its threading policy, so tests cannot substitute a test dispatcher. Injecting the dispatcher keeps the layer testable. This is a testability recommendation, not a runtime bug.',
+        evidence:'Dispatchers.IO/Default/Main/Unconfined inside a repository/service/data-source class.',
+        badExample:'withContext(Dispatchers.IO) { dao.load() }',
+        goodExample:'class Repo(private val io: CoroutineDispatcher = Dispatchers.IO)',
+        exclusions:['Only flagged in data-layer roles (Repository/Service/DataSource).','Not a confirmed bug; a plain recommendation.'],
+        docUrl:'https://developer.android.com/kotlin/coroutines/coroutines-best-practices#inject-dispatchers',
+        learnTopicId:'kotlin-dispatcher-injection'
+    },
     'swiftui-observedobject-ownership':{
         ruleId:'swiftui-observedobject-ownership',ecosystem:'swift',languages:['swift'],frameworks:['swiftui'],
         kind:'issue',severity:'high',confidence:'high',
@@ -1420,6 +1468,30 @@ var LEARNING_TOPICS={
         example:'viewModelScope.launch { repo.load() }',
         docUrl:'https://developer.android.com/kotlin/coroutines/coroutines-best-practices',
         relatedRuleIds:['android-globalscope-usage']
+    },
+    'android-ui-state':{
+        topicId:'android-ui-state',title:'UI state encapsulation & UDF',ecosystem:'kotlin',
+        roles:['ViewModel','UI'],
+        explanation:'The ViewModel is the single source of truth for screen state. Keep mutable state private and expose read-only StateFlow/LiveData; the UI sends events and observes state (unidirectional data flow), rather than writing state directly.',
+        example:'private val _ui = MutableStateFlow(UiState())\nval ui = _ui.asStateFlow()',
+        docUrl:'https://developer.android.com/topic/architecture/ui-layer#define-ui-state',
+        relatedRuleIds:['android-viewmodel-exposed-mutable-state']
+    },
+    'android-lifecycle-flow':{
+        topicId:'android-lifecycle-flow',title:'Lifecycle-aware Flow collection',ecosystem:'kotlin',
+        roles:['UI','Composable'],
+        explanation:'Collecting a Flow for screen state should stop while the screen is stopped. In Compose use collectAsStateWithLifecycle(); in Views use repeatOnLifecycle(STARTED){ flow.collect { } }. Composition-scoped state can still use plain collectAsState().',
+        example:'val ui by vm.ui.collectAsStateWithLifecycle()',
+        docUrl:'https://developer.android.com/topic/libraries/architecture/coroutines#lifecycle-aware',
+        relatedRuleIds:['android-flow-collect-without-lifecycle']
+    },
+    'kotlin-dispatcher-injection':{
+        topicId:'kotlin-dispatcher-injection',title:'Injecting coroutine dispatchers',ecosystem:'kotlin',
+        roles:['Repository','Service'],
+        explanation:'Inject a CoroutineDispatcher (defaulting to the real one) instead of referencing Dispatchers.* directly, so tests can swap in a StandardTestDispatcher for deterministic, fast execution.',
+        example:'class Repo(private val io: CoroutineDispatcher = Dispatchers.IO)',
+        docUrl:'https://developer.android.com/kotlin/coroutines/coroutines-best-practices#inject-dispatchers',
+        relatedRuleIds:['android-hardcoded-dispatcher']
     },
     'swiftui-observation':{
         topicId:'swiftui-observation',title:'SwiftUI model ownership',ecosystem:'swift',
@@ -1553,6 +1625,65 @@ function kotlinComposableBodyRanges(masked){
     }
     return ranges;
 }
+// Brace ranges [open,close] for the bodies of ordinary fun declarations (masked),
+// used to tell class-level properties from code inside functions.
+function kotlinFunctionBodyRanges(masked){
+    var ranges=[],re=/\bfun\s+(?:<[^>]*>\s*)?[A-Za-z_][\w.]*\s*\(/g,m;
+    while((m=re.exec(masked))!==null){
+        var paren=masked.indexOf('(',m.index);
+        if(paren<0)continue;
+        var pClose=kjMatchParen(masked,paren);
+        if(pClose<0)continue;
+        var brace=masked.indexOf('{',pClose);
+        if(brace<0)continue;
+        var nl=masked.indexOf('\n',pClose);
+        var gap=masked.slice(pClose+1,brace);
+        if(/[;]/.test(gap))continue;
+        if(/=/.test(gap)&&(nl<0||brace>nl))continue;// expression-bodied fun
+        var bClose=kjMatchBrace(masked,brace);
+        if(bClose<0)continue;
+        ranges.push([brace,bClose]);
+    }
+    return ranges;
+}
+// Recognize Kotlin/Android architectural roles from real source evidence (not
+// just file names). Heuristic, comment/string-masked token matching — not an AST.
+function detectKotlinConstructs(content){
+    var c=String(content||''),masked=maskKotlinJavaLiterals(c);
+    var classes=[],cre=/\b(?:class|object|interface)\s+(\w+)([^{\n]*)/g,cm;
+    while((cm=cre.exec(masked))!==null)classes.push({name:cm[1],rest:cm[2]||''});
+    function names(pred){return classes.filter(pred).map(function(x){return x.name;});}
+    var count=function(re){return (masked.match(re)||[]).length;};
+    return {
+        isAndroid:/\b(?:androidx?\.|android\.(?:app|content|os|view|widget|util))/.test(c),
+        activities:names(function(x){return /:\s*[^\n]*\b(?:AppCompatActivity|ComponentActivity|FragmentActivity|Activity)\b/.test(x.rest);}),
+        fragments:names(function(x){return /:\s*[^\n]*\b(?:DialogFragment|Fragment)\b/.test(x.rest);}),
+        viewModels:names(function(x){return /:\s*[^\n]*\b(?:ViewModel|AndroidViewModel)\b/.test(x.rest)||/ViewModel$/.test(x.name);}),
+        repositories:names(function(x){return /Repository(?:Impl)?$/.test(x.name);}),
+        services:names(function(x){return /Service(?:Impl)?$/.test(x.name);}),
+        daos:names(function(x){return /Dao$/.test(x.name);}),
+        composables:count(/@Composable\b/g),
+        retrofitApi:/@(?:GET|POST|PUT|DELETE|PATCH|HTTP)\b/.test(masked)||/\bRetrofit\b/.test(masked),
+        room:/@(?:Dao|Entity|Database)\b/.test(masked)||/\bRoomDatabase\b/.test(masked),
+        di:{
+            hilt:/@(?:HiltAndroidApp|AndroidEntryPoint|HiltViewModel|Module|InstallIn|Inject|Provides)\b/.test(masked),
+            koin:/\bimport\s+org\.koin\b/.test(c)
+        },
+        flow:{stateFlow:/\bStateFlow\b/.test(masked),mutableStateFlow:/\bMutableStateFlow\b/.test(masked),sharedFlow:/\b(?:Mutable)?SharedFlow\b/.test(masked)},
+        suspendFns:count(/\bsuspend\s+fun\b/g),
+        scopes:{
+            viewModelScope:/\bviewModelScope\b/.test(masked),
+            lifecycleScope:/\blifecycleScope\b/.test(masked),
+            rememberCoroutineScope:/\brememberCoroutineScope\b/.test(masked)
+        }
+    };
+}
+// Is `name` a Kotlin class whose name marks a data-layer role (for testability
+// recommendations that only apply to repositories/services/data sources)?
+function isKotlinDataLayerFile(masked,name){
+    if(/(repository|repositoryimpl|service|serviceimpl|datasource|dao)\.(kt|kts)$/i.test(name))return true;
+    return /\b(?:class|object)\s+\w*(?:Repository|RepositoryImpl|Service|ServiceImpl|DataSource)\b/.test(masked);
+}
 function runKotlinArchitectureRules(f,path,name,content,insights){
     var masked=maskKotlinJavaLiterals(content);
     var ECO='Kotlin/Android',m;
@@ -1603,6 +1734,79 @@ function runKotlinArchitectureRules(f,path,name,content,insights){
                 remediation:'Move creation of the database/network client into a repository or a dependency-injection module and have the UI depend on that abstraction.',
                 docUrl:'https://developer.android.com/topic/architecture/data-layer',
                 name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+        }
+    }
+
+    // C — Unstructured coroutine ownership beyond GlobalScope: an ad-hoc
+    // CoroutineScope(...)/MainScope() that is launched inline and never retained,
+    // so nothing cancels it. Managed scopes (viewModelScope, lifecycleScope,
+    // rememberCoroutineScope, a retained scope cancelled in onCleared) are fine.
+    var scopeRe=/\b(CoroutineScope\s*\([^)]*\)|MainScope\s*\(\s*\))\s*\.\s*(launch|async)\b/g;
+    while((m=scopeRe.exec(masked))!==null){
+        pushArchInsight(insights,{ruleId:'android-unstructured-coroutine-scope',ecosystem:ECO,severity:'medium',confidence:'medium',kind:'potential',
+            title:'Coroutine launched on an unmanaged ad-hoc scope',
+            problem:'Creating a CoroutineScope/MainScope inline and calling .'+m[2]+' on it leaves no reference to cancel, so the work is not tied to any lifecycle and can leak or run after its owner is gone.',
+            remediation:'Launch from a lifecycle-aware scope (viewModelScope, lifecycleScope, rememberCoroutineScope), or hold the scope in a property and cancel it in onCleared()/the owner’s teardown.',
+            docUrl:'https://developer.android.com/kotlin/coroutines/coroutines-best-practices',
+            name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+    }
+
+    if(isViewModelKotlinFile(masked,name)){
+        // B — A ViewModel exposes writable mutable state (MutableStateFlow /
+        // MutableLiveData) publicly, breaking single-source-of-truth encapsulation.
+        var fnRanges=kotlinFunctionBodyRanges(masked);
+        var pubRe=/(^|[\n{;])([ \t]*)((?:@\w+(?:\([^)]*\))?\s*)*)((?:public\s+|open\s+|override\s+|lateinit\s+)*)(val|var)\s+(\w+)\s*(?::\s*(MutableStateFlow|MutableLiveData)\b[^=\n]*)?(=\s*(?:MutableStateFlow|MutableLiveData)\b)?/g;
+        while((m=pubRe.exec(masked))!==null){
+            var modifiers=m[4]||'';
+            var declaredType=m[7];var inited=m[8];
+            if(!declaredType&&!inited)continue;// not a mutable-flow/livedata property
+            if(/\b(private|protected|internal)\b/.test(modifiers))continue;// encapsulated
+            var declIdx=m.index+(m[1]?m[1].length:0);
+            if(archInAnyRange(declIdx,fnRanges))continue;// a local inside a function, not a public property
+            var kind2=declaredType||'MutableStateFlow';
+            pushArchInsight(insights,{ruleId:'android-viewmodel-exposed-mutable-state',ecosystem:ECO,severity:'medium',confidence:'high',kind:'issue',
+                title:'ViewModel exposes mutable state publicly',
+                problem:'The ViewModel exposes '+m[6]+' as a public '+kind2+', so any UI consumer can mutate it directly, defeating the single-source-of-truth and unidirectional data flow the ViewModel is meant to enforce.',
+                remediation:'Keep the mutable state private (private val _'+m[6]+') and expose a read-only StateFlow/LiveData (val '+m[6]+' = _'+m[6]+'.asStateFlow()); update it only through ViewModel functions.',
+                docUrl:'https://developer.android.com/topic/architecture/ui-layer#define-ui-state',
+                name:name,path:path,line:archLineAt(content,declIdx),code:archSnippet(content,declIdx)});
+        }
+    }
+
+    // A — Lifecycle-aware Flow collection. Inside a @Composable, collectAsState()
+    // is not lifecycle-aware; prefer collectAsStateWithLifecycle(). Recommendation
+    // only, and skipped when the file already uses the lifecycle-aware collector.
+    var composeRanges=kotlinComposableBodyRanges(masked);
+    if(composeRanges.length&&!/\bcollectAsStateWithLifecycle\b/.test(masked)){
+        var casRe=/\.\s*collectAsState\s*\(/g;
+        while((m=casRe.exec(masked))!==null){
+            if(!archInAnyRange(m.index,composeRanges))continue;
+            pushArchInsight(insights,{ruleId:'android-flow-collect-without-lifecycle',ecosystem:ECO,severity:'low',confidence:'medium',kind:'recommendation',
+                title:'Flow collected without lifecycle awareness',
+                problem:'collectAsState() keeps collecting even when the UI is in the background, which can waste work or process updates the stopped screen does not need.',
+                remediation:'For screen-level state, prefer collectAsStateWithLifecycle() (lifecycle-runtime-compose), which pauses collection when the lifecycle is stopped. Plain collectAsState() is fine for state scoped to composition.',
+                docUrl:'https://developer.android.com/topic/libraries/architecture/coroutines#lifecycle-aware',
+                name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+        }
+    }
+
+    // F — Testability recommendation: a hardcoded Dispatchers.* inside a
+    // repository/service/data-source makes that layer hard to test deterministically.
+    if(isKotlinDataLayerFile(masked,name)){
+        // Only hardcoded USAGE sites (withContext/launch/async/flowOn(Dispatchers.X))
+        // are flagged — an injected default parameter (= Dispatchers.IO) is the
+        // recommended form and is deliberately not flagged.
+        var dispRe=/\b(withContext|flowOn)\s*\(\s*Dispatchers\s*\.\s*(IO|Default|Main|Unconfined)\b/g;
+        var seenDispLine={};
+        while((m=dispRe.exec(masked))!==null){
+            var dLine=archLineAt(content,m.index);
+            if(seenDispLine[dLine])continue;seenDispLine[dLine]=true;
+            pushArchInsight(insights,{ruleId:'android-hardcoded-dispatcher',ecosystem:ECO,severity:'low',confidence:'medium',kind:'recommendation',
+                title:'Hardcoded Dispatcher in the data layer',
+                problem:'Referencing Dispatchers.'+m[2]+' directly inside a repository/service hardcodes the threading policy, so tests cannot substitute a test dispatcher and run deterministically.',
+                remediation:'Inject a CoroutineDispatcher (e.g. via the constructor) and default it to Dispatchers.'+m[2]+', so tests can pass a StandardTestDispatcher.',
+                docUrl:'https://developer.android.com/kotlin/coroutines/coroutines-best-practices#inject-dispatchers',
+                name:name,path:path,line:dLine,code:archSnippet(content,m.index)});
         }
     }
 }
@@ -2608,6 +2812,7 @@ const Parser={
     detectArchitectureInsights:function(files){return computeArchitectureInsights(files);},
     detectProjectEcosystems:function(files){return detectProjectEcosystems(files);},
     detectDartConstructs:function(content){return detectDartConstructs(content);},
+    detectKotlinConstructs:function(content){return detectKotlinConstructs(content);},
     getArchitectureRule:function(ruleId){return getArchitectureRule(ruleId);},
     getLearningTopic:function(topicId){return getLearningTopic(topicId);},
     getLearningTopics:function(ecosystem){return listLearningTopics(ecosystem);},
