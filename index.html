@@ -12052,8 +12052,14 @@ function layoutOpenedCodeCards(files,prev,sizesByPath,options){
 }
 
 function codeViewWheelAction(event){
-    if(event&&(event.ctrlKey||event.metaKey))return 'zoom';
-    return 'pan';
+    return 'zoom';
+}
+
+function codeCanvasWheelZoomFactor(event,height){
+    var delta=Number(event.deltaY)||0;
+    if(event.deltaMode===1)delta*=16;
+    if(event.deltaMode===2)delta*=Math.max(1,Number(height)||800);
+    return Math.exp(Math.max(-0.35,Math.min(0.35,-delta*0.002)));
 }
 
 function codeViewWheelPanDelta(deltaX,deltaY,scale){
@@ -12935,13 +12941,16 @@ function isCodeCanvasDeselectTarget(target,svg){
 
 function isCodeCanvasNativeScrollTarget(target){
     if(!target||!target.closest)return false;
+    if(target.closest('.code-source-editor'))return true;
     if(target.closest('.code-sym-list'))return true;
+    var body=target.closest('.code-card-body');
+    if(body&&(body.scrollHeight>body.clientHeight||body.scrollWidth>body.clientWidth)&&!target.closest('.code-card.code-far'))return true;
     if(!target.closest('.code-card.clipped .code-card-body'))return false;
     return !target.closest('.code-card.code-far');
 }
 
 function codeViewWheelUsesNativeScroll(event,target){
-    if(codeViewWheelAction(event)==='zoom')return false;
+    if(event&&(event.ctrlKey||event.metaKey))return false;
     return isCodeCanvasNativeScrollTarget(target);
 }
 
@@ -15344,18 +15353,12 @@ function App(){
         if(!el||graphConfig.vizType!=='code')return;
         function onWheel(e){
             if(!zoomRef.current||!svgRef.current)return;
-            if(codeViewWheelUsesNativeScroll(e,e.target))return;
-            var action=codeViewWheelAction(e);
+            if(codeViewWheelUsesNativeScroll(e,e.target)){e.stopPropagation();return;}
             e.preventDefault();
             var svg=d3.select(svgRef.current);
-            if(action==='zoom'){
-                var rect=svgRef.current.getBoundingClientRect();
-                var factor=e.deltaY<0?1.08:1/1.08;
-                zoomRef.current.scaleBy(svg,factor,[e.clientX-rect.left,e.clientY-rect.top]);
-                return;
-            }
-            var pan=codeViewWheelPanDelta(e.deltaX,e.deltaY,snapshotZoomTransform(codeZoomTransformRef.current).k);
-            zoomRef.current.translateBy(svg,pan.x,pan.y);
+            var rect=svgRef.current.getBoundingClientRect();
+            var factor=codeCanvasWheelZoomFactor(e,rect.height);
+            zoomRef.current.scaleBy(svg,factor,[e.clientX-rect.left,e.clientY-rect.top]);
         }
         el.addEventListener('wheel',onWheel,{passive:false});
         return function(){el.removeEventListener('wheel',onWheel);};
@@ -17962,7 +17965,7 @@ function App(){
                 React.createElement('div',{className:'empty-desc'},codeViewRootGateMessage(rootCount,codeViewRootGate))
             ),
             React.createElement('div',{className:'code-canvas-hud'},
-                React.createElement('div',{className:'code-canvas-hint'},codeRootGateActive?codeViewRootGateMessage(rootCount,codeViewRootGate):(codeViewFiles.length?'Open files from leftover nodes or the Files tree. Open cards stay put. New Group wraps selected cards. Wheel pans · Ctrl+wheel zooms.':'No files to open as cards.')),
+                React.createElement('div',{className:'code-canvas-hint'},codeRootGateActive?codeViewRootGateMessage(rootCount,codeViewRootGate):(codeViewFiles.length?'Open files from leftover nodes or the Files tree. Open cards stay put. New Group wraps selected cards. Wheel zooms · Inside source scrolls · Ctrl+wheel zooms.':'No files to open as cards.')),
                 codeViewSymbols.length>0&&React.createElement('div',{className:'code-sym-list'},
                     codeViewSymbols.map(function(sym){
                         return React.createElement('button',{key:sym.name,className:'code-sym-chip '+sym.kind+(activeSymbol===sym.name?' active':''),title:sym.name,onClick:function(){setActiveSymbol(function(prev){return prev===sym.name?null:sym.name;});}},sym.name);

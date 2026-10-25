@@ -689,7 +689,7 @@ test('wheel pan deltas stay screen-pixel based across zoom', () => {
   assert.deepEqual(J(context.codeViewWheelPanDelta(40, 80, 1)), { x: -40, y: -80 });
   assert.deepEqual(J(context.codeViewWheelPanDelta(40, 80, 2)), { x: -20, y: -40 });
   assert.deepEqual(J(context.codeViewWheelPanDelta(40, 80, 0.5)), { x: -80, y: -160 });
-  assert.equal(context.codeViewWheelAction({}), 'pan');
+  assert.equal(context.codeViewWheelAction({}), 'zoom');
 });
 
 test('line-level code edges use bezier anchors, not card centers', () => {
@@ -727,7 +727,7 @@ test('line-level code edges use bezier anchors, not card centers', () => {
   assert.ok(!toCard.includes('800,240'));
   assert.equal(context.codeCardLinkPath({ source: src, target: leftover, fn: 'shared' }, sizes, files, new Set()), null);
   assert.equal(context.codeViewWheelAction({ ctrlKey: true }), 'zoom');
-  assert.equal(context.codeViewWheelAction({}), 'pan');
+  assert.equal(context.codeViewWheelAction({}), 'zoom');
 });
 
 test('same-folder stacked cards route links through top and bottom edges', () => {
@@ -1658,7 +1658,7 @@ test('far-zoom clipped cards let unmodified wheel pan the canvas', () => {
   assert.equal(context.isCodeCanvasNativeScrollTarget(farBody), false);
   assert.equal(context.codeViewWheelUsesNativeScroll({}, farBody), false);
   assert.equal(context.codeViewWheelUsesNativeScroll({}, nearBody), true);
-  assert.equal(context.codeViewWheelAction({}), 'pan');
+  assert.equal(context.codeViewWheelAction({}), 'zoom');
 });
 
 test('folder frames count as canvas background for deselect', () => {
