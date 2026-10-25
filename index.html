@@ -1395,6 +1395,54 @@ var ARCHITECTURE_RULE_CATALOG={
         docUrl:'https://developer.apple.com/documentation/swiftui/state',
         learnTopicId:'swiftui-state-ownership'
     },
+    'swiftui-observableobject-in-state':{
+        ruleId:'swiftui-observableobject-in-state',ecosystem:'swift',languages:['swift'],frameworks:['swiftui'],
+        kind:'issue',severity:'high',confidence:'medium',
+        title:'ObservableObject stored in @State',
+        explanation:'@State does not subscribe to an ObservableObject’s @Published changes, so a legacy ObservableObject kept in @State will not drive view updates. Use @StateObject (or migrate to the @Observable macro).',
+        evidence:'@State var/let whose type is a project type that conforms to ObservableObject (and is not an @Observable macro type).',
+        badExample:'@State var model = LegacyModel()  // LegacyModel: ObservableObject',
+        goodExample:'@StateObject var model = LegacyModel()',
+        exclusions:['Modern @Observable models in @State are correct and not flagged.','Value types in @State are not flagged.','Requires resolved project type evidence.'],
+        docUrl:'https://developer.apple.com/documentation/swiftui/stateobject',
+        learnTopicId:'swiftui-observation'
+    },
+    'swiftui-observedobject-on-observable-type':{
+        ruleId:'swiftui-observedobject-on-observable-type',ecosystem:'swift',languages:['swift'],frameworks:['swiftui'],
+        kind:'issue',severity:'high',confidence:'medium',
+        title:'@ObservedObject used with an @Observable type',
+        explanation:'A type defined with the @Observable macro is not an ObservableObject, so @ObservedObject is the wrong wrapper. Modern Observation uses @State to own and @Bindable for bindings.',
+        evidence:'@ObservedObject on a type the project defines with @Observable and without ObservableObject conformance.',
+        badExample:'@ObservedObject var model: NewModel  // @Observable class NewModel',
+        goodExample:'@State private var model = NewModel()  // and @Bindable where bindings are needed',
+        exclusions:['Never inferred from a name or from import Observation alone.','Types that intentionally conform to ObservableObject are not flagged.','Requires resolved project type evidence.'],
+        docUrl:'https://developer.apple.com/documentation/SwiftUI/Migrating-from-the-observable-object-protocol-to-the-observable-macro',
+        learnTopicId:'swiftui-observation-migration'
+    },
+    'swiftui-blocking-work-in-body':{
+        ruleId:'swiftui-blocking-work-in-body',ecosystem:'swift',languages:['swift'],frameworks:['swiftui'],
+        kind:'potential',severity:'medium',confidence:'medium',
+        title:'Blocking work inside View body',
+        explanation:'SwiftUI may evaluate body many times. Synchronous I/O or blocking calls there stall rendering. Load data in a .task/onAppear and read the cached value in body. A performance recommendation, not a measured timing.',
+        evidence:'Data/String(contentsOf:), contentsOfFile: or Thread.sleep inside a var body: some View { } scope.',
+        badExample:'var body: some View { let d = try! Data(contentsOf: url); ... }',
+        goodExample:'.task { data = try? await load(url) }  // body reads `data`',
+        exclusions:['Calls inside button actions, .task closures or other functions are not flagged.','Only occurrences within the computed body scope are reported.'],
+        docUrl:'https://developer.apple.com/documentation/swiftui/view/task(priority:_:)',
+        learnTopicId:'swiftui-view-lifecycle'
+    },
+    'swift-detached-task-captures-self':{
+        ruleId:'swift-detached-task-captures-self',ecosystem:'swift',languages:['swift'],frameworks:['swift','swiftui'],
+        kind:'potential',severity:'medium',confidence:'medium',
+        title:'Task.detached captures self',
+        explanation:'Task.detached does not inherit the enclosing actor isolation, so reading/writing self’s (often @MainActor) state from it crosses the isolation boundary and can race. A structured Task { } inherits isolation.',
+        evidence:'A Task.detached { } closure that references self.',
+        badExample:'Task.detached { self.items = await load() }',
+        goodExample:'Task { self.items = await load() }  // or await MainActor.run { }',
+        exclusions:['Structured Task { }, .task { }, MainActor.run and actor-isolated contexts are not flagged.','Reported as potential, never a confirmed data race.'],
+        docUrl:'https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/',
+        learnTopicId:'swift-concurrency'
+    },
     'flutter-buildcontext-across-async-gap':{
         ruleId:'flutter-buildcontext-across-async-gap',ecosystem:'flutter',languages:['dart'],frameworks:['flutter'],
         kind:'potential',severity:'high',confidence:'medium',
@@ -1499,7 +1547,31 @@ var LEARNING_TOPICS={
         explanation:'A view that creates an observable model owns it with @StateObject (or @State with @Observable in modern SwiftUI); a view that receives one uses @ObservedObject (or a plain let for @Observable). Ownership controls the model’s lifetime.',
         example:'@StateObject private var model = CounterModel()',
         docUrl:'https://developer.apple.com/documentation/SwiftUI/Managing-model-data-in-your-app',
-        relatedRuleIds:['swiftui-observedobject-ownership']
+        relatedRuleIds:['swiftui-observedobject-ownership','swiftui-observableobject-in-state']
+    },
+    'swiftui-observation-migration':{
+        topicId:'swiftui-observation-migration',title:'ObservableObject vs the Observation macro',ecosystem:'swift',
+        roles:['View','Model'],
+        explanation:'Legacy: an ObservableObject with @Published, owned by @StateObject / passed as @ObservedObject / shared via @EnvironmentObject. Modern (iOS 17+): an @Observable type owned in @State, passed by value/reference, bound with @Bindable, shared via @Environment. Both are valid; a project on older targets or mid-migration may use either, but the wrappers must match the model type.',
+        example:'@Observable final class Model { var count = 0 } // owned via @State',
+        docUrl:'https://developer.apple.com/documentation/SwiftUI/Migrating-from-the-observable-object-protocol-to-the-observable-macro',
+        relatedRuleIds:['swiftui-observedobject-on-observable-type','swiftui-observableobject-in-state']
+    },
+    'swiftui-view-lifecycle':{
+        topicId:'swiftui-view-lifecycle',title:'SwiftUI View lifecycle & body',ecosystem:'swift',
+        roles:['View'],
+        explanation:'body is a pure, frequently-recomputed description of the UI. Keep it cheap: no synchronous I/O or blocking work. Load and mutate state in lifecycle hooks (.task, onAppear) or event handlers, and let body read the resulting state.',
+        example:'.task { items = await repo.load() }',
+        docUrl:'https://developer.apple.com/documentation/swiftui/view/task(priority:_:)',
+        relatedRuleIds:['swiftui-blocking-work-in-body']
+    },
+    'swift-concurrency':{
+        topicId:'swift-concurrency',title:'Swift concurrency & actor isolation',ecosystem:'swift',
+        roles:['View','Model','Actor'],
+        explanation:'Structured Task { } inherits the enclosing actor isolation (e.g. @MainActor), so updating UI state from it is safe. Task.detached opts out of isolation and must hop back (await MainActor.run { } or call actor-isolated methods with await) before touching isolated state. SwiftUI .task is lifecycle-aware and cancelled when the view disappears.',
+        example:'Task { await viewModel.refresh() }',
+        docUrl:'https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/',
+        relatedRuleIds:['swift-detached-task-captures-self']
     },
     'swiftui-state-ownership':{
         topicId:'swiftui-state-ownership',title:'SwiftUI @State ownership',ecosystem:'swift',
@@ -1810,16 +1882,117 @@ function runKotlinArchitectureRules(f,path,name,content,insights){
         }
     }
 }
-function runSwiftArchitectureRules(f,path,name,content,insights){
+// Recognize Swift/SwiftUI constructs from real source (comment/string-masked
+// heuristic, not an AST — the Swift grammar is vendored but not active here). The
+// Kotlin/Java masker also covers Swift //, ///, /* */ and "…"/"""…""" strings;
+// Swift string interpolation is masked with its string.
+function detectSwiftConstructs(content){
+    var c=String(content||''),masked=maskKotlinJavaLiterals(c);
+    function count(re){return (masked.match(re)||[]).length;}
+    var types=[],tre=/\b(?:final\s+|public\s+|internal\s+|fileprivate\s+|private\s+|open\s+)*(class|struct|enum|actor)\s+(\w+)([^{\n]*)/g,tm;
+    while((tm=tre.exec(masked))!==null)types.push({kind:tm[1],name:tm[2],rest:tm[3]||''});
+    function conforms(t,base){return new RegExp(':\\s*[^{]*\\b'+base+'\\b').test(t.rest);}
+    function namesOf(pred){return types.filter(pred).map(function(t){return t.name;});}
+    var observableMacro=[],ore=/@Observable\b/g,om;
+    while((om=ore.exec(masked))!==null){
+        var mm=/\b(?:final\s+|public\s+|@MainActor\s+)*(?:class|struct|actor)\s+(\w+)/.exec(masked.slice(om.index,om.index+180));
+        if(mm&&observableMacro.indexOf(mm[1])<0)observableMacro.push(mm[1]);
+    }
+    return {
+        isSwiftUI:/\bimport\s+SwiftUI\b/.test(c),
+        hasObservationImport:/\bimport\s+Observation\b/.test(c),
+        views:namesOf(function(t){return conforms(t,'View');}),
+        apps:namesOf(function(t){return conforms(t,'App')||conforms(t,'Scene');}),
+        observableObjects:namesOf(function(t){return conforms(t,'ObservableObject');}),
+        observableMacroTypes:observableMacro,
+        actors:namesOf(function(t){return t.kind==='actor';}),
+        services:namesOf(function(t){return /Service(?:Impl)?$/.test(t.name);}),
+        repositories:namesOf(function(t){return /Repository(?:Impl)?$/.test(t.name);}),
+        wrappers:{
+            state:/@State\b/.test(masked),binding:/@Binding\b/.test(masked),stateObject:/@StateObject\b/.test(masked),
+            observedObject:/@ObservedObject\b/.test(masked),environment:/@Environment\b/.test(masked),
+            environmentObject:/@EnvironmentObject\b/.test(masked),bindable:/@Bindable\b/.test(masked),
+            published:count(/@Published\b/g)
+        },
+        concurrency:{
+            mainActor:/@MainActor\b/.test(masked),asyncFns:count(/\basync\b/g),awaits:count(/\bawait\b/g),
+            tasks:count(/\bTask\s*\{/g),detached:count(/\bTask\s*\.\s*detached\b/g),dotTask:count(/\.task\s*[({]/g)
+        },
+        swiftData:/@Model\b/.test(masked)
+    };
+}
+// Brace ranges [open,close] for `var body: some View { … }` computed properties.
+function swiftBodyRanges(masked){
+    var ranges=[],re=/\bvar\s+body\s*:\s*some\s+View\s*\{/g,m;
+    while((m=re.exec(masked))!==null){
+        var brace=masked.indexOf('{',m.index);
+        if(brace<0)continue;
+        var close=kjMatchBrace(masked,brace);
+        if(close<0)continue;
+        ranges.push([brace,close]);
+    }
+    return ranges;
+}
+// Project-level Swift type evidence: which types are legacy ObservableObject vs
+// modern @Observable, so wrapper/type-mismatch rules use real conformance data.
+function collectSwiftTypeSets(files){
+    var obsObject=Object.create(null),obsMacro=Object.create(null);
+    (files||[]).forEach(function(f){
+        if(!f||!f.content||f.isCode===false)return;
+        var nm=String(f.name||(f.path||'').split('/').pop()||'');
+        if(!/\.swift$/i.test(nm))return;
+        var c=detectSwiftConstructs(f.content);
+        c.observableObjects.forEach(function(n){obsObject[n]=true;});
+        c.observableMacroTypes.forEach(function(n){obsMacro[n]=true;});
+    });
+    return {obsObject:obsObject,obsMacro:obsMacro};
+}
+function runSwiftArchitectureRules(f,path,name,content,insights,opts){
+    opts=opts||{};
+    var obsObject=opts.obsObject||Object.create(null);
+    var obsMacro=opts.obsMacro||Object.create(null);
     // The Kotlin/Java masker also covers Swift comments and "…"/"""…""" strings.
     var masked=maskKotlinJavaLiterals(content);
     var ECO='Swift/SwiftUI',m;
-    var ooRe=/@ObservedObject\s+(?:private\s+)?var\s+\w+\s*(?::[^=\n]+)?=\s*[A-Za-z_]/g;
+    // Rule A (improved) — a View constructs its own ObservableObject with
+    // @ObservedObject (= Type()). Requires an actual constructor call (a passed
+    // reference is not flagged), and defers to Rule C for modern @Observable types.
+    var ooRe=/@ObservedObject\s+(?:private\s+)?var\s+\w+\s*(?::\s*[\w.<>\[\], ?]+)?\s*=\s*([A-Z]\w*)\s*\(/g;
     while((m=ooRe.exec(masked))!==null){
+        if(obsMacro[m[1]]&&!obsObject[m[1]])continue;// modern @Observable → Rule C
         pushArchInsight(insights,{ruleId:'swiftui-observedobject-ownership',ecosystem:ECO,severity:'high',confidence:'high',kind:'issue',
             title:'@ObservedObject owns its model',
             problem:'An @ObservedObject created inside the view is re-initialized whenever SwiftUI recreates the view, silently resetting its state; @ObservedObject is meant for a model owned elsewhere.',
             remediation:'Use @StateObject for a reference model the view creates and owns, and keep @ObservedObject only for a model passed in from a parent.',
+            docUrl:'https://developer.apple.com/documentation/swiftui/stateobject',
+            name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+    }
+
+    // Rule C — @ObservedObject applied to a type established as @Observable (and
+    // not ObservableObject): an incompatible observation/ownership model. Needs
+    // real project type evidence, never inferred from a name or an import.
+    var ocRe=/@ObservedObject\s+(?:private\s+)?var\s+\w+\s*(?::\s*([A-Z]\w*)|=\s*([A-Z]\w*)\s*\()/g;
+    while((m=ocRe.exec(masked))!==null){
+        var t=m[1]||m[2];
+        if(!t||!obsMacro[t]||obsObject[t])continue;
+        pushArchInsight(insights,{ruleId:'swiftui-observedobject-on-observable-type',ecosystem:ECO,severity:'high',confidence:'medium',kind:'issue',
+            title:'@ObservedObject used with an @Observable type',
+            problem:t+' is defined with the @Observable macro (not ObservableObject), so @ObservedObject is the wrong wrapper and will not observe changes the modern way.',
+            remediation:'With an @Observable type, let the owning view hold it in @State and pass it down directly; use @Bindable only where bindings are needed. Reserve @ObservedObject for ObservableObject types.',
+            docUrl:'https://developer.apple.com/documentation/SwiftUI/Migrating-from-the-observable-object-protocol-to-the-observable-macro',
+            name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+    }
+
+    // Rule B — a legacy ObservableObject stored in @State (it relies on @Published
+    // observation that @State does not provide). Modern @Observable in @State is OK.
+    var bRe=/@State\s+(?:private\s+)?var\s+\w+\s*(?::\s*([A-Z]\w*)|=\s*([A-Z]\w*)\s*\()/g;
+    while((m=bRe.exec(masked))!==null){
+        var bt=m[1]||m[2];
+        if(!bt||!obsObject[bt]||obsMacro[bt])continue;
+        pushArchInsight(insights,{ruleId:'swiftui-observableobject-in-state',ecosystem:ECO,severity:'high',confidence:'medium',kind:'issue',
+            title:'ObservableObject stored in @State',
+            problem:bt+' is an ObservableObject, but @State does not subscribe to its @Published changes, so the view will not update when the model changes.',
+            remediation:'Use @StateObject for a view-owned ObservableObject, or migrate the model to the @Observable macro and keep it in @State.',
             docUrl:'https://developer.apple.com/documentation/swiftui/stateobject',
             name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
     }
@@ -1830,6 +2003,51 @@ function runSwiftArchitectureRules(f,path,name,content,insights){
             problem:'@State is local, view-owned storage. Leaving it non-private exposes it to external mutation, which Apple\u2019s SwiftUI guidance discourages.',
             remediation:'Mark it private (@State private var ...); to share with child views pass a Binding, or move shared state to @StateObject / an @Observable model.',
             docUrl:'https://developer.apple.com/documentation/swiftui/state',
+            name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+    }
+
+    // Rule E — clearly synchronous/blocking work directly inside a View body.
+    // "Directly" means at the body's own statement scope, not inside a nested
+    // closure such as .task { }, onAppear { } or a Button action.
+    var bodyRanges=swiftBodyRanges(masked);
+    function directlyInBody(idx){
+        for(var r=0;r<bodyRanges.length;r++){
+            var open=bodyRanges[r][0],close=bodyRanges[r][1];
+            if(idx<=open||idx>=close)continue;
+            var depth=0;
+            for(var k=open+1;k<idx;k++){if(masked[k]==='{')depth++;else if(masked[k]==='}')depth--;}
+            return depth===0;// 0 => top level of body; >0 => inside a nested closure
+        }
+        return false;
+    }
+    if(bodyRanges.length){
+        var blockRe=/\b(?:Data|String|NSData)\s*\(\s*contentsOf\s*:|\bThread\s*\.\s*sleep\b|\bcontentsOfFile\s*:/g;
+        while((m=blockRe.exec(masked))!==null){
+            if(!directlyInBody(m.index))continue;
+            pushArchInsight(insights,{ruleId:'swiftui-blocking-work-in-body',ecosystem:ECO,severity:'medium',confidence:'medium',kind:'potential',
+                title:'Blocking work inside View body',
+                problem:'SwiftUI can evaluate body frequently. Doing synchronous I/O or blocking work there stalls recomposition and can hitch the UI.',
+                remediation:'Move the work out of body into a .task { } or onAppear, cache the result in a model, and have body read the already-loaded value.',
+                docUrl:'https://developer.apple.com/documentation/swiftui/view/task(priority:_:)',
+                name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+        }
+    }
+
+    // Rule F — Task.detached capturing self: detached work inherits no actor
+    // isolation, so touching self state crosses the actor/@MainActor boundary.
+    // Reported as potential (not a confirmed data race).
+    var dtRe=/\bTask\s*\.\s*detached\s*(?:\([^)]*\)\s*)?\{/g;
+    while((m=dtRe.exec(masked))!==null){
+        var dBrace=masked.indexOf('{',m.index);
+        if(dBrace<0)continue;
+        var dClose=kjMatchBrace(masked,dBrace);
+        if(dClose<0)continue;
+        if(!/\bself\b/.test(masked.slice(dBrace,dClose)))continue;
+        pushArchInsight(insights,{ruleId:'swift-detached-task-captures-self',ecosystem:ECO,severity:'medium',confidence:'medium',kind:'potential',
+            title:'Task.detached captures self',
+            problem:'Task.detached does not inherit the current actor isolation, so accessing the enclosing self state from it crosses the actor/@MainActor boundary and can race with isolated access.',
+            remediation:'Prefer a structured Task { } that inherits isolation, or hop explicitly with await MainActor.run { } / call actor-isolated methods with await. Use detached only for genuinely independent work.',
+            docUrl:'https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/',
             name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
     }
 }
@@ -2020,6 +2238,9 @@ function computeArchitectureInsights(files){
             if(/\bclass\s+\w*Repository\w*\b/.test(df.content)){dartRepositoryBoundary=true;break;}
         }
     }
+    // Project-level Swift type evidence (legacy ObservableObject vs @Observable),
+    // so wrapper/type-mismatch rules resolve real conformance across files.
+    var swiftTypeSets=eco.swiftui?collectSwiftTypeSets(list):{obsObject:Object.create(null),obsMacro:Object.create(null)};
     var insights=[];
     list.forEach(function(f){
         if(!f||!f.content||f.isCode===false)return;
@@ -2029,7 +2250,7 @@ function computeArchitectureInsights(files){
         if(isArchitectureBuildOutput(path,name)||isNonProductionPath(path))return;
         var content=f.content;
         if(eco.android&&/\.(kt|kts)$/.test(lower))runKotlinArchitectureRules(f,path,name,content,insights);
-        if(eco.swiftui&&/\.swift$/.test(lower))runSwiftArchitectureRules(f,path,name,content,insights);
+        if(eco.swiftui&&/\.swift$/.test(lower))runSwiftArchitectureRules(f,path,name,content,insights,swiftTypeSets);
         if(eco.react&&/\.(jsx|tsx|js|ts|mjs|cjs)$/.test(lower))runReactArchitectureRules(f,path,name,content,insights);
         if(eco.flutter&&/\.dart$/.test(lower))runDartArchitectureRules(f,path,name,content,insights,{hasRepositoryBoundary:dartRepositoryBoundary});
     });
@@ -2813,6 +3034,7 @@ const Parser={
     detectProjectEcosystems:function(files){return detectProjectEcosystems(files);},
     detectDartConstructs:function(content){return detectDartConstructs(content);},
     detectKotlinConstructs:function(content){return detectKotlinConstructs(content);},
+    detectSwiftConstructs:function(content){return detectSwiftConstructs(content);},
     getArchitectureRule:function(ruleId){return getArchitectureRule(ruleId);},
     getLearningTopic:function(topicId){return getLearningTopic(topicId);},
     getLearningTopics:function(ecosystem){return listLearningTopics(ecosystem);},

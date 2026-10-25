@@ -164,11 +164,38 @@ scopes from source evidence. See the official
 
 | Rule id | Severity / confidence | What it flags | Reference |
 | --- | --- | --- | --- |
-| `swiftui-observedobject-ownership` | high / high | `@ObservedObject var x = Model()` — an owned model should be `@StateObject`. `@ObservedObject` passed in (no initializer) is fine | [StateObject](https://developer.apple.com/documentation/swiftui/stateobject) |
+| `swiftui-observedobject-ownership` | high / high | `@ObservedObject var x = Model()` — a view that **constructs** its model should own it with `@StateObject`. An injected (no-initializer) `@ObservedObject`, and `@StateObject`, are fine | [StateObject](https://developer.apple.com/documentation/swiftui/stateobject) |
+| `swiftui-observableobject-in-state` | high / medium | A legacy `ObservableObject` type stored in `@State` (it needs `@StateObject` to observe `@Published`). Modern `@Observable` in `@State` is correct and not flagged. Requires resolved project type evidence | [StateObject](https://developer.apple.com/documentation/swiftui/stateobject) |
+| `swiftui-observedobject-on-observable-type` | high / medium | `@ObservedObject` on a type the project defines with the `@Observable` macro (not `ObservableObject`) — the wrong wrapper for modern Observation. Never inferred from a name or `import Observation`; needs type evidence | [Migrating to @Observable](https://developer.apple.com/documentation/SwiftUI/Migrating-from-the-observable-object-protocol-to-the-observable-macro) |
 | `swiftui-state-not-private` | low / medium (recommendation) | A non-private `@State` property | [State](https://developer.apple.com/documentation/swiftui/state) |
+| `swiftui-blocking-work-in-body` | medium / medium (potential) | Synchronous I/O (`Data/String(contentsOf:)`, `contentsOfFile:`) or `Thread.sleep` **directly** in a `var body: some View { }` scope. Calls inside `.task`/`onAppear`/button actions and nested closures are not flagged | [View.task](https://developer.apple.com/documentation/swiftui/view/task(priority:_:)) |
+| `swift-detached-task-captures-self` | medium / medium (potential) | A `Task.detached { }` closure that captures `self` — it inherits no actor isolation, so touching `self`'s (often `@MainActor`) state crosses the boundary. Structured `Task { }`, `.task`, `MainActor.run` and self-free detached work are not flagged | [Swift concurrency](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/) |
 
-See Apple's [SwiftUI documentation](https://developer.apple.com/documentation/swiftui).
-Android MVVM conventions are not imposed on SwiftUI.
+Construct recognition (`Parser.detectSwiftConstructs`) identifies SwiftUI `View`/
+`App`/`Scene` types, legacy `ObservableObject` classes and `@Published`, modern
+`@Observable` types, the property wrappers (`@State`/`@Binding`/`@StateObject`/
+`@ObservedObject`/`@Environment`/`@EnvironmentObject`/`@Bindable`), `actor`
+declarations, `@MainActor`, async/await and task patterns, services/repositories
+and `@Model`/SwiftData — all from source, never from filenames alone.
+
+**Both Observation systems are supported.** Legacy `ObservableObject` is **not**
+treated as incorrect — a project targeting older OS versions, or mid-migration,
+may legitimately use it, and a project may mix both. The wrapper/type-mismatch
+rules (B and C) fire only when the model type's conformance is actually resolved
+from project source (ObservableObject vs `@Observable`), so a name, an `import`,
+or an unresolved external type never produces a finding. See Apple's
+[SwiftUI documentation](https://developer.apple.com/documentation/swiftui) and
+[Managing model data](https://developer.apple.com/documentation/SwiftUI/Managing-model-data-in-your-app).
+
+**Version/compatibility & concurrency caveats.** CodeFlow is **source-code only**
+and does not read project configuration, so it cannot know the deployment target,
+Swift language mode or compiler actor-isolation settings. It therefore avoids
+definitive version-specific or isolation-certain claims: concurrency findings are
+limited to the demonstrable `Task.detached`-captures-`self` case (reported as
+*potential*, not a confirmed data race), and it does **not** flag a ViewModel
+merely for lacking `@MainActor`, nor legitimate `@MainActor`, `MainActor.run`,
+structured concurrency or SwiftUI `.task`. Android MVVM conventions are not imposed
+on SwiftUI.
 
 ### React
 
