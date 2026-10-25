@@ -77,9 +77,13 @@ insufficient, they stay silent rather than guess.
 
 **Dart has no Tree-sitter grammar vendored.** `.dart` files are recognized as
 code and analyzed with the same comment/string-aware heuristic parsing; CodeFlow
-does **not** advertise full syntax-aware (AST) Dart support. Flutter/Dart
-architecture rules (added in a later phase) are built on this heuristic basis and
-are written conservatively for the same reason.
+does **not** advertise full syntax-aware (AST) Dart support. The Flutter/Dart
+architecture rules use a dedicated Dart literal masker (`maskDartLiterals`:
+`//`/`///` line comments, nested `/* */` blocks, `'…'`/`"…"`/`'''…'''`/`"""…"""`
+and raw `r'…'` strings, with interpolation masked conservatively) plus
+brace-matched structural scope resolution. This is heuristic token+brace matching,
+not an AST, and is written conservatively so weak evidence stays silent. No Flutter
+SDK or network access is required, and analyzed project code is never executed.
 
 ### Shared rule & learning catalog
 
@@ -163,6 +167,35 @@ Normal React hooks (`useState`, `useEffect`, custom `useX` hooks), large
 components, and stable keys (`key={item.id}`) are deliberately **not** flagged.
 See the official [React docs](https://react.dev/learn). Android-style MVVM is not
 imposed on React.
+
+### Flutter / Dart
+
+Flutter rules run only when the project is detected as **Flutter** (a
+`package:flutter/` import in a `.dart` file — detection is source-based; see the
+framework-detection note above). Plain Dart packages are detected as Dart but get
+no Flutter rules. Recognition (`Parser.detectDartConstructs`) classifies widgets
+(`extends StatelessWidget/StatefulWidget`), `State<T>` classes, view-models/state
+controllers (`extends ChangeNotifier/StateNotifier/Cubit/Bloc`, or
+`…ViewModel/Controller/Notifier`), repositories, services, and the state-management
+library in use (Provider / Riverpod / BLoC / ChangeNotifier) — no particular
+library or MVVM naming is required.
+
+| Rule id | Severity / confidence | What it flags | Reference |
+| --- | --- | --- | --- |
+| `flutter-buildcontext-across-async-gap` | high / medium (potential) | A `BuildContext` used after an `await` in the same block with no `mounted` / `context.mounted` guard in between | [use_build_context_synchronously](https://dart.dev/tools/linter-rules/use_build_context_synchronously) |
+| `flutter-missing-dispose` | high / high (no dispose) · high / medium (dispose misses the field) | A `State<T>` that **constructs** a controller/subscription (`AnimationController`, `TextEditingController`, `…`, or `x.listen(...)`) and never releases it in `dispose()` | [State.dispose](https://api.flutter.dev/flutter/widgets/State/dispose.html) |
+| `flutter-widget-builds-data-layer` | medium / medium (potential) | A widget/`State` that directly constructs a concrete data source (`http.Client()`, `Dio()`, `HttpClient()`, `FirebaseFirestore.instance`) **when the project already defines a `*Repository` boundary** | [Flutter app architecture](https://docs.flutter.dev/app-architecture/guide) |
+
+These rules are deliberately conservative to avoid false positives: a guarded
+`context` after `await`, a field that is **passed in** (not constructed by the
+class), a controller released with `.dispose()/.cancel()/.close()`, idiomatic
+`ChangeNotifier`/`setState`/Provider/Riverpod/BLoC usage, and a project without a
+repository boundary are all left alone. CodeFlow does not require MVVM class names
+or a UseCase layer. References: the Flutter
+[architecture guide](https://docs.flutter.dev/app-architecture/guide),
+[recommendations](https://docs.flutter.dev/app-architecture/recommendations),
+[case study](https://docs.flutter.dev/app-architecture/case-study) and Dart
+[analysis tooling](https://dart.dev/tools/analysis).
 
 ## Known limitations / unsupported cases
 

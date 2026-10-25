@@ -1040,6 +1040,54 @@ function maskKotlinJavaLiterals(src){
     }
     return out.join('');
 }
+// Dart literal masking: blanks // and /// line comments, nested /* */ block
+// comments, and '…' "…" '''…''' """…""" strings plus raw r'…'/r"…" strings
+// (preserving newlines/offsets). String interpolation is masked with its string
+// — conservative, so an architectural token inside a string never triggers a rule.
+function maskDartLiterals(src){
+    var n=src.length,out=new Array(n);
+    for(var k=0;k<n;k++)out[k]=src[k];
+    function blank(a,b){for(var k=a;k<b&&k<n;k++){if(out[k]!=='\n')out[k]=' ';}}
+    function isIdent(ch){return !!ch&&/[A-Za-z0-9_$]/.test(ch);}
+    var i=0;
+    while(i<n){
+        var c=src[i],d=src[i+1];
+        if(c==='/'&&d==='/'){var j=i+2;while(j<n&&src[j]!=='\n')j++;blank(i,j);i=j;continue;}
+        if(c==='/'&&d==='*'){
+            var depth=1,j2=i+2; // Dart block comments nest
+            while(j2<n&&depth>0){
+                if(src[j2]==='/'&&src[j2+1]==='*'){depth++;j2+=2;continue;}
+                if(src[j2]==='*'&&src[j2+1]==='/'){depth--;j2+=2;continue;}
+                j2++;
+            }
+            blank(i,j2);i=j2;continue;
+        }
+        var raw=false,qi=i;
+        if(c==='r'&&(d==='"'||d==="'")&&!isIdent(src[i-1])){raw=true;qi=i+1;}
+        var qc=src[qi];
+        if(qc==='"'||qc==="'"){
+            if(src[qi+1]===qc&&src[qi+2]===qc){ // triple-quoted
+                var j3=qi+3;
+                while(j3<n){
+                    if(!raw&&src[j3]==='\\'){j3+=2;continue;}
+                    if(src[j3]===qc&&src[j3+1]===qc&&src[j3+2]===qc){j3+=3;break;}
+                    j3++;
+                }
+                if(j3>n)j3=n;blank(i,j3);i=j3;continue;
+            }
+            var j4=qi+1;
+            while(j4<n){
+                if(!raw&&src[j4]==='\\'){j4+=2;continue;}
+                if(src[j4]===qc){j4++;break;}
+                if(src[j4]==='\n')break;
+                j4++;
+            }
+            blank(i,j4);i=j4;continue;
+        }
+        i++;
+    }
+    return out.join('');
+}
 function maskVbaLiterals(src){
     var n=src.length;
     var out=new Array(n);
@@ -1299,6 +1347,42 @@ var ARCHITECTURE_RULE_CATALOG={
         docUrl:'https://developer.apple.com/documentation/swiftui/state',
         learnTopicId:'swiftui-state-ownership'
     },
+    'flutter-buildcontext-across-async-gap':{
+        ruleId:'flutter-buildcontext-across-async-gap',ecosystem:'flutter',languages:['dart'],frameworks:['flutter'],
+        kind:'potential',severity:'high',confidence:'medium',
+        title:'BuildContext used across an async gap',
+        explanation:'A BuildContext captured before an await may refer to a widget that is no longer mounted once the await completes. Using it then can throw or operate on a disposed element — this is exactly what Dart’s use_build_context_synchronously lint guards against.',
+        evidence:'A use of context after an await in the same block, with no mounted check in between.',
+        badExample:'await save();\nNavigator.of(context).pop();',
+        goodExample:'await save();\nif (!context.mounted) return;\nNavigator.of(context).pop();',
+        exclusions:['Not flagged when a mounted / context.mounted guard appears between the await and the usage.','Comments and string literals are masked out.'],
+        docUrl:'https://dart.dev/tools/linter-rules/use_build_context_synchronously',
+        learnTopicId:'flutter-buildcontext'
+    },
+    'flutter-missing-dispose':{
+        ruleId:'flutter-missing-dispose',ecosystem:'flutter',languages:['dart'],frameworks:['flutter'],
+        kind:'issue',severity:'high',confidence:'high',
+        title:'Owned controller/subscription not disposed',
+        explanation:'A State that creates a controller or stream subscription owns it and must release it in dispose(); otherwise it leaks and may keep firing callbacks after the widget is gone.',
+        evidence:'A State<T> class with a field initialized to AnimationController/TextEditingController/…/.listen(), where dispose() is absent or does not release that field.',
+        badExample:'final _c = TextEditingController();\n// no dispose()',
+        goodExample:'@override void dispose(){ _c.dispose(); super.dispose(); }',
+        exclusions:['Only fields the class constructs (ownership established) are flagged.','A field released with .dispose()/.cancel()/.close() in dispose() is not flagged.'],
+        docUrl:'https://api.flutter.dev/flutter/widgets/State/dispose.html',
+        learnTopicId:'flutter-dispose'
+    },
+    'flutter-widget-builds-data-layer':{
+        ruleId:'flutter-widget-builds-data-layer',ecosystem:'flutter',languages:['dart'],frameworks:['flutter'],
+        kind:'potential',severity:'medium',confidence:'medium',
+        title:'Widget constructs a data source directly',
+        explanation:'When a project already has a repository boundary, a widget that builds a concrete network/database client itself couples the UI to that implementation and is hard to test or swap.',
+        evidence:'http.Client()/Dio()/HttpClient()/FirebaseFirestore.instance inside a Widget or State, in a project that also defines a *Repository class.',
+        badExample:'// inside build()\nfinal data = await Dio().get(url);',
+        goodExample:'// depend on an injected repository\nfinal data = await repository.fetch();',
+        exclusions:['Only fires when the project provides a recognized repository boundary.','Only direct construction inside a widget/State file is flagged.'],
+        docUrl:'https://docs.flutter.dev/app-architecture/guide',
+        learnTopicId:'flutter-architecture-layers'
+    },
     'react-array-index-key':{
         ruleId:'react-array-index-key',ecosystem:'react',languages:['javascript','typescript'],frameworks:['react'],
         kind:'potential',severity:'medium',confidence:'medium',
@@ -1359,7 +1443,7 @@ var LEARNING_TOPICS={
         explanation:'Flutter’s recommended architecture separates a UI layer (Widgets + a view-model/state controller) from a data layer (Repositories + Services). The UI depends on repositories, not directly on services or raw data sources. BLoC/Riverpod/Provider are all valid state approaches — adapt to the one the project uses.',
         example:'class HomeViewModel extends ChangeNotifier { final ItemRepository repo; }',
         docUrl:'https://docs.flutter.dev/app-architecture/guide',
-        relatedRuleIds:[]
+        relatedRuleIds:['flutter-widget-builds-data-layer']
     },
     'flutter-state-management':{
         topicId:'flutter-state-management',title:'Flutter state management',ecosystem:'flutter',
@@ -1372,10 +1456,18 @@ var LEARNING_TOPICS={
     'flutter-dispose':{
         topicId:'flutter-dispose',title:'Disposing controllers in Flutter',ecosystem:'flutter',
         roles:['State<T>'],
-        explanation:'Owned controllers/subscriptions (AnimationController, TextEditingController, StreamSubscription, etc.) created in a State must be released in dispose() to avoid leaks.',
+        explanation:'Owned controllers/subscriptions (AnimationController, TextEditingController, StreamSubscription, etc.) created in a State must be released in dispose() to avoid leaks. Fields that are passed in (not created by the class) are owned elsewhere and are not your responsibility to dispose.',
         example:'@override void dispose(){ controller.dispose(); super.dispose(); }',
-        docUrl:'https://docs.flutter.dev/perf/best-practices',
-        relatedRuleIds:[]
+        docUrl:'https://api.flutter.dev/flutter/widgets/State/dispose.html',
+        relatedRuleIds:['flutter-missing-dispose']
+    },
+    'flutter-buildcontext':{
+        topicId:'flutter-buildcontext',title:'BuildContext across async gaps',ecosystem:'flutter',
+        roles:['Widget','State<T>'],
+        explanation:'After an await, the widget that owned a BuildContext may have been removed from the tree. Before using the context again, confirm the element is still mounted (mounted in a State, or context.mounted) and bail out otherwise. This is the behaviour enforced by the use_build_context_synchronously lint.',
+        example:'await load();\nif (!context.mounted) return;\nNavigator.of(context).pop();',
+        docUrl:'https://dart.dev/tools/linter-rules/use_build_context_synchronously',
+        relatedRuleIds:['flutter-buildcontext-across-async-gap']
     }
 };
 function getArchitectureRule(ruleId){return ARCHITECTURE_RULE_CATALOG[ruleId]||null;}
@@ -1559,10 +1651,171 @@ function runReactArchitectureRules(f,path,name,content,insights){
         }
     }
 }
+// ---- Flutter / Dart recognition + rules ----------------------------------
+// Recognize Dart/Flutter constructs from real source (imports use the ORIGINAL
+// text because package URIs are string literals; structural checks use masked
+// source). This is heuristic, comment/string-aware token+brace matching — NOT a
+// Dart AST (CodeFlow vendors no Dart grammar). It preserves source locations and
+// is written conservatively so weak evidence stays silent.
+function detectDartConstructs(content){
+    var c=String(content||'');
+    var masked=maskDartLiterals(c);
+    var imports={
+        flutter:/\bimport\s+r?['"]package:flutter\//.test(c),
+        provider:/\bimport\s+r?['"]package:provider\//.test(c),
+        riverpod:/\bimport\s+r?['"]package:(?:flutter_)?riverpod\//.test(c),
+        bloc:/\bimport\s+r?['"]package:(?:flutter_)?(?:bloc|flutter_bloc)\//.test(c)||/\bimport\s+r?['"]package:flutter_bloc\//.test(c)
+    };
+    var widgets=[],states=[],viewModels=[],repositories=[],services=[];
+    var cre=/\bclass\s+(\w+)([^{]*)\{/g,cm;
+    while((cm=cre.exec(masked))!==null){
+        var nm=cm[1],h=cm[2]||'';
+        if(/\bextends\s+(StatelessWidget|StatefulWidget|InheritedWidget)\b/.test(h))widgets.push(nm);
+        if(/\bextends\s+State\s*</.test(h)||/\bextends\s+State\b/.test(h))states.push(nm);
+        if(/\bextends\s+(ChangeNotifier|StateNotifier|Cubit|Bloc)\b/.test(h)||/\bwith\s+ChangeNotifier\b/.test(h))viewModels.push(nm);
+        else if(/(ViewModel|Controller|Notifier)$/.test(nm)&&/\bextends\b|\bimplements\b|\bwith\b/.test(h))viewModels.push(nm);
+        if(/Repository(Impl)?$/.test(nm))repositories.push(nm);
+        if(/Service(Impl)?$/.test(nm))services.push(nm);
+    }
+    var changeNotifier=/\b(?:extends|with)\s+ChangeNotifier\b/.test(masked)||/\bValueNotifier\s*</.test(masked);
+    return {
+        isFlutter:imports.flutter,
+        widgets:widgets,states:states,viewModels:viewModels,repositories:repositories,services:services,
+        stateMgmt:{provider:imports.provider,riverpod:imports.riverpod,bloc:imports.bloc,changeNotifier:changeNotifier}
+    };
+}
+// End index of the brace block that encloses idx (operates on masked source).
+function dartEnclosingBlockEnd(s,idx){
+    var depth=0;
+    for(var k=idx-1;k>=0;k--){
+        if(s[k]==='}')depth++;
+        else if(s[k]==='{'){if(depth===0)return kjMatchBrace(s,k);depth--;}
+    }
+    return -1;
+}
+// Owned disposable fields declared at a State class's top level (not locals in a
+// method): name = AnimationController(…), TextEditingController(…), …, or
+// name = something.listen(…) (a StreamSubscription the class owns).
+function dartOwnedDisposables(body){
+    var out=[];
+    var types='AnimationController|TextEditingController|ScrollController|FocusNode|PageController|TabController|StreamController|OverlayEntry|VideoPlayerController|AudioPlayer|Timer';
+    function topLevel(idx){
+        var depth=0;for(var k=0;k<idx;k++){if(body[k]==='{')depth++;else if(body[k]==='}')depth--;}return depth===0;
+    }
+    var re=new RegExp('([A-Za-z_]\\w*)\\s*=\\s*(?:'+types+')\\s*(?:<[^>]*>)?\\s*\\(','g'),m;
+    while((m=re.exec(body))!==null){if(topLevel(m.index)&&out.indexOf(m[1])<0)out.push(m[1]);}
+    var re2=/([A-Za-z_]\w*)\s*=\s*[A-Za-z_][\w.]*\.listen\s*\(/g;
+    while((m=re2.exec(body))!==null){if(topLevel(m.index)&&out.indexOf(m[1])<0)out.push(m[1]);}
+    return out;
+}
+function dartDisposeBody(body){
+    var m=/\bdispose\s*\(\s*\)\s*(?:async\s*)?\{/.exec(body);
+    if(!m)return null;
+    var brace=body.indexOf('{',m.index);
+    if(brace<0)return null;
+    var close=kjMatchBrace(body,brace);
+    if(close<0)return null;
+    return body.slice(brace+1,close);
+}
+function runDartArchitectureRules(f,path,name,content,insights,opts){
+    opts=opts||{};
+    var masked=maskDartLiterals(content);
+    var ECO='Flutter/Dart',m;
+
+    // R1 — BuildContext used after an async gap without a mounted guard.
+    var awaitRe=/\bawait\b/g;
+    var flaggedCtx={};
+    while((m=awaitRe.exec(masked))!==null){
+        var a=m.index;
+        var semi=masked.indexOf(';',a);
+        if(semi<0)continue;
+        var blockEnd=dartEnclosingBlockEnd(masked,a);
+        if(blockEnd<0)blockEnd=Math.min(masked.length,semi+1500);
+        var region=masked.slice(semi+1,blockEnd);
+        if(/\bmounted\b/.test(region))continue;// a mounted guard protects the rest of the block
+        var ctxRe=/\bcontext\b/g,cmU;
+        while((cmU=ctxRe.exec(region))!==null){
+            var abs=semi+1+cmU.index;
+            var tail=masked.slice(abs,abs+16);
+            if(/^context\s*\.\s*mounted\b/.test(tail))break;
+            // A genuine use: context. / (context) / context, / context:
+            if(/^context\s*[.),;:\]]/.test(tail)){
+                var ln=archLineAt(content,abs);
+                if(!flaggedCtx[ln]){
+                    flaggedCtx[ln]=true;
+                    pushArchInsight(insights,{ruleId:'flutter-buildcontext-across-async-gap',ecosystem:ECO,severity:'high',confidence:'medium',kind:'potential',
+                        title:'BuildContext used after an await (async gap)',
+                        problem:'This BuildContext is used after an await, so the widget may already be unmounted by the time it runs — using it then can throw or target a disposed element.',
+                        remediation:'Guard the usage after the await: check if (!mounted) return; (in a State) or if (!context.mounted) return; before using the context.',
+                        docUrl:'https://dart.dev/tools/linter-rules/use_build_context_synchronously',
+                        name:name,path:path,line:ln,code:archSnippet(content,abs)});
+                }
+                break;// one finding per await
+            }
+        }
+    }
+
+    // R2 — Owned controllers/subscriptions in a State without cleanup in dispose().
+    var stateRe=/\bclass\s+\w+[^{]*\bextends\s+State\s*<[^{]*\{/g;
+    while((m=stateRe.exec(masked))!==null){
+        var open=masked.indexOf('{',m.index);
+        if(open<0)continue;
+        var close=kjMatchBrace(masked,open);
+        if(close<0)continue;
+        var body=masked.slice(open+1,close);
+        var owned=dartOwnedDisposables(body);
+        if(!owned.length)continue;
+        var disposeBody=dartDisposeBody(body);
+        for(var oi=0;oi<owned.length;oi++){
+            var fld=owned[oi];
+            var cleaned=disposeBody&&new RegExp('\\b'+fld+'\\s*[?!]?\\s*\\.\\s*(?:dispose|cancel|close)\\s*\\(').test(disposeBody);
+            if(cleaned)continue;
+            // Anchor the finding at the field's declaration line.
+            var fldRe=new RegExp('\\b'+fld+'\\s*=');
+            var fm=fldRe.exec(masked.slice(open+1,close));
+            var at=fm?open+1+fm.index:m.index;
+            pushArchInsight(insights,{ruleId:'flutter-missing-dispose',ecosystem:ECO,severity:'high',confidence:disposeBody?'medium':'high',kind:'issue',
+                title:'Owned '+(disposeBody?'resource not released in dispose()':'resource with no dispose()'),
+                problem:'The State owns '+fld+' (a controller/subscription it creates) but '+(disposeBody?'dispose() does not release it':'the class has no dispose() override')+', so it leaks and can keep firing after the widget is gone.',
+                remediation:'Override dispose() and call '+fld+'.dispose() (or .cancel()/.close()) before super.dispose().',
+                docUrl:'https://api.flutter.dev/flutter/widgets/State/dispose.html',
+                name:name,path:path,line:archLineAt(content,at),code:archSnippet(content,at)});
+        }
+    }
+
+    // R3 — A widget directly constructs a concrete data source, but the project
+    // already has a repository boundary (so the dependency should go through it).
+    if(opts.hasRepositoryBoundary){
+        var isWidgetFile=/\bextends\s+(StatelessWidget|StatefulWidget)\b/.test(masked)||/\bextends\s+State\s*</.test(masked);
+        if(isWidgetFile){
+            var dlRe=/\b(http\s*\.\s*Client|Dio|HttpClient)\s*\(|\bFirebaseFirestore\s*\.\s*instance\b/g;
+            while((m=dlRe.exec(masked))!==null){
+                var apiName=(m[1]?m[1].replace(/\s+/g,''):'FirebaseFirestore.instance');
+                pushArchInsight(insights,{ruleId:'flutter-widget-builds-data-layer',ecosystem:ECO,severity:'medium',confidence:'medium',kind:'potential',
+                    title:'Widget constructs a data source directly',
+                    problem:'This widget builds '+apiName+'(...) itself even though the project has a repository layer, coupling the UI to a concrete network/database client and making it hard to test or swap.',
+                    remediation:'Depend on a repository/service interface (injected via a provider, constructor or Riverpod/Provider) instead of creating the client inside the widget.',
+                    docUrl:'https://docs.flutter.dev/app-architecture/guide',
+                    name:name,path:path,line:archLineAt(content,m.index),code:archSnippet(content,m.index)});
+            }
+        }
+    }
+}
 // Entry point: returns a flat, severity-then-confidence sorted list of insights.
 function computeArchitectureInsights(files){
     var list=files||[];
     var eco=detectProjectEcosystems(list);
+    // Project-level evidence that a repository boundary exists, so the Flutter
+    // "widget builds data layer" rule only fires where layering is recognized.
+    var dartRepositoryBoundary=false;
+    if(eco.flutter){
+        for(var di=0;di<list.length;di++){
+            var df=list[di];if(!df||!df.content||df.isCode===false)continue;
+            var dname=String(df.name||(df.path||'').split('/').pop()||'');
+            if(!/\.dart$/i.test(dname))continue;
+            if(/\bclass\s+\w*Repository\w*\b/.test(df.content)){dartRepositoryBoundary=true;break;}
+        }
+    }
     var insights=[];
     list.forEach(function(f){
         if(!f||!f.content||f.isCode===false)return;
@@ -1574,6 +1827,7 @@ function computeArchitectureInsights(files){
         if(eco.android&&/\.(kt|kts)$/.test(lower))runKotlinArchitectureRules(f,path,name,content,insights);
         if(eco.swiftui&&/\.swift$/.test(lower))runSwiftArchitectureRules(f,path,name,content,insights);
         if(eco.react&&/\.(jsx|tsx|js|ts|mjs|cjs)$/.test(lower))runReactArchitectureRules(f,path,name,content,insights);
+        if(eco.flutter&&/\.dart$/.test(lower))runDartArchitectureRules(f,path,name,content,insights,{hasRepositoryBoundary:dartRepositoryBoundary});
     });
     var sevRank={high:0,medium:1,low:2};
     var confRank={high:0,medium:1,low:2};
@@ -2353,6 +2607,7 @@ const Parser={
     },
     detectArchitectureInsights:function(files){return computeArchitectureInsights(files);},
     detectProjectEcosystems:function(files){return detectProjectEcosystems(files);},
+    detectDartConstructs:function(content){return detectDartConstructs(content);},
     getArchitectureRule:function(ruleId){return getArchitectureRule(ruleId);},
     getLearningTopic:function(topicId){return getLearningTopic(topicId);},
     getLearningTopics:function(ecosystem){return listLearningTopics(ecosystem);},
