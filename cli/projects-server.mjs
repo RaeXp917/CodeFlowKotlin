@@ -1,20 +1,28 @@
 #!/usr/bin/env node
 /**
- * CodeFlowKotlin local multi-project selector.
+ * CodeFlowKotlin local multi-project server.
  * The original CodeFlow index.html and all existing views are served unchanged.
- * Adds only a dropdown via the optional project-selector.js runtime overlay.
+ * Adds only a project dropdown (+ Add Folder / Remove / Exclusions) via the
+ * optional project-selector.js runtime overlay.
  * Start: node cli/projects-server.mjs "C:\\Users\\MainPc\\AndroidStudioProjects"
  */
 import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  isAllowedCliRequest, safeRequestPath, resolveSafeExistingPath,
-  startFileWatchers, listWatchFiles, openBrowser,
+  isAllowedCliRequest, isSameOriginMutation, isValidCsrf,
+  safeRequestPath, resolveSafeExistingPath, resolveSafeCliPath,
+  startFileWatchers, listWatchFiles, openBrowser, makeExcludeMatcher,
   bumpWatchRev, currentWatchRev, CLI_FILE_MAX_BYTES, shouldSkipName,
 } from './server-utils.mjs';
+import {
+  loadConfig, saveConfig, getRootRecord, buildProjectList, projectId,
+  normalizeExclusions, isReasonableProjectRoot, rootKey,
+} from './project-registry.mjs';
+import { pickFolder } from './pick-folder.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const UI_ROOT = path.resolve(HERE, '..');
@@ -22,12 +30,13 @@ const SELECTOR_FILENAME = 'project-selector.js';
 const STATE_FILE = path.join(os.homedir(), '.codeflowkotlin-projects.json');
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 4173;
-const MAX_JSON_BYTES = 8192;
+const MAX_JSON_BYTES = 16 * 1024;
 const MAX_PROJECTS = 500;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_EXCLUSIONS = 200;
 const SKIP_PROJECT_NAMES = new Set(['.git', 'node_modules', 'build', 'dist', 'out', '.gradle', '.idea', '.cache', '.vscode']);
 
-const makeKey = (p) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+const makeKey = rootKey;
 // A selected project can be deleted/moved while the server runs, so the live
 // selection is re-validated against disk before it is reported or enumerated.
 async function dirExists(p) {
@@ -79,12 +88,12 @@ async function sendFile(res, fullPath, { contentType, maxBytes, revision } = {})
   }
 }
 
-async function parseJson(req) {
+async function parseJson(req, limit = MAX_JSON_BYTES) {
   const buffers = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_JSON_BYTES) throw new Error('Payload too large');
+    if (size > limit) throw new Error('Payload too large');
     buffers.push(chunk);
   }
   return JSON.parse(Buffer.concat(buffers).toString('utf8'));
@@ -114,6 +123,8 @@ export async function discoverProjects(projectsRoot) {
   return dirs.slice(0, MAX_PROJECTS);
 }
 
+// Resolve the canonical root for an auto-discovered project name (immediate
+// child of projectsRoot only — no traversal, no symlink escape).
 export async function resolveProject(projectsRoot, projectName) {
   if (typeof projectName !== 'string' || !projectName || projectName === '.' || projectName === '..' ||
       projectName.includes('/') || projectName.includes('\\') || projectName.includes('\0')) return null;
@@ -128,28 +139,59 @@ export async function resolveProject(projectsRoot, projectName) {
   return realFolder;
 }
 
-async function savedSelection(root) {
-  try {
-    const obj = JSON.parse(await fs.readFile(STATE_FILE, 'utf8'));
-    return typeof obj[makeKey(root)] === 'string' ? obj[makeKey(root)] : null;
-  } catch { return null; }
-}
-async function rememberSelection(root, project) {
-  let obj = {};
-  try { obj = JSON.parse(await fs.readFile(STATE_FILE, 'utf8')); } catch {}
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) obj = {};
-  obj[makeKey(root)] = project;
-  await fs.writeFile(STATE_FILE, JSON.stringify(obj, null, 2), { mode: 0o600 });
-}
-
-export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist = true } = {}) {
+export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist = true, configPath = STATE_FILE, pickFolderFn = pickFolder } = {}) {
   const clients = new Set();
+  const csrfToken = crypto.randomBytes(18).toString('hex');
+  let config = { version: 2, roots: {} };
+  let currentId = null;
   let currentProject = null;
   let currentRoot = null;
+  let currentExclusions = [];
   let watcher = null;
   let generation = 0;
   let revisions = new Map();
   let switching = Promise.resolve();
+  let pickerBusy = false;
+
+  async function persistConfig() {
+    if (!persist) return;
+    await saveConfig(configPath, config).catch((e) => console.error('CodeFlowKotlin: could not save config:', e && e.message));
+  }
+
+  // Compose the live list: auto-discovered children + manual registrations.
+  async function listProjects() {
+    let autoNames = [];
+    try { autoNames = await discoverProjects(projectsRoot); } catch {}
+    let realBase = null;
+    try { realBase = await fs.realpath(projectsRoot); } catch {}
+    const autoRoots = [];
+    for (const name of autoNames) {
+      const folder = path.join(projectsRoot, name);
+      try {
+        const st = await fs.lstat(folder);
+        if (!st.isDirectory() || st.isSymbolicLink()) continue;
+        const realFolder = await fs.realpath(folder);
+        if (realBase && path.dirname(realFolder) !== realBase) continue;
+        autoRoots.push({ name, root: realFolder });
+      } catch {}
+    }
+    const record = getRootRecord(config, projectsRoot);
+    const existsSet = new Set();
+    for (const m of record.manual) {
+      if (await dirExists(m.root)) existsSet.add(makeKey(m.root));
+    }
+    return buildProjectList({
+      config, projectsRoot, autoRoots,
+      manualExists: (root) => existsSet.has(makeKey(root)),
+    });
+  }
+
+  async function resolveSelection(idOrName) {
+    const list = await listProjects();
+    let entry = list.find((p) => p.id === idOrName);
+    if (!entry) entry = list.find((p) => p.source === 'auto' && p.name === idOrName);
+    return entry || null;
+  }
 
   function closeWatch() {
     generation++;
@@ -157,34 +199,135 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
     watcher = null;
     revisions = new Map();
   }
-  async function changeProject(project) {
+  function openWatch() {
+    const thisGeneration = generation;
+    const isExcluded = makeExcludeMatcher(currentExclusions);
+    watcher = startFileWatchers(currentRoot, (rel) => {
+      if (thisGeneration !== generation) return;
+      const file = String(rel).replace(/\\/g, '/');
+      const rev = bumpWatchRev(revisions, file);
+      const event = 'data: ' + JSON.stringify({ type: 'change', path: file, rev }) + '\n\n';
+      for (const client of clients) {
+        try { client.write(event); } catch { clients.delete(client); }
+      }
+    }, undefined, isExcluded);
+  }
+
+  function dropClients() {
+    for (const client of clients) {
+      try { client.end(); } catch {}
+    }
+    clients.clear();
+  }
+
+  async function changeProject(idOrName) {
     // Serialize changes, so a quick second selection cannot create 2 watchers.
     const task = switching.then(async () => {
-      const nextRoot = await resolveProject(projectsRoot, project);
-      if (!nextRoot) throw new Error('Project not found');
-      if (currentProject === project && currentRoot === nextRoot) return;
-      closeWatch();
-      currentProject = project;
-      currentRoot = nextRoot;
-      const thisGeneration = generation;
-      watcher = startFileWatchers(nextRoot, (rel) => {
-        if (thisGeneration !== generation) return;
-        const file = String(rel).replace(/\\/g, '/');
-        const rev = bumpWatchRev(revisions, file);
-        const event = 'data: ' + JSON.stringify({ type: 'change', path: file, rev }) + '\n\n';
-        for (const client of clients) {
-          try { client.write(event); } catch { clients.delete(client); }
-        }
-      });
-      for (const client of clients) {
-        try { client.end(); } catch {}
+      const entry = await resolveSelection(idOrName);
+      if (!entry) throw new Error('Project not found');
+      const realRoot = await fs.realpath(entry.root).catch(() => null);
+      if (!realRoot || !(await dirExists(realRoot))) throw new Error('Project folder is missing');
+      if (currentId === entry.id && currentRoot === realRoot) {
+        // Still refresh exclusions in case they changed.
+        currentExclusions = normalizeExclusions(entry.exclusions);
+        return;
       }
-      clients.clear();
-      if (persist) await rememberSelection(projectsRoot, project).catch(() => {});
-      console.log('Watching project: ' + nextRoot);
+      closeWatch();
+      currentId = entry.id;
+      currentProject = entry.name;
+      currentRoot = realRoot;
+      currentExclusions = normalizeExclusions(entry.exclusions);
+      openWatch();
+      dropClients();
+      getRootRecord(config, projectsRoot).selected = entry.id;
+      await persistConfig();
+      console.log('Watching project: ' + realRoot);
     });
     switching = task.catch(() => {});
     return task;
+  }
+
+  function clearActive() {
+    closeWatch();
+    currentId = null;
+    currentProject = null;
+    currentRoot = null;
+    currentExclusions = [];
+    dropClients();
+  }
+
+  // ---- Registry mutations (always update in-memory config; persist if enabled)
+  async function addManualProject(folderPath) {
+    if (typeof folderPath !== 'string' || !folderPath) return { error: 'invalid-path' };
+    let canonical;
+    try { canonical = await fs.realpath(folderPath); } catch { return { error: 'not-found' }; }
+    const st = await fs.stat(canonical).catch(() => null);
+    if (!st || !st.isDirectory()) return { error: 'not-a-directory' };
+    if (!isReasonableProjectRoot(canonical)) return { error: 'unsafe-root' };
+    const id = projectId(canonical);
+    const list = await listProjects();
+    if (list.some((p) => p.id === id)) return { error: 'already-registered', id };
+    const record = getRootRecord(config, projectsRoot);
+    record.manual.push({ id, root: canonical, name: path.basename(canonical) || canonical, exclusions: [] });
+    await persistConfig();
+    return { id, root: canonical, name: path.basename(canonical) || canonical };
+  }
+
+  async function removeProject(id) {
+    const record = getRootRecord(config, projectsRoot);
+    const idx = record.manual.findIndex((m) => m.id === id);
+    if (idx < 0) return { error: 'not-manual' };
+    record.manual.splice(idx, 1);
+    delete record.autoExclusions[id];
+    if (record.selected === id) record.selected = null;
+    if (currentId === id) clearActive();
+    await persistConfig();
+    return { ok: true };
+  }
+
+  async function setHidden(id, hidden) {
+    const entry = (await listProjects()).find((p) => p.id === id);
+    if (!entry || entry.source !== 'auto') return { error: 'not-auto' };
+    const record = getRootRecord(config, projectsRoot);
+    const set = new Set(record.hiddenAuto);
+    if (hidden) set.add(id); else set.delete(id);
+    record.hiddenAuto = [...set];
+    if (hidden && record.selected === id) record.selected = null;
+    if (hidden && currentId === id) clearActive();
+    await persistConfig();
+    return { ok: true, hidden: !!hidden };
+  }
+
+  async function setExclusions(id, exclusions) {
+    const entry = (await listProjects()).find((p) => p.id === id);
+    if (!entry) return { error: 'unknown-project' };
+    const norm = normalizeExclusions(exclusions).slice(0, MAX_EXCLUSIONS);
+    for (const ex of norm) {
+      if (!resolveSafeCliPath(entry.root, ex)) return { error: 'unsafe-exclusion', value: ex };
+    }
+    const record = getRootRecord(config, projectsRoot);
+    if (entry.source === 'manual') {
+      const m = record.manual.find((x) => x.id === id);
+      if (m) m.exclusions = norm;
+    } else if (norm.length) {
+      record.autoExclusions[id] = norm;
+    } else {
+      delete record.autoExclusions[id];
+    }
+    if (currentId === id) {
+      currentExclusions = norm;
+      closeWatch();
+      openWatch();
+      dropClients();
+    }
+    await persistConfig();
+    return { ok: true, exclusions: norm };
+  }
+
+  function mutationGuard(req, res) {
+    if (req.method !== 'POST') { plain(res, 405, 'Method not allowed'); return false; }
+    if (!isSameOriginMutation(req) || !isValidCsrf(req, csrfToken)) { plain(res, 403, 'Forbidden'); return false; }
+    return true;
   }
 
   const server = http.createServer(async (req, res) => {
@@ -193,42 +336,130 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
       const parsed = safeRequestPath(req.url);
       if (!parsed.ok) return plain(res, parsed.status, 'Invalid request');
       const { url, pathname } = parsed;
+
       if (pathname === '/__codeflow/projects') {
         if (req.method !== 'GET') return plain(res, 405, 'Method not allowed');
-        return json(res, 200, { root: projectsRoot, projects: await discoverProjects(projectsRoot), selected: currentProject });
+        return json(res, 200, {
+          root: projectsRoot,
+          projects: await listProjects(),
+          selected: currentId,
+          csrf: csrfToken,
+        });
       }
+
       if (pathname === '/__codeflow/select-project') {
-        if (req.method !== 'POST') return plain(res, 405, 'Method not allowed');
+        if (!mutationGuard(req, res)) return;
         let data;
         try { data = await parseJson(req); } catch { return json(res, 400, { error: 'Invalid JSON' }); }
+        const idOrName = typeof data.id === 'string' ? data.id : data.project;
         try {
-          await changeProject(data.project);
-          return json(res, 200, { ok: true, selected: currentProject });
+          await changeProject(idOrName);
+          return json(res, 200, { ok: true, selected: currentId });
         } catch { return json(res, 400, { error: 'Unknown project' }); }
       }
+
+      if (pathname === '/__codeflow/pick-folder') {
+        if (!mutationGuard(req, res)) return;
+        if (pickerBusy) return json(res, 409, { status: 'busy' });
+        pickerBusy = true;
+        try {
+          const result = await pickFolderFn({});
+          return json(res, 200, result);
+        } finally {
+          pickerBusy = false;
+        }
+      }
+
+      if (pathname === '/__codeflow/add-project') {
+        if (!mutationGuard(req, res)) return;
+        let data;
+        try { data = await parseJson(req); } catch { return json(res, 400, { error: 'Invalid JSON' }); }
+        const result = await addManualProject(data && data.path);
+        if (result.error) return json(res, result.error === 'already-registered' ? 409 : 400, result);
+        try { await changeProject(result.id); } catch {}
+        return json(res, 200, { ok: true, id: result.id, selected: currentId, projects: await listProjects() });
+      }
+
+      if (pathname === '/__codeflow/remove-project') {
+        if (!mutationGuard(req, res)) return;
+        let data;
+        try { data = await parseJson(req); } catch { return json(res, 400, { error: 'Invalid JSON' }); }
+        const result = await removeProject(data && data.id);
+        if (result.error) return json(res, 400, result);
+        return json(res, 200, { ok: true, selected: currentId, projects: await listProjects() });
+      }
+
+      if (pathname === '/__codeflow/set-hidden') {
+        if (!mutationGuard(req, res)) return;
+        let data;
+        try { data = await parseJson(req); } catch { return json(res, 400, { error: 'Invalid JSON' }); }
+        const result = await setHidden(data && data.id, !!(data && data.hidden));
+        if (result.error) return json(res, 400, result);
+        return json(res, 200, { ok: true, selected: currentId, projects: await listProjects() });
+      }
+
+      if (pathname === '/__codeflow/set-exclusions') {
+        if (!mutationGuard(req, res)) return;
+        let data;
+        try { data = await parseJson(req); } catch { return json(res, 400, { error: 'Invalid JSON' }); }
+        const result = await setExclusions(data && data.id, data && data.exclusions);
+        if (result.error) return json(res, 400, result);
+        return json(res, 200, { ok: true, exclusions: result.exclusions, selected: currentId });
+      }
+
+      if (pathname === '/__codeflow/dirs') {
+        // Read-only directory listing for the project-scoped exclusion picker.
+        if (req.method !== 'GET') return plain(res, 405, 'Method not allowed');
+        const id = url.searchParams.get('id') || '';
+        const rel = url.searchParams.get('rel') || '';
+        const entry = (await listProjects()).find((p) => p.id === id);
+        if (!entry) return json(res, 404, { error: 'unknown-project' });
+        const base = await fs.realpath(entry.root).catch(() => null);
+        if (!base) return json(res, 410, { error: 'project-missing' });
+        const dir = rel ? await resolveSafeExistingPath(base, rel) : base;
+        if (!dir) return json(res, 404, { error: 'not-found' });
+        const isExcluded = makeExcludeMatcher(entry.exclusions);
+        let entries = [];
+        try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return json(res, 404, { error: 'not-found' }); }
+        const dirs = entries
+          .filter((e) => e.isDirectory() && !shouldSkipName(e.name))
+          .map((e) => (rel ? rel.replace(/\/+$/, '') + '/' + e.name : e.name).replace(/\\/g, '/'))
+          .filter((childRel) => !isExcluded(childRel))
+          .sort((a, b) => a.localeCompare(b));
+        return json(res, 200, { rel, dirs });
+      }
+
       if (pathname === '/__codeflow/status') {
         const live = await dirExists(currentRoot);
         return json(res, 200, {
           ok: live, root: currentRoot, name: currentProject,
-          id: live ? makeKey(currentRoot) : null,// stable identity (canonical root), not the display name
+          id: live ? makeKey(currentRoot) : null, // stable identity (canonical root), not the display name
+          pid: live ? currentId : null,
+          exclusions: live ? currentExclusions : [],
           watch: !!(watcher && watcher.watching) && live,
           missing: !!currentProject && !live,
         });
       }
+
       if (pathname === '/__codeflow/files') {
         if (!currentProject || !currentRoot) return json(res, 409, { error: 'No project selected', code: 'no-project' });
         if (!(await dirExists(currentRoot))) return json(res, 410, { error: 'Project folder is missing', code: 'project-missing' });
-        return json(res, 200, { files: await listWatchFiles(currentRoot) });
+        const isExcluded = makeExcludeMatcher(currentExclusions);
+        return json(res, 200, { files: await listWatchFiles(currentRoot, isExcluded), exclusions: currentExclusions });
       }
+
       if (pathname === '/__codeflow/file') {
         if (!currentRoot) return plain(res, 409, 'Select a project');
         const rel = url.searchParams.get('path') || '';
+        const isExcluded = makeExcludeMatcher(currentExclusions);
+        if (isExcluded(rel)) return plain(res, 404, 'Not found'); // excluded files are not readable
         const file = await resolveSafeExistingPath(currentRoot, rel);
         if (!file) return plain(res, 404, 'Not found');
         // Sampling the revision before opening matches CodeFlow's existing watcher semantics.
         const rev = currentWatchRev(revisions, rel);
         return sendFile(res, file, { contentType: 'text/plain; charset=utf-8', maxBytes: CLI_FILE_MAX_BYTES, revision: rev });
       }
+
       if (pathname === '/__codeflow/events') {
         if (!currentRoot) return plain(res, 409, 'Select a project');
         res.writeHead(200, {
@@ -239,10 +470,12 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
         req.on('close', () => clients.delete(res));
         return;
       }
+
       if (pathname === '/__codeflow/project-selector.js') {
         const file = path.join(HERE, SELECTOR_FILENAME);
         return sendFile(res, file, { contentType: 'text/javascript; charset=utf-8' });
       }
+
       const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
       const file = await resolveSafeExistingPath(uiRoot, rel);
       if (!file) return plain(res, 404, 'Not found');
@@ -271,19 +504,25 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
   return {
     server,
     changeProject,
+    // Exposed for tests / tooling.
+    _registry: {
+      listProjects, addManualProject, removeProject, setHidden, setExclusions,
+      get config() { return config; },
+      get csrf() { return csrfToken; },
+    },
     async restore() {
-      if (persist) {
-        const last = await savedSelection(projectsRoot);
-        if (last) await changeProject(last).catch(() => {});
+      config = await loadConfig(configPath);
+      const record = getRootRecord(config, projectsRoot);
+      let selected = record.selected;
+      if (!selected && record.selectedName) {
+        const byName = (await listProjects()).find((p) => p.source === 'auto' && p.name === record.selectedName);
+        if (byName) selected = byName.id;
       }
+      if (selected) await changeProject(selected).catch(() => {});
     },
     async close() {
-      closeWatch();
-      for (const client of clients) {
-        try { client.end(); } catch {}
-      }
-      clients.clear();
-      if (server.listening) await new Promise(resolve => server.close(resolve));
+      clearActive();
+      if (server.listening) await new Promise((resolve) => server.close(resolve));
     },
   };
 }
@@ -313,5 +552,5 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  main().catch(e => { console.error(e.message); process.exitCode = 1; });
+  main().catch((e) => { console.error(e.message); process.exitCode = 1; });
 }

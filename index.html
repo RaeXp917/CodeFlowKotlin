@@ -13403,6 +13403,9 @@ function App(){
         }
         if(status&&status.ok)setCliStatus(status);
         var cliMeta=cliWatchCacheMeta(status);
+        // Per-project server-side exclusions participate in the analysis cache key,
+        // so changing a project's excluded folders invalidates its cached analysis.
+        var serverExcludes=(status&&Array.isArray(status.exclusions))?status.exclusions:[];
         cliWatchDuringRef.current=[];
         cliWatchReadRef.current=Object.create(null);
         cliWatchSnapRevRef.current=Object.create(null);
@@ -13460,7 +13463,7 @@ function App(){
             var dataObj=await runAnalysisData({
                 analyzed:analyzed,
                 allFns:allFns,
-                excludePatterns:activeExcludePatterns.map(function(x){return x.raw;}),
+                excludePatterns:activeExcludePatterns.map(function(x){return x.raw;}).concat(serverExcludes),
                 progress:setProgress,
                 yieldFn:yieldToBrowser
             });

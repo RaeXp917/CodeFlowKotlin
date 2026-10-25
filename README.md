@@ -132,7 +132,7 @@ See [card/](./card/) for setup, or jump to the [style gallery](#card-style-galle
 - Never uploads your local project source anywhere
 - Requires **no accounts, tokens or GitHub login** of any kind
 - Makes **no external network requests** when analyzing a local project; there is no remote repository analysis
-- Stores project configuration and the analysis cache locally so your selection persists across restarts
+- Stores project configuration locally (`~/.codeflowkotlin-projects.json`: manual folder registrations, per-project exclusions, hidden projects and the current selection) and the analysis cache, so your projects and selection persist across restarts — nothing is uploaded and no paths are committed to Git
 - No analytics or tracking
 
 ---
@@ -198,6 +198,72 @@ changes mark the analysis stale so you can re-analyze on demand. If the selected
 folder was deleted or moved, the app says so instead of failing silently; with no
 project selected it shows a neutral empty state. (The legacy `?cli=1` URL still
 resolves but is no longer required or a separate mode.)
+
+### Managing projects (Add Folder, Remove, Exclusions)
+The Project dropdown lists both **auto-discovered** Android Studio projects (the
+immediate subfolders of the directory the server was started with) and
+**manually registered** external folders. Three actions sit next to it:
+
+- **Add Folder…** opens the **native Windows folder picker**
+  (`FolderBrowserDialog`, shown on your interactive desktop with no visible
+  PowerShell window). Pick any permitted folder — it may live outside
+  `AndroidStudioProjects`, on any local drive, and its path may contain spaces or
+  Unicode. The folder is validated, registered permanently, added to the
+  dropdown, and selected/loaded automatically. Cancelling does nothing; an
+  invalid or inaccessible path shows an error. A drive root (`C:\`) or a system
+  directory (e.g. `C:\Windows`) is refused. The same canonical folder cannot be
+  registered twice (paths differing only by case or separators are treated as one).
+- **Remove** unregisters the **manually registered** project that is selected —
+  it only removes it from CodeFlow and **never deletes the folder, source files
+  or Git history**. For an **auto-discovered** project, Remove instead **hides**
+  it from the dropdown (it stays on disk and can be unhidden from **Excludes →
+  Manage**). Removing/hiding the active project clears the selection rather than
+  silently jumping to an unrelated project.
+- **Excludes** opens a per-project **Manage** panel: add/remove excluded folders
+  (type a relative path or pick from the project folder tree), reset custom
+  exclusions, and remove/hide the project. Exclusions are stored **per project**
+  (so `wms-vicko` excluding `screenshots/`, `generated/`, `old-source/` does not
+  affect any other project) and are applied consistently to **file enumeration,
+  analysis, re-analyze, direct file reads, and file-watch notifications**.
+  Changing exclusions invalidates that project's cached analysis and re-analyzes.
+
+**Project identity.** Each project has a **stable id derived from its canonical
+absolute root** (not its name), so two projects called `app` in different parents
+stay distinct. Selection, removal and exclusion requests use that id; the display
+name is never the identity. Where two visible projects share a name, the dropdown
+appends the parent folder to tell them apart.
+
+**Where configuration lives.** The registry (manual registrations, per-project
+exclusions, hidden auto projects, and the current selection) is stored locally in
+`~/.codeflowkotlin-projects.json` (your Windows user profile). Writes are atomic,
+a corrupt file is quarantined and recreated rather than crashing, and an older
+single-selection config is migrated automatically. **No project source code or
+project paths are committed to Git** — only this local user file holds them.
+
+**Local-only permissions & security.** These privileged actions are only
+reachable from the trusted local UI: the folder picker and every
+registry/exclusion mutation require a same-origin request plus a per-session CSRF
+token, so an arbitrary website cannot open the picker, register folders or change
+your configuration even though the server listens on `127.0.0.1`. File reads and
+enumeration are confined to the active project's real root (no `..` traversal, no
+symlink/junction escape), excluded folders are not readable through the file
+endpoint, and only the active project has a live watcher.
+
+**Windows dialog limitations.** The picker needs an interactive Windows desktop
+session (it is launched STA via `powershell.exe`). If it cannot be shown (for
+example a non-interactive/headless context), CodeFlow reports that precisely
+instead of claiming success. Recursive Windows watchers may still observe events
+inside an excluded subtree at the OS level; those events are reliably filtered
+out before they reach analysis or the UI.
+
+**Tests.** Stage 5 is covered by `tests/project-registry.test.mjs` (identity,
+migration, dedup, atomic/corrupt-config, exclusion normalization),
+`tests/native-picker.test.mjs` (mocked picker: success/cancel/error/non-JSON,
+non-Windows, fixed-arg launch), `tests/project-management.test.mjs` (HTTP:
+picker endpoint + concurrency, CSRF/same-origin guards, add/remove/hide,
+persistence across restart, migration, exclusions across files/reads/status/dirs,
+isolation), `tests/project-selector-actions.test.mjs` (overlay wiring) and the
+exclusion/guard cases in `tests/server-utils.test.mjs`.
 
 ### Local Files
 Click the "Open Folder" button to analyze code from your computer:

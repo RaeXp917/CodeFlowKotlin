@@ -21,6 +21,10 @@ import {
   isMissingFsError,
   bumpWatchRev,
   currentWatchRev,
+  makeExcludeMatcher,
+  isSameOriginMutation,
+  isValidCsrf,
+  startFileWatchers,
 } from '../cli/server-utils.mjs';
 
 const slash = (p) => String(p).replace(/\\/g, '/');
@@ -88,6 +92,56 @@ test('lists source files from a folder and skips junk trees', async () => {
   const files = await listWatchFiles(root);
   assert.deepEqual(files.map((f) => f.path), ['src/app.js']);
   await rm(root, { recursive: true, force: true });
+});
+
+test('makeExcludeMatcher matches folder prefixes case-insensitively', () => {
+  const m = makeExcludeMatcher(['screenshots', 'a/b']);
+  assert.equal(m('screenshots/shot.png'), true);
+  assert.equal(m('Screenshots/x.kt'), true); // case-insensitive (Windows)
+  assert.equal(m('a/b'), true);
+  assert.equal(m('a/b/c.kt'), true);
+  assert.equal(m('a/bc.kt'), false); // not a path-boundary prefix
+  assert.equal(m('src/app.kt'), false);
+  assert.equal(makeExcludeMatcher([])('anything'), false);
+});
+
+test('listWatchFiles honours an exclusion matcher', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'cfk-excl-'));
+  await mkdir(join(root, 'src'));
+  await mkdir(join(root, 'generated'));
+  await writeFile(join(root, 'src', 'app.js'), 'export const a = 1;\n');
+  await writeFile(join(root, 'generated', 'g.js'), 'export const g = 1;\n');
+  const files = await listWatchFiles(root, makeExcludeMatcher(['generated']));
+  assert.deepEqual(files.map((f) => f.path), ['src/app.js']);
+  await rm(root, { recursive: true, force: true });
+});
+
+test('startFileWatchers drops events inside excluded subtrees', () => {
+  const seen = [];
+  // Inject a fake watch() so nothing touches the real filesystem.
+  const fakeWatch = (dir, opts, cb) => {
+    fakeWatch._cb = cb;
+    return { close() {} };
+  };
+  const w = startFileWatchers('/proj', (rel) => seen.push(rel), fakeWatch, makeExcludeMatcher(['generated']));
+  fakeWatch._cb('change', 'src/app.js');
+  fakeWatch._cb('change', 'generated/out.js');
+  fakeWatch._cb('change', 'generated/deep/x.js');
+  w.close();
+  assert.deepEqual(seen, ['src/app.js'], 'excluded paths must not reach SSE clients');
+});
+
+test('mutation guard requires same-origin Origin and a matching CSRF token', () => {
+  const host = '127.0.0.1:4173';
+  const sameOrigin = { headers: { host, origin: 'http://127.0.0.1:4173' } };
+  assert.equal(isSameOriginMutation(sameOrigin), true);
+  assert.equal(isSameOriginMutation({ headers: { host } }), false, 'Origin is mandatory');
+  assert.equal(isSameOriginMutation({ headers: { host, origin: 'http://127.0.0.1:9999' } }), false, 'port must match');
+  assert.equal(isSameOriginMutation({ headers: { host, origin: 'http://evil.example' } }), false);
+  assert.equal(isValidCsrf({ headers: { 'x-codeflow-csrf': 'tok' } }, 'tok'), true);
+  assert.equal(isValidCsrf({ headers: { 'x-codeflow-csrf': 'nope' } }, 'tok'), false);
+  assert.equal(isValidCsrf({ headers: {} }, 'tok'), false);
+  assert.equal(isValidCsrf({ headers: { 'x-codeflow-csrf': 'tok' } }, ''), false);
 });
 
 test('openBrowser keeps running when the opener is missing', () => {

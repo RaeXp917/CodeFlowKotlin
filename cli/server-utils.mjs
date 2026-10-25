@@ -90,6 +90,53 @@ export function isAllowedCliRequest(req) {
   }
 }
 
+// State-changing endpoints (pick folder, register/remove project, change
+// exclusions, switch project) get a stricter guard than read-only GETs: the
+// request must be same-origin (an Origin header that exactly matches the Host it
+// was sent to) AND carry the per-session CSRF token. A cross-origin page cannot
+// set the custom header without a CORS preflight we never grant, and cannot read
+// the token, so it cannot drive these privileged operations.
+export function isSameOriginMutation(req) {
+  const headers = req && req.headers ? req.headers : (req || {});
+  const host = String(headers.host || headers.Host || '').trim().toLowerCase();
+  if (!host || !isLoopbackHost(host)) return false;
+  const origin = headers.origin || headers.Origin;
+  if (origin == null || origin === '') return false; // Origin is mandatory for mutations
+  let originHost;
+  try {
+    originHost = new URL(String(origin)).host.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!isLoopbackHost(originHost)) return false;
+  return originHost === host; // exact same-origin (host incl. port)
+}
+
+export function isValidCsrf(req, token) {
+  if (!token) return false;
+  const headers = req && req.headers ? req.headers : (req || {});
+  const provided = headers['x-codeflow-csrf'] || headers['X-Codeflow-CSRF'];
+  return typeof provided === 'string' && provided.length > 0 && provided === token;
+}
+
+// Build an exclusion predicate from a list of normalized relative POSIX paths.
+// A path is excluded when it equals an exclusion or sits under one (folder
+// prefix). Matching is case-insensitive to mirror Windows path semantics.
+export function makeExcludeMatcher(exclusions) {
+  const list = (Array.isArray(exclusions) ? exclusions : [])
+    .map((e) => String(e || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase())
+    .filter(Boolean);
+  if (!list.length) return () => false;
+  return (rel) => {
+    const norm = String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+    if (!norm) return false;
+    for (const ex of list) {
+      if (norm === ex || norm.startsWith(ex + '/')) return true;
+    }
+    return false;
+  };
+}
+
 export function shouldSkipName(name) {
   const base = String(name || '').toLowerCase();
   return !base || base === '.ds_store' || IGNORE.has(base);
@@ -100,7 +147,8 @@ export function isWatchableFile(name) {
   return TEXT_EXT.has(ext);
 }
 
-export async function listWatchFiles(root) {
+export async function listWatchFiles(root, isExcluded) {
+  const excluded = typeof isExcluded === 'function' ? isExcluded : () => false;
   const files = [];
   async function walk(dir, rel) {
     let entries;
@@ -113,6 +161,7 @@ export async function listWatchFiles(root) {
       if (shouldSkipName(entry.name)) continue;
       const childRel = rel ? rel + '/' + entry.name : entry.name;
       const childPath = path.join(dir, entry.name);
+      if (excluded(childRel)) continue;
       if (entry.isDirectory()) {
         await walk(childPath, childRel);
       } else if (entry.isFile() && isWatchableFile(entry.name)) {
@@ -186,16 +235,21 @@ export function safeRequestPath(rawUrl) {
   return { ok: true, url, pathname };
 }
 
-export function startFileWatchers(root, onRelPath, watchFn) {
+export function startFileWatchers(root, onRelPath, watchFn, isExcluded) {
   const run = typeof watchFn === 'function' ? watchFn : watch;
+  const excluded = typeof isExcluded === 'function' ? isExcluded : () => false;
   const watched = new Map();
   let watching = false;
   let closed = false;
 
+  // Recursive OS watchers can still observe events inside an excluded subtree;
+  // we reliably filter those events here rather than claim the OS is not
+  // watching them. Excluded paths therefore never reach SSE clients or analysis.
   function emit(rel) {
     if (closed || !rel) return;
     const norm = String(rel).replace(/\\/g, '/');
     if (norm.split('/').some(shouldSkipName)) return;
+    if (excluded(norm)) return;
     onRelPath(norm);
   }
 
@@ -223,7 +277,7 @@ export function startFileWatchers(root, onRelPath, watchFn) {
           const childPath = path.join(dir, String(filename));
           fs.stat(childPath).then((st) => {
             if (closed || shouldSkipName(path.basename(childPath))) return;
-            if (!st.isDirectory()) return;
+            if (!st.isDirectory() || excluded(childRel)) return;
             forgetTree(childPath);
             add(childPath, childRel, false);
             watchExistingTree(childPath, childRel);
@@ -253,6 +307,7 @@ export function startFileWatchers(root, onRelPath, watchFn) {
       if (closed) return;
       if (!entry.isDirectory() || shouldSkipName(entry.name)) continue;
       const childRel = rel ? rel + '/' + entry.name : entry.name;
+      if (excluded(childRel)) continue;
       const childPath = path.join(dir, entry.name);
       add(childPath, childRel, false);
       await watchExistingTree(childPath, childRel);
