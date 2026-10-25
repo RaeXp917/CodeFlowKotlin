@@ -134,3 +134,27 @@ or browsers; handler/React-element/D3 tests are executable but do not constitute
 visual or real browser interaction verification. Native clipboard/Undo UX and
 custom Windows ACL configurations still need interactive verification. Draft text
 survives a card remount, but native textarea Undo history is limited to its mount.
+
+
+## Manual Windows desktop launcher
+
+Use the **CodeFlowKotlin** desktop shortcut or `Open CodeFlow.cmd`. Both call
+`scripts/start-codeflow.ps1`; the desktop shortcut hides the helper window.
+The script serializes concurrent launches, checks `/__codeflow/runtime` to ensure
+port 4173 belongs to this checkout, starts the one Node server hidden and detached
+if needed, waits for readiness and opens the default browser. It never stops an
+unknown process. Logs are under `%LOCALAPPDATA%/CodeFlowKotlin/`. Its default
+project discovery parent is `%USERPROFILE%/AndroidStudioProjects`; registered
+projects and the saved selection are restored as before.
+
+The Node server no longer opens the browser automatically. There is no IDE or
+Windows-login auto-start registration added by this launcher. Android Studio
+shortcuts, startup tasks, global settings and registered project IDE settings
+were checked; no CodeFlow auto-launch hook was found. The previous server had
+been started manually during development. A direct server start now also remains
+browser-silent, so browser opening is controlled by the manual launcher.
+
+For a noninteractive launch/reuse check, run
+`powershell.exe -NoProfile -File scripts/start-codeflow.ps1 -NoBrowser`.
+A token is not needed by this launcher: project management and source-writing
+CSRF protections remain within the local application.

@@ -12,7 +12,13 @@ Requires Node.js 18+; no package installation or build is needed. From this repo
 node server/projects-server.mjs "C:\Users\MainPc\AndroidStudioProjects"
 ```
 
-The server binds only `127.0.0.1:4173` and opens the local app. `npm start` uses the
+Double-click **CodeFlowKotlin** on the Windows desktop (or `Open CodeFlow.cmd` in
+this folder) to open it without any IDE. The launcher starts a hidden, detached
+server when needed and reuses it on later clicks. It opens your default browser.
+Closing Android Studio or the launcher does not stop CodeFlow.
+
+The server binds only `127.0.0.1:4173`. Starting the Node server directly never
+opens a browser; browser opening is an explicit launcher action. `npm start` uses the
 current directory as the discovery parent. Browser dependencies are pinned under
 `vendor/` and load offline. No remote repository, PR, authentication, share-link,
 standalone analysis launcher or Card product is included.

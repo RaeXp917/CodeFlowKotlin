@@ -65,3 +65,21 @@ test('the project server exposes a stable id (canonical root, not basename)', as
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('manual launcher can identify the local runtime independently of any IDE', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cfk-launch-'));
+  const app = createProjectsServer({ projectsRoot: root, persist: false });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  try {
+    const response = await fetch('http://127.0.0.1:' + app.server.address().port + '/__codeflow/runtime');
+    assert.equal(response.status, 200);
+    const runtime = await response.json();
+    assert.equal(runtime.app, 'CodeFlowKotlin');
+    assert.equal(runtime.uiRoot, path.resolve(__dirname, '..'));
+    assert.equal(runtime.projectsRoot, root);
+    assert.equal(runtime.processId, process.pid);
+  } finally {
+    await app.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

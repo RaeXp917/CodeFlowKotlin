@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   isAllowedProjectRequest, isSameOriginMutation, isValidCsrf,
   safeRequestPath, resolveSafeExistingPath, resolveSafeProjectPath,
-  startFileWatchers, listWatchFiles, openBrowser, makeExcludeMatcher,
+  startFileWatchers, listWatchFiles, makeExcludeMatcher,
   bumpWatchRev, currentWatchRev, SOURCE_FILE_MAX_BYTES, shouldSkipName,
   isSourceCodeFile,
 } from './server-utils.mjs';
@@ -459,6 +459,10 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
         }
       }
 
+      if (pathname === '/__codeflow/runtime') {
+        return json(res, 200, { app: 'CodeFlowKotlin', uiRoot, projectsRoot, processId: process.pid });
+      }
+
       if (pathname === '/__codeflow/status') {
         const live = await dirExists(currentRoot);
         return json(res, 200, {
@@ -618,15 +622,20 @@ async function main() {
   if (!st || !st.isDirectory()) throw new Error('Folder does not exist: ' + parsed.projectsRoot);
   const app = createProjectsServer({ projectsRoot: await fs.realpath(parsed.projectsRoot) });
   await app.restore();
-  await new Promise((resolve, reject) => {
-    app.server.once('error', reject);
-    app.server.listen(parsed.port, HOST, resolve);
-  });
+  try {
+    await new Promise((resolve, reject) => {
+      app.server.once('error', reject);
+      app.server.listen(parsed.port, HOST, resolve);
+    });
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
   const url = 'http://' + HOST + ':' + parsed.port + '/';
   console.log('CodeFlowKotlin: ' + url);
   console.log('Projects directory: ' + parsed.projectsRoot);
   console.log('Use the Project dropdown in the existing CodeFlow header.');
-  openBrowser(url);
+  // Browser opening is an explicit action of the desktop launcher only.
   const shutdown = () => app.close().then(() => process.exit(0));
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
