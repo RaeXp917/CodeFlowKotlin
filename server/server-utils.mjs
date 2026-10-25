@@ -1,5 +1,5 @@
 // Shared local-server utilities for the CodeFlowKotlin local application server
-// (cli/projects-server.mjs): secure path resolution, project source enumeration,
+// (server/projects-server.mjs): secure path resolution, project source enumeration,
 // file watching, revision tracking, localhost request validation and the browser
 // launcher. These were previously housed in the now-removed standalone CLI.
 
@@ -56,7 +56,7 @@ export function pathStaysInRoot(root, candidate) {
   return full === rootPath || full.startsWith(prefix);
 }
 
-export function resolveSafeCliPath(root, relPath) {
+export function resolveSafeProjectPath(root, relPath) {
   const rootPath = path.resolve(String(root || ''));
   const rel = String(relPath || '').replace(/\\/g, '/');
   if (!rel || rel.startsWith('/') || rel.split('/').includes('..')) return null;
@@ -66,7 +66,7 @@ export function resolveSafeCliPath(root, relPath) {
 }
 
 export async function resolveSafeExistingPath(root, relPath) {
-  const lexical = resolveSafeCliPath(root, relPath);
+  const lexical = resolveSafeProjectPath(root, relPath);
   if (!lexical) return null;
   try {
     const realRoot = await fs.realpath(root);
@@ -97,7 +97,7 @@ export function isLoopbackHost(hostHeader) {
   return LOOPBACK_HOSTS.has(loopbackHostName(hostHeader));
 }
 
-export function isAllowedCliRequest(req) {
+export function isAllowedProjectRequest(req) {
   const headers = req && req.headers ? req.headers : (req || {});
   if (!isLoopbackHost(headers.host || headers.Host)) return false;
   const origin = headers.origin || headers.Origin;
@@ -212,7 +212,7 @@ export async function listSearchableFiles(root, isExcluded) {
   return walkFiles(root, { isExcluded, accept: isSourceCodeFile });
 }
 
-export const CLI_FILE_MAX_BYTES = 2 * 1024 * 1024;
+export const SOURCE_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
 export function isMissingFsError(err) {
   const code = err && err.code;

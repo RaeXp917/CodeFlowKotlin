@@ -4,17 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CodeFlow — Open Source Architecture Intelligence</title>
-    <meta name="description" content="Visualize any GitHub repository's architecture in seconds. See dependencies, blast radius, code ownership, security issues, and design patterns. No installation required.">
-    <meta name="keywords" content="code visualization, architecture, github, dependency graph, blast radius, code analysis, open source">
+    <meta name="description" content="Explore, analyze and learn from local source-code projects.">
+    <meta name="keywords" content="code visualization, architecture, local source, dependency graph, blast radius, code analysis, open source">
     <meta name="author" content="CodeFlow">
     <meta name="robots" content="index, follow">
     <meta property="og:title" content="CodeFlow — Visualize Your Codebase Architecture">
-    <meta property="og:description" content="Turn any GitHub repo into an interactive architecture map in seconds. Zero setup, privacy-first, runs in your browser.">
+    <meta property="og:description" content="Explore local source architecture privately and offline.">
     <meta property="og:type" content="website">
     <meta property="og:image" content="codeflow-social.png">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="CodeFlow — Visualize Your Codebase Architecture">
-    <meta name="twitter:description" content="Turn any GitHub repo into an interactive architecture map in seconds. Zero setup, privacy-first.">
+    <meta name="twitter:description" content="Explore local source architecture privately and offline.">
     <meta name="twitter:image" content="codeflow-social.png">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300ff9d' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M13 2 4 14h6l-1 8 9-12h-6l1-8z'/></svg>">
     <script src="./vendor/react/react.production.min.js"></script>
@@ -23,11 +23,9 @@
     <script src="./vendor/d3/d3.min.js"></script>
     <script src="./vendor/d3-sankey/d3-sankey.min.js"></script>
     <script src="./vendor/acorn/acorn.min.js"></script>
-    <script src="./vendor/jsrsasign/jsrsasign-all-min.js"></script>
     <script src="./vendor/jszip/jszip.min.js"></script>
     <script src="./vendor/tree-sitter/tree-sitter.js"></script>
     <script src="./vendor/jspdf/jspdf.umd.min.js"></script>
-    <script src="./vendor/mermaid/mermaid.min.js"></script>
     <script src="./vendor/3d-force-graph/3d-force-graph.min.js" defer></script>
     <style>
 @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;src:url('./vendor/jetbrains-mono/jetbrains-mono-latin-400-normal.woff2') format('woff2')}
@@ -221,13 +219,6 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .badge-info{background:rgba(77,159,255,0.2);color:var(--blue)}
 .progress-bar{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden}
 .progress-fill{height:100%;border-radius:3px}
-.owner-bar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin:8px 0}
-.owner-segment{height:100%}
-.owner-list{display:flex;flex-direction:column;gap:4px}
-.owner-item{display:flex;align-items:center;gap:8px;font-size:10px}
-.owner-avatar{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;color:white}
-.owner-name{flex:1;color:var(--t1)}
-.owner-percent{color:var(--t3)}
 .pattern-item{padding:12px;background:linear-gradient(180deg,rgba(34,197,94,0.08) 0%,var(--bg0) 55%);border-radius:8px;margin-bottom:8px;border:1px solid rgba(34,197,94,0.32);transition:transform 0.15s ease,border-color 0.15s ease,box-shadow 0.15s ease}
 .pattern-item:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(0,0,0,0.18)}
 .pattern-item.anti{background:linear-gradient(180deg,rgba(255,95,95,0.08) 0%,var(--bg0) 55%);border-color:rgba(255,95,95,0.34)}
@@ -330,8 +321,6 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .reset-btn:hover{border-color:var(--red);color:var(--red)}
 .refresh-btn{background:transparent;border:1px solid var(--border);color:var(--t2);padding:4px 8px;border-radius:4px;font-size:9px;cursor:pointer;margin-left:8px;display:flex;align-items:center;gap:4px}
 .refresh-btn:hover{border-color:var(--acc);color:var(--acc)}
-.loading-owner{display:flex;align-items:center;gap:8px;padding:12px;color:var(--t2);font-size:10px}
-.loading-owner::before{content:'';width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--acc);border-radius:50%;animation:spin 0.6s linear infinite}
 .privacy-modal{max-width:450px}
 .privacy-item{display:flex;align-items:flex-start;gap:10px;padding:10px;background:var(--bg0);border-radius:8px;margin-bottom:8px}
 .privacy-icon{flex-shrink:0;color:var(--acc)}
@@ -620,9 +609,7 @@ svg.color-blocks text.node-label{display:none}
 .recent-mini-btn.danger.armed{background:var(--red);border-color:var(--red);color:#fff}
 .recent-empty{font-size:10px;color:var(--t3);line-height:1.4;padding:4px 0}
 .stale-banner{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--accbg);border:1px solid var(--acc);border-radius:6px;margin:0 0 8px;font-size:10px;color:var(--t1)}
-.github-hint{font-size:9px;color:var(--t3);line-height:1.45;margin-top:6px;max-width:420px}
-.github-hint button{background:none;border:none;color:var(--acc);cursor:pointer;font-family:inherit;font-size:9px;padding:0;text-decoration:underline}
-.cli-chip{padding:4px 8px;background:var(--accbg);border:1px solid var(--acc);border-radius:6px;font-size:9px;color:var(--acc)}
+.project-chip{padding:4px 8px;background:var(--accbg);border:1px solid var(--acc);border-radius:6px;font-size:9px;color:var(--acc)}
 @media(max-width:980px){
 .code-canvas-hud{top:56px;left:10px;width:140px}
 }
@@ -4915,19 +4902,16 @@ function countFiles(n){return n.files.length+Object.values(n.children).reduce(fu
 
 var ARCHITECTURE_MAX_BLOCKS=64;
 var ARCHITECTURE_MAX_RENDERED_DEPENDENCIES=48;
-var ARCHITECTURE_GROUP_ORDER_CODEFLOW=['Browser App','GitHub Action','Analysis Core','Repository Collection','Rendering / Reports','Testing','Fixtures / Examples','Application','Storage'];
 var ARCHITECTURE_GROUP_ORDER_WEBAPP=['App Entry / Shell','Frontend Routes / Views','Frontend Components','Backend / API Layer','Services / Business Logic','Data / Storage','Shared / Utilities','Configuration','Content / Data','External Integrations','Build Output','Testing','Fixtures / Examples'];
 var ARCHITECTURE_GROUP_ORDER_GENERIC=['Application','Shared Services / Utils','Configuration','Content / Data','Build Output','Testing','Fixtures / Examples','Storage'];
 
 function getArchitectureGroupOrder(profile){
-    if(profile==='codeflow')return ARCHITECTURE_GROUP_ORDER_CODEFLOW;
     if(profile==='web-app')return ARCHITECTURE_GROUP_ORDER_WEBAPP;
     return ARCHITECTURE_GROUP_ORDER_GENERIC;
 }
 
 function detectArchitectureProfile(files,framework){
     var paths=(files||[]).map(function(f){return normalizeArchitecturePath(f.path||f.name).toLowerCase();});
-    if(paths.some(function(p){return /(^|\/)index\.html?$/i.test(p);})&&paths.some(function(p){return /(^|\/)card\/(lib|render)\//i.test(p);}))return'codeflow';
     if(framework==='Next.js')return'web-app';
     if(paths.some(function(p){
         return /(^|\/)src\/app\//i.test(p)||/(^|\/)pages\//i.test(p)||/(^|\/)(backend|server|api|services?|middleware|routes?|platforms?)\b/i.test(p);
@@ -5087,24 +5071,6 @@ function inferWebAppRoute(path){
     return null;
 }
 
-function inferCodeflowArchitectureRole(path){
-    var p=normalizeArchitecturePath(path).toLowerCase();
-    if(isArchitectureTestFile(path))return'test';
-    if(isArchitectureFixtureFile(path))return'fixture';
-    if(/(^|\/)index\.html?$/i.test(p))return'browser-shell';
-    if(/(^|\/)card\/index\.(js|mjs|cjs)$/i.test(p))return'action-entry';
-    if(/\/analyzer\.(js|mjs|cjs)$/i.test(p))return'analyzer-loader';
-    if(/\/collect\.(js|mjs|cjs)$/i.test(p))return'collector';
-    if(/\/git\.(js|mjs|cjs)$/i.test(p))return'git';
-    if(/\/inputs\.(js|mjs|cjs)$/i.test(p))return'inputs';
-    if(/\/pr\.(js|mjs|cjs)$/i.test(p))return'pr';
-    if(/\/state\.(js|mjs|cjs)$/i.test(p))return'state';
-    if(/\/card\/render\/card\.(js|mjs|cjs)$/i.test(p))return'renderer';
-    if(/(^|\/)card\/render\//i.test(p))return'render-support';
-    if(/(^|\/)card\/lib\//i.test(p))return'module';
-    return'module';
-}
-
 function inferWebAppArchitectureRole(path,classified,content){
     var p=normalizeArchitecturePath(path).toLowerCase();
     var base=architectureFileBaseName(path);
@@ -5140,24 +5106,10 @@ function inferWebAppArchitectureRole(path,classified,content){
 }
 
 function inferArchitectureRole(path,profile,classified,content){
-    if(profile==='codeflow')return inferCodeflowArchitectureRole(path);
     return inferWebAppArchitectureRole(path,classified||{kind:'utility',route:null},content||'');
 }
 
 function inferArchitectureGroup(role,fact,profile){
-    if(profile==='codeflow'){
-        if(role==='browser-shell')return'Browser App';
-        if(role==='action-entry')return'GitHub Action';
-        if(role==='analyzer-loader'||role==='state')return'Analysis Core';
-        if(role==='collector'||role==='git'||role==='inputs'||role==='pr')return'Repository Collection';
-        if(role==='renderer'||role==='render-support')return'Rendering / Reports';
-        if(role==='test')return'Testing';
-        if(role==='fixture')return'Fixtures / Examples';
-        if(fact&&fact.kind==='page')return'Browser App';
-        if(fact&&fact.kind==='api')return'Application';
-        if(fact&&(fact.kind==='database-adapter'||fact.kind==='database'))return'Storage';
-        return'Application';
-    }
     if(role==='app-shell')return'App Entry / Shell';
     if(role==='frontend-route')return'Frontend Routes / Views';
     if(role==='frontend-component')return'Frontend Components';
@@ -5176,14 +5128,6 @@ function inferArchitectureGroup(role,fact,profile){
 
 function isArchitectureSignificantFile(path,role,fact,framework,profile,importedByCore){
     if(isArchitectureTestFile(path)||isArchitectureFixtureFile(path)||isArchitectureBuildOutput(path))return false;
-    if(profile==='codeflow'){
-        if(role==='browser-shell'||role==='action-entry')return true;
-        if(role==='analyzer-loader'||role==='collector'||role==='git'||role==='inputs'||role==='pr'||role==='state'||role==='renderer'||role==='render-support')return true;
-        if(/(^|\/)card\/(lib|render)\//i.test(path))return true;
-        if(fact.kind==='page'||fact.kind==='api')return true;
-        if(fact.kind==='database-adapter'&&fact.dbUsage)return true;
-        return false;
-    }
     if(role==='app-shell')return true;
     if(role==='frontend-route'&&fact.route&&canBeFrontendRoute(path))return true;
     if(role==='frontend-component'&&/\.(tsx|jsx)$/i.test(path))return true;
@@ -5230,25 +5174,12 @@ function testFileReferencesCore(content){
 function inferTestTargetPaths(testPath){
     var base=architectureFileBaseName(testPath).toLowerCase();
     var targets=[];
-    if(/golden/.test(base))targets.push('card/lib/analyzer.js');
-    if(/repo-smoke|smoke/.test(base))targets.push('card/lib/collect.js');
     if(/md-extractor|sync-with-html|html-inline/.test(base))targets.push('index.html');
     return targets;
 }
 
 function architectureDependencyLabel(sourceRole,targetRole,importPath){
     if(sourceRole==='test')return'tests';
-    if(sourceRole==='browser-shell'&&targetRole==='analyzer-loader')return'runs analysis';
-    if(sourceRole==='browser-shell'&&targetRole==='collector')return'loads repo data';
-    if(sourceRole==='action-entry'&&targetRole==='browser-shell')return'loads analyzer from';
-    if(sourceRole==='action-entry'&&targetRole==='collector')return'collects repo';
-    if(sourceRole==='action-entry'&&targetRole==='analyzer-loader')return'runs analysis';
-    if(sourceRole==='action-entry'&&targetRole==='state')return'stores derived state';
-    if(sourceRole==='action-entry'&&targetRole==='renderer')return'renders report';
-    if(sourceRole==='collector'&&targetRole==='git')return'uses GitHub API';
-    if(sourceRole==='collector'&&targetRole==='inputs')return'normalizes input';
-    if(sourceRole==='pr'&&targetRole==='git')return'analyzes pull requests';
-    if(sourceRole==='analyzer-loader'&&targetRole==='state')return'stores derived state';
     if(sourceRole==='renderer'&&targetRole==='render-support')return'uses visual helpers';
     if(sourceRole==='render-support'&&targetRole==='render-support'){
         if(/receipt-md/.test(importPath||''))return'exports markdown';
@@ -5632,7 +5563,6 @@ function architectureTitle(fact){
     if(fact.displayTitle)return fact.displayTitle;
     if(fact.role==='app-shell')return'App Entry / Shell';
     if(fact.kind==='shell'||fact.role==='browser-shell')return'Browser App Shell';
-    if(fact.kind==='action-entry')return'GitHub Action';
     if(fact.role==='frontend-route')return fact.route==='/'?'/':fact.route;
     if(fact.role==='frontend-component')return inferPageComponentTitle(fact.path,fact.route,fact.content);
     if(fact.role==='platform-analyzer'){
@@ -5679,7 +5609,6 @@ function aggregateFrontendComponentKey(block){
 }
 
 function getArchitectureAggregateKey(block,profile){
-    if(profile==='codeflow')return null;
     if(block.isBuildOutput)return null;
     if(block.role==='app-shell'||block.role==='browser-shell')return'agg:app-shell';
     if(block.role==='frontend-route'&&block.route)return'agg:route:'+block.route;
@@ -5757,7 +5686,6 @@ function resolveAggregateBlockTitle(key){
 }
 
 function aggregateArchitectureBlocks(blocks,profile,warnings){
-    if(profile==='codeflow')return blocks;
     var merged=Object.create(null);
     var passthrough=[];
     blocks.forEach(function(block){
@@ -5997,34 +5925,6 @@ function buildImportBasedDependencies(facts,blocks,files){
 function buildSyntheticArchitectureDependencies(blocks,facts){
     var deps=[];
     var shell=findBlockByRole(blocks,'browser-shell');
-    var analyzer=findBlockByRole(blocks,'analyzer-loader')||findBlockByPathEnds(blocks,'card/lib/analyzer.js');
-    var collector=findBlockByRole(blocks,'collector')||findBlockByPathEnds(blocks,'card/lib/collect.js');
-    var action=findBlockByRole(blocks,'action-entry')||findBlockByPathEnds(blocks,'card/index.js');
-    if(shell&&analyzer){
-        deps.push({from:shell.id,to:analyzer.id,kind:'runtime',label:architectureDependencyLabel(shell.role,analyzer.role),confidence:'high'});
-    }
-    if(shell&&collector){
-        deps.push({from:shell.id,to:collector.id,kind:'runtime',label:architectureDependencyLabel(shell.role,collector.role),confidence:'high'});
-    }
-    if(action&&shell){
-        deps.push({from:action.id,to:shell.id,kind:'runtime',label:architectureDependencyLabel(action.role,shell.role),confidence:'high'});
-    }
-    var state=findBlockByRole(blocks,'state')||findBlockByPathEnds(blocks,'card/lib/state.js');
-    var pr=findBlockByRole(blocks,'pr')||findBlockByPathEnds(blocks,'card/lib/pr.js');
-    var git=findBlockByRole(blocks,'git')||findBlockByPathEnds(blocks,'card/lib/git.js');
-    var inputs=findBlockByRole(blocks,'inputs')||findBlockByPathEnds(blocks,'card/lib/inputs.js');
-    if(analyzer&&state){
-        deps.push({from:analyzer.id,to:state.id,kind:'runtime',label:architectureDependencyLabel('analyzer-loader','state'),confidence:'medium'});
-    }
-    if(pr&&git){
-        deps.push({from:pr.id,to:git.id,kind:'runtime',label:architectureDependencyLabel('pr','git'),confidence:'high'});
-    }
-    if(action&&collector&&inputs){
-        deps.push({from:collector.id,to:inputs.id,kind:'runtime',label:architectureDependencyLabel('collector','inputs'),confidence:'medium'});
-    }
-    if(action&&collector&&git){
-        deps.push({from:collector.id,to:git.id,kind:'runtime',label:architectureDependencyLabel('collector','git'),confidence:'medium'});
-    }
     var appShell=findBlockByRole(blocks,'app-shell');
     if(appShell){
         blocks.forEach(function(block){
@@ -6064,8 +5964,6 @@ function buildSyntheticArchitectureDependencies(blocks,facts){
         var targets=[];
         if(testFileReferencesCore(fact.content)){
             if(shell)targets.push(shell);
-            if(analyzer)targets.push(analyzer);
-            if(collector)targets.push(collector);
         }
         inferTestTargetPaths(fact.path).forEach(function(suffix){
             var target=findBlockByPathEnds(blocks,suffix);
@@ -6166,7 +6064,6 @@ function formatMermaidBlock(block){
 
 function architectureGroupStyleClass(group){
     if(group==='Browser App'||group==='App Entry / Shell')return group==='App Entry / Shell'?'appentry':'browser';
-    if(group==='GitHub Action')return'action';
     if(group==='Analysis Core')return'analysis';
     if(group==='Repository Collection')return'collection';
     if(group==='Rendering / Reports')return'rendering';
@@ -10517,7 +10414,7 @@ function localFolderCacheMeta(options){
     return{sourceKey:title+'|sel:'+selectionId,title:title,selectionId:selectionId};
 }
 
-function cliWatchCacheMeta(status){
+function projectWatchCacheMeta(status){
     status=status||{};
     var root=String(status.root||'').replace(/\\/g,'/');
     var title=String(status.name||'').trim();
@@ -10543,14 +10440,14 @@ function retainedFolderMatchesRecord(record,retained){
     return String(retained.sourceKey||'')===String(record.sourceKey);
 }
 
-function normalizeCliRoot(root){
+function normalizeProjectRoot(root){
     return String(root||'').replace(/\\/g,'/').replace(/\/+$/,'');
 }
 
-function cliRecordMatchesStatus(record,status){
+function projectRecordMatchesStatus(record,status){
     if(!record||!record.sourceKey)return true;
     if(!status||!status.ok)return false;
-    return normalizeCliRoot(status.root)===normalizeCliRoot(record.sourceKey);
+    return normalizeProjectRoot(status.root)===normalizeProjectRoot(record.sourceKey);
 }
 
 function zipFileIdentity(zipFile){
@@ -10596,47 +10493,47 @@ function asCodeLines(lines){
     return[String(lines||'')];
 }
 
-var CLI_WATCH_DIFF_MS=200;
+var PROJECT_WATCH_DIFF_MS=200;
 var CODE_DIFF_LCS_LIMIT=160000;
 
-function normalizeCliWatchPath(path){
+function normalizeProjectWatchPath(path){
     return String(path||'').replace(/\\/g,'/').replace(/^\/+/,'');
 }
 
-function noteCliWatchPath(prev,path){
-    var next=normalizeCliWatchPath(path);
+function noteProjectWatchPath(prev,path){
+    var next=normalizeProjectWatchPath(path);
     if(!next)return prev||[];
     var list=prev||[];
     if(list.indexOf(next)>=0)return list;
     return list.concat([next]);
 }
 
-function noteCliWatchPathIfRead(prev,path,readByPath){
-    var next=normalizeCliWatchPath(path);
+function noteProjectWatchPathIfRead(prev,path,readByPath){
+    var next=normalizeProjectWatchPath(path);
     if(!next)return prev||[];
     if(!(readByPath&&readByPath[next]))return prev||[];
-    return noteCliWatchPath(prev,next);
+    return noteProjectWatchPath(prev,next);
 }
 
-function cliWatchEventRev(value){
+function projectWatchEventRev(value){
     var n=Number(value);
     return Number.isFinite(n)?n:null;
 }
 
-function normalizeCliWatchDuringEvent(item){
-    if(typeof item==='string')return{path:normalizeCliWatchPath(item),rev:null};
-    var path=normalizeCliWatchPath(item&&item.path);
+function normalizeProjectWatchDuringEvent(item){
+    if(typeof item==='string')return{path:normalizeProjectWatchPath(item),rev:null};
+    var path=normalizeProjectWatchPath(item&&item.path);
     if(!path)return null;
-    return{path:path,rev:cliWatchEventRev(item.rev)};
+    return{path:path,rev:projectWatchEventRev(item.rev)};
 }
 
-function noteCliWatchDuringEvent(prev,path,rev){
-    var ev=normalizeCliWatchDuringEvent({path:path,rev:rev});
+function noteProjectWatchDuringEvent(prev,path,rev){
+    var ev=normalizeProjectWatchDuringEvent({path:path,rev:rev});
     if(!ev)return prev||[];
     var list=(prev||[]).slice();
     var idx=-1;
     for(var i=0;i<list.length;i++){
-        var cur=normalizeCliWatchDuringEvent(list[i]);
+        var cur=normalizeProjectWatchDuringEvent(list[i]);
         if(cur&&cur.path===ev.path){idx=i;break;}
     }
     if(idx>=0)list[idx]=ev;
@@ -10644,45 +10541,45 @@ function noteCliWatchDuringEvent(prev,path,rev){
     return list;
 }
 
-function cliWatchEventIsAfterSnapshot(eventRev,snapRev){
+function projectWatchEventIsAfterSnapshot(eventRev,snapRev){
     if(eventRev==null||snapRev==null)return true;
     return Number(eventRev)>Number(snapRev);
 }
 
-function cliWatchSnapRevFromResponse(res){
+function projectWatchSnapRevFromResponse(res){
     if(!res||!res.headers||typeof res.headers.get!=='function')return null;
-    return cliWatchEventRev(res.headers.get('x-codeflow-rev'));
+    return projectWatchEventRev(res.headers.get('x-codeflow-rev'));
 }
 
-function forgetCliWatchPath(prev,path){
-    var next=normalizeCliWatchPath(path);
+function forgetProjectWatchPath(prev,path){
+    var next=normalizeProjectWatchPath(path);
     if(!next)return prev||[];
     return (prev||[]).filter(function(item){return item!==next;});
 }
 
-function analyzedFileForCliWatchPath(files,path){
-    var next=normalizeCliWatchPath(path);
+function analyzedFileForProjectWatchPath(files,path){
+    var next=normalizeProjectWatchPath(path);
     if(!next||!files)return null;
     for(var i=0;i<files.length;i++){
         var file=files[i];
-        if(file&&normalizeCliWatchPath(file.path)===next)return file;
+        if(file&&normalizeProjectWatchPath(file.path)===next)return file;
     }
     return null;
 }
 
-function cliWatchLiveMatchesBaseline(file,liveContent){
+function projectWatchLiveMatchesBaseline(file,liveContent){
     return !!(fileHasAnalyzedSourceForDiff(file)&&typeof liveContent==='string'&&liveContent===file.content);
 }
 
-function cliWatchLiveClearsDirty(file,liveContent,kind){
-    return kind==='ok'&&cliWatchLiveMatchesBaseline(file,liveContent);
+function projectWatchLiveClearsDirty(file,liveContent,kind){
+    return kind==='ok'&&projectWatchLiveMatchesBaseline(file,liveContent);
 }
 
-function mergeCliLiveContents(prev,updates){
+function mergeProjectLiveContents(prev,updates){
     var next=Object.assign(Object.create(null),prev||{});
     (updates||[]).forEach(function(update){
         if(!update||!update.path)return;
-        var path=normalizeCliWatchPath(update.path);
+        var path=normalizeProjectWatchPath(update.path);
         if(!path)return;
         if(typeof update.content!=='string'){
             delete next[path];
@@ -10697,14 +10594,14 @@ function fileHasAnalyzedSourceForDiff(file){
     return !!(file&&!file.analysisSkipped&&typeof file.content==='string');
 }
 
-function cliWatchDiffPaths(files,paths){
+function projectWatchDiffPaths(files,paths){
     var known=Object.create(null);
     (files||[]).forEach(function(file){
         if(file&&file.path&&fileHasAnalyzedSourceForDiff(file))known[file.path]=true;
     });
     var out=[];
     (paths||[]).forEach(function(path){
-        var next=normalizeCliWatchPath(path);
+        var next=normalizeProjectWatchPath(path);
         if(next&&known[next]&&out.indexOf(next)<0)out.push(next);
     });
     return out;
@@ -10857,64 +10754,64 @@ function codeCardDiffLineIndex(diffRows,analyzedLine){
     return found>0?found:n;
 }
 
-function startedCliWatchDiffPaths(pending,gen){
+function startedProjectWatchDiffPaths(pending,gen){
     var out=[];
     (pending||[]).forEach(function(path){
-        var next=normalizeCliWatchPath(path);
+        var next=normalizeProjectWatchPath(path);
         if(next&&out.indexOf(next)<0)out.push(next);
     });
     Object.keys(gen||{}).forEach(function(path){
-        var next=normalizeCliWatchPath(path);
+        var next=normalizeProjectWatchPath(path);
         if(next&&out.indexOf(next)<0)out.push(next);
     });
     return out;
 }
 
-function bumpCliWatchDiffEpoch(epoch){
+function bumpProjectWatchDiffEpoch(epoch){
     return (Number(epoch)||0)+1;
 }
 
-function cliWatchDiffRequestIsCurrent(epoch,capturedEpoch,genByPath,path,capturedGen){
+function projectWatchDiffRequestIsCurrent(epoch,capturedEpoch,genByPath,path,capturedGen){
     if((Number(epoch)||0)!==(Number(capturedEpoch)||0))return false;
     return !!(genByPath&&genByPath[path]===capturedGen);
 }
 
-function retainCliWatchPathsAfterAnalysis(receivedDuring,readByPath,snapRevByPath){
+function retainProjectWatchPathsAfterAnalysis(receivedDuring,readByPath,snapRevByPath){
     var read=readByPath||Object.create(null);
     var snaps=snapRevByPath||Object.create(null);
     var out=[];
     (receivedDuring||[]).forEach(function(item){
-        var ev=normalizeCliWatchDuringEvent(item);
+        var ev=normalizeProjectWatchDuringEvent(item);
         if(!ev||!read[ev.path]||out.indexOf(ev.path)>=0)return;
-        if(!cliWatchEventIsAfterSnapshot(ev.rev,Object.prototype.hasOwnProperty.call(snaps,ev.path)?snaps[ev.path]:null))return;
+        if(!projectWatchEventIsAfterSnapshot(ev.rev,Object.prototype.hasOwnProperty.call(snaps,ev.path)?snaps[ev.path]:null))return;
         out.push(ev.path);
     });
     return out;
 }
 
-var CLI_WATCH_MAX_BYTES=2*1024*1024;
+var PROJECT_WATCH_MAX_BYTES=2*1024*1024;
 
-function cliWatchLiveRejectsOversized(size){
+function projectWatchLiveRejectsOversized(size){
     var n=Number(size);
-    return Number.isFinite(n)&&n>CLI_WATCH_MAX_BYTES;
+    return Number.isFinite(n)&&n>PROJECT_WATCH_MAX_BYTES;
 }
 
-function cliWatchLiveFromResponse(status,body,ok,contentLength){
-    if(cliWatchLiveRejectsOversized(contentLength))return{kind:'error'};
+function projectWatchLiveFromResponse(status,body,ok,contentLength){
+    if(projectWatchLiveRejectsOversized(contentLength))return{kind:'error'};
     if(ok){
         var content=typeof body==='string'?body:'';
-        if(cliWatchLiveRejectsOversized(content.length))return{kind:'error'};
+        if(projectWatchLiveRejectsOversized(content.length))return{kind:'error'};
         return{kind:'ok',content:content};
     }
     if(Number(status)===404)return{kind:'missing',content:''};
     return{kind:'error'};
 }
 
-function shouldApplyCliWatchLive(result){
+function shouldApplyProjectWatchLive(result){
     return !!(result&&(result.kind==='ok'||result.kind==='missing'));
 }
 
-function pendingCliWatchDiffPaths(dirty,live,inflight){
+function pendingProjectWatchDiffPaths(dirty,live,inflight){
     var have=live||Object.create(null);
     var wait=inflight||[];
     return (dirty||[]).filter(function(path){
@@ -10925,12 +10822,12 @@ function pendingCliWatchDiffPaths(dirty,live,inflight){
     });
 }
 
-function cliWatchAppliesToAnalysis(localSourceKind,cliStatus,analysisSource){
-    if(!cliStatus||!cliStatus.ok)return false;
+function projectWatchAppliesToAnalysis(localSourceKind,projectStatus,analysisSource){
+    if(!projectStatus||!projectStatus.ok)return false;
     if(localSourceKind==='folder'||localSourceKind==='zip')return false;
     if(analysisSource&&analysisSource.sourceType&&analysisSource.sourceType!=='local-project')return false;
     if(localSourceKind&&localSourceKind!=='local-project')return false;
-    if(analysisSource&&analysisSource.sourceType==='local-project')return cliRecordMatchesStatus(analysisSource,cliStatus);
+    if(analysisSource&&analysisSource.sourceType==='local-project')return projectRecordMatchesStatus(analysisSource,projectStatus);
     return localSourceKind==='local-project';
 }
 
@@ -12472,8 +12369,8 @@ function loadedAnalysisSourceIdentity(options){
     options=options||{};
     if(options.localSourceKind==='folder')return{sourceType:'folder',sourceKey:options.folderKey||'local-folder'};
     if(options.localSourceKind==='zip')return{sourceType:'zip',sourceKey:options.zipKey||'zip'};
-    if(options.localSourceKind==='local-project')return{sourceType:'local-project',sourceKey:options.cliRoot||'local-project'};
-    if(options.cliOk)return{sourceType:'local-project',sourceKey:options.cliRoot||'local-project'};
+    if(options.localSourceKind==='local-project')return{sourceType:'local-project',sourceKey:options.projectRoot||'local-project'};
+    if(options.projectOk)return{sourceType:'local-project',sourceKey:options.projectRoot||'local-project'};
     return null;
 }
 
@@ -13098,7 +12995,6 @@ function buildRecentAnalysisRecord(options){
         title:options.title||sourceKey,
         sourceType:sourceType,
         sourceKey:sourceKey,
-        repoUrl:options.repoUrl||'',
         fileCount:options.data&&options.data.files?options.data.files.length:0,
         savedAt:options.savedAt||Date.now(),
         data:options.data||null,
@@ -13253,13 +13149,17 @@ function openAnalysisCacheDb(){
     });
 }
 
+function isLocalAnalysisRecord(record){return !!record&&['local-project','folder','zip'].indexOf(record.sourceType)>=0;}
+
 function listRecentAnalyses(){
     return openAnalysisCacheDb().then(function(db){
         return new Promise(function(resolve,reject){
-            var tx=db.transaction(ANALYSIS_CACHE_STORE,'readonly');
-            var req=tx.objectStore(ANALYSIS_CACHE_STORE).getAll();
+            var tx=db.transaction(ANALYSIS_CACHE_STORE,'readwrite');
+            var store=tx.objectStore(ANALYSIS_CACHE_STORE);
+            var req=store.getAll();
             req.onsuccess=function(){
-                var rows=(req.result||[]).slice().sort(function(a,b){return (b.savedAt||0)-(a.savedAt||0);});
+                (req.result||[]).forEach(function(row){if(!isLocalAnalysisRecord(row))store.delete(row.id);});
+                var rows=(req.result||[]).filter(isLocalAnalysisRecord).sort(function(a,b){return (b.savedAt||0)-(a.savedAt||0);});
                 resolve(rows);
             };
             req.onerror=function(){reject(req.error);};
@@ -13272,7 +13172,7 @@ function getRecentAnalysis(id){
         return new Promise(function(resolve,reject){
             var tx=db.transaction(ANALYSIS_CACHE_STORE,'readonly');
             var req=tx.objectStore(ANALYSIS_CACHE_STORE).get(id);
-            req.onsuccess=function(){resolve(req.result||null);};
+            req.onsuccess=function(){resolve(isLocalAnalysisRecord(req.result)?req.result:null);};
             req.onerror=function(){reject(req.error);};
         });
     });
@@ -13290,7 +13190,7 @@ function deleteRecentAnalysis(id){
 }
 
 function saveRecentAnalysis(record){
-    if(!record||!record.id||!record.data)return Promise.resolve(false);
+    if(!isLocalAnalysisRecord(record)||!record.id||!record.data)return Promise.resolve(false);
     if(estimateAnalysisRecordBytes(record)>ANALYSIS_CACHE_MAX_BYTES)return Promise.resolve(false);
     return openAnalysisCacheDb().then(function(db){
         return new Promise(function(resolve,reject){
@@ -13308,7 +13208,7 @@ function saveRecentAnalysis(record){
     }).catch(function(){return false;});
 }
 
-function resolveSafeCliPath(root,relPath){
+function resolveSafeProjectPath(root,relPath){
     var rootPath=String(root||'').replace(/\\/g,'/').replace(/\/+$/,'');
     var rel=String(relPath||'').replace(/\\/g,'/');
     if(!rel||rel.charAt(0)==='/'||rel.indexOf('..')>=0)return null;
@@ -13523,9 +13423,6 @@ function Icon(props){
             break;
         case 'export':
             children=[React.createElement('path',Object.assign({key:'p1',d:'M12 3v12'},common)),React.createElement('polyline',Object.assign({key:'p2',points:'8 7 12 3 16 7'},common)),React.createElement('path',Object.assign({key:'p3',d:'M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5'},common))];
-            break;
-        case 'share':
-            children=[React.createElement('circle',Object.assign({key:'c1',cx:'18',cy:'5',r:'2'},common)),React.createElement('circle',Object.assign({key:'c2',cx:'6',cy:'12',r:'2'},common)),React.createElement('circle',Object.assign({key:'c3',cx:'18',cy:'19',r:'2'},common)),React.createElement('path',Object.assign({key:'p1',d:'M8 12 16 6'},common)),React.createElement('path',Object.assign({key:'p2',d:'M8 12 16 18'},common))];
             break;
         case 'close':
             children=[React.createElement('path',Object.assign({key:'p1',d:'M6 6l12 12'},common)),React.createElement('path',Object.assign({key:'p2',d:'M18 6 6 18'},common))];
@@ -13891,12 +13788,10 @@ function App(){
     var _m=useState('details'),rightTab=_m[0],setRightTab=_m[1];
     var _m2=useState(null),drillDown=_m2[0],setDrillDown=_m2[1];// {type:'issue'|'pattern'|'security'|'suggestion'|'duplicate', data:...}
     var _n=useState(null),blastRadius=_n[0],setBlastRadius=_n[1];
-    var _o=useState(null),ownership=_o[0],setOwnership=_o[1];
     var _r=useState(false),showExport=_r[0],setShowExport=_r[1];
     var _t=useState(false),showPrivacy=_t[0],setShowPrivacy=_t[1];
     var _u=useState(null),tooltip=_u[0],setTooltip=_u[1];
     var _v=useState(null),toast=_v[0],setToast=_v[1];
-    var _w=useState(false),ownerLoading=_w[0],setOwnerLoading=_w[1];
     var _x=useState(null),folderFilter=_x[0],setFolderFilter=_x[1];
     var _y=useState(new Set()),expandedFns=_y[0],setExpandedFns=_y[1];
     var _z=useState(false),showUnused=_z[0],setShowUnused=_z[1];
@@ -13919,9 +13814,9 @@ function App(){
     var _cachedId=useState(null),cachedFromId=_cachedId[0],setCachedFromId=_cachedId[1];
     var _activeSym=useState(null),activeSymbol=_activeSym[0],setActiveSymbol=_activeSym[1];
     var _pendingDel=useState(null),pendingRecentDelete=_pendingDel[0],setPendingRecentDelete=_pendingDel[1];
-    var _cli=useState(null),cliStatus=_cli[0],setCliStatus=_cli[1];
-    var _cliDirty=useState([]),cliDirty=_cliDirty[0],setCliDirty=_cliDirty[1];
-    var _cliLive=useState(Object.create(null)),cliLiveByPath=_cliLive[0],setCliLiveByPath=_cliLive[1];
+    var _cli=useState(null),projectStatus=_cli[0],setProjectStatus=_cli[1];
+    var _cliDirty=useState([]),projectDirty=_cliDirty[0],setProjectDirty=_cliDirty[1];
+    var _cliLive=useState(Object.create(null)),projectLiveByPath=_cliLive[0],setProjectLiveByPath=_cliLive[1];
     var isMobile=viewportWidth<=980;
     var svgRef=useRef(null);
     var graph3dRef=useRef(null);
@@ -13983,15 +13878,15 @@ function App(){
     var dataRef=useRef(null);
     var analysisRunRef=useRef(0);
     dataRef.current=data;
-    var enqueueCliWatchDiffRef=useRef(null);
-    var cliDiffTimerRef=useRef(null);
-    var cliDiffPendingRef=useRef([]);
-    var cliDiffGenRef=useRef(Object.create(null));
-    var cliDiffEpochRef=useRef(1);
-    var cliAnalyzingRef=useRef(false);
-    var cliWatchDuringRef=useRef([]);
-    var cliWatchReadRef=useRef(Object.create(null));
-    var cliWatchSnapRevRef=useRef(Object.create(null));
+    var enqueueProjectWatchDiffRef=useRef(null);
+    var projectDiffTimerRef=useRef(null);
+    var projectDiffPendingRef=useRef([]);
+    var projectDiffGenRef=useRef(Object.create(null));
+    var projectDiffEpochRef=useRef(1);
+    var projectAnalyzingRef=useRef(false);
+    var projectWatchDuringRef=useRef([]);
+    var projectWatchReadRef=useRef(Object.create(null));
+    var projectWatchSnapRevRef=useRef(Object.create(null));
     var _openedCards=useState([]),openedCodePaths=_openedCards[0],setOpenedCodePaths=_openedCards[1];
     var _sourceFailed=useState(Object.create(null)),codeSourceFailed=_sourceFailed[0],setCodeSourceFailed=_sourceFailed[1];
     var _pillScroll=useState(0),codePillScroll=_pillScroll[0],setCodePillScroll=_pillScroll[1];
@@ -14128,16 +14023,15 @@ function App(){
     },[pendingRecentDelete]);
 
     useEffect(function(){
-        // Local-only: no ?repo/?run remote analysis. Old links open the app normally.
         refreshRecentList();
         loadActiveProject();
     },[]);
 
     function currentAnalysisSource(){
-        if(localSourceKind==='folder')return{sourceType:'folder',sourceKey:(repoInfo&&(repoInfo.folderKey||repoInfo.name))||'local-folder',title:(repoInfo&&repoInfo.name)||'Local Folder',repoUrl:'',localSourceKind:'folder'};
-        if(localSourceKind==='zip')return{sourceType:'zip',sourceKey:(repoInfo&&(repoInfo.zipKey||repoInfo.name))||'zip',title:(repoInfo&&repoInfo.name)||'ZIP Archive',repoUrl:'',localSourceKind:'zip'};
-        if(localSourceKind==='local-project')return{sourceType:'local-project',sourceKey:(repoInfo&&repoInfo.cliRoot)||(cliStatus&&cliStatus.root)||'local-project',title:(cliStatus&&cliStatus.name)||(repoInfo&&repoInfo.name)||'Local watch',repoUrl:'',localSourceKind:'local-project'};
-        if(cliStatus&&cliStatus.ok)return{sourceType:'local-project',sourceKey:cliStatus.root||'local-project',title:cliStatus.name||'Local watch',repoUrl:'',localSourceKind:'local-project'};
+        if(localSourceKind==='folder')return{sourceType:'folder',sourceKey:(repoInfo&&(repoInfo.folderKey||repoInfo.name))||'local-folder',title:(repoInfo&&repoInfo.name)||'Local Folder',localSourceKind:'folder'};
+        if(localSourceKind==='zip')return{sourceType:'zip',sourceKey:(repoInfo&&(repoInfo.zipKey||repoInfo.name))||'zip',title:(repoInfo&&repoInfo.name)||'ZIP Archive',localSourceKind:'zip'};
+        if(localSourceKind==='local-project')return{sourceType:'local-project',sourceKey:(repoInfo&&repoInfo.projectRoot)||(projectStatus&&projectStatus.root)||'local-project',title:(projectStatus&&projectStatus.name)||(repoInfo&&repoInfo.name)||'Local watch',localSourceKind:'local-project'};
+        if(projectStatus&&projectStatus.ok)return{sourceType:'local-project',sourceKey:projectStatus.root||'local-project',title:projectStatus.name||'Local watch',localSourceKind:'local-project'};
         return null;
     }
     var analysisGraphIdentity=useMemo(function(){return analysisGraphKey(data);},[data]);
@@ -14146,16 +14040,16 @@ function App(){
             localSourceKind:localSourceKind,
             folderKey:repoInfo&&(repoInfo.folderKey||repoInfo.name),
             zipKey:repoInfo&&(repoInfo.zipKey||repoInfo.name),
-            cliRoot:(repoInfo&&repoInfo.cliRoot)||(cliStatus&&cliStatus.root),
-            cliOk:!!(cliStatus&&cliStatus.ok)
+            projectRoot:(repoInfo&&repoInfo.projectRoot)||(projectStatus&&projectStatus.root),
+            projectOk:!!(projectStatus&&projectStatus.ok)
         });
-    },[localSourceKind,repoInfo,data,cliStatus]);
+    },[localSourceKind,repoInfo,data,projectStatus]);
     var currentHydrationId=useMemo(function(){
         return analysisHydrationIdFromParts(loadedSourceIdentity,analysisGraphIdentity);
     },[loadedSourceIdentity,analysisGraphIdentity]);
     analysisHydrationIdRef.current=currentHydrationId;
-    var guideScopeValid=localSourceKind!=='local-project'||!!(repoInfo&&repoInfo.cliRoot&&cliStatus&&cliStatus.ok&&cliRecordMatchesStatus({sourceKey:repoInfo.cliRoot},cliStatus));
-    var guideIndex=useMemo(function(){return buildGuideIndex(guideScopeValid?data:null,activeExcludePatterns.concat(compileExcludePatterns((cliStatus&&cliStatus.exclusions||[]).join('\n'))));},[data&&data.architectureInsights,data&&data.connections,activeExcludePatterns,cliStatus,guideScopeValid]);
+    var guideScopeValid=localSourceKind!=='local-project'||!!(repoInfo&&repoInfo.projectRoot&&projectStatus&&projectStatus.ok&&projectRecordMatchesStatus({sourceKey:repoInfo.projectRoot},projectStatus));
+    var guideIndex=useMemo(function(){return buildGuideIndex(guideScopeValid?data:null,activeExcludePatterns.concat(compileExcludePatterns((projectStatus&&projectStatus.exclusions||[]).join('\n'))));},[data&&data.architectureInsights,data&&data.connections,activeExcludePatterns,projectStatus,guideScopeValid]);
     var guideRevisionRef=useRef({insights:null,revision:0});
     if(guideRevisionRef.current.insights!==(data&&data.architectureInsights))guideRevisionRef.current={insights:data&&data.architectureInsights,revision:guideRevisionRef.current.revision+1};
     // Always resolve the selected path against this analysis, never a retained file object.
@@ -14185,7 +14079,6 @@ function App(){
                     title:row.title,
                     sourceType:row.sourceType,
                     sourceKey:row.sourceKey,
-                    repoUrl:row.repoUrl,
                     fileCount:row.fileCount,
                     savedAt:row.savedAt
                 };
@@ -14201,7 +14094,6 @@ function App(){
             sourceType:source.sourceType,
             sourceKey:source.sourceKey,
             title:source.title,
-            repoUrl:source.repoUrl,
             data:compactAnalysisForCache(dataObj),
             repoInfo:source.repoInfo||repoInfo,
             localSourceKind:source.localSourceKind
@@ -14213,18 +14105,17 @@ function App(){
     }
 
     function applyCachedAnalysis(record){
-        if(!record||!record.data)return;
+        if(!isLocalAnalysisRecord(record)||!record.data)return;
         analysisRunRef.current++;
         setData(compactAnalysisForCache(record.data));
         setExpandedPaths(new Set(['']));
         setSelected(null);
         setBlastRadius(null);
-        setOwnership(null);
         setFolderFilter(null);
         setCachedFromId(record.id);
         setActiveSymbol(null);
-        setCliDirty([]);
-        clearCliLiveDiffs();
+        setProjectDirty([]);
+        clearProjectLiveDiffs();
         if(record.repoInfo)setRepoInfo(record.repoInfo);
         var folderMatches=record.sourceType==='folder'&&retainedFolderMatchesRecord(record,{sourceKey:localFolderKeyRef.current});
         var zipMatches=record.sourceType==='zip'&&retainedZipMatchesRecord(record,{
@@ -14242,8 +14133,8 @@ function App(){
             zipFileRef.current=null;
             zipKeyRef.current=null;
         }
-        if(record.sourceType==='github'||record.sourceType==='local-project'||record.sourceType==='cli'){
-            setLocalSourceKind((record.sourceType==='local-project'||record.sourceType==='cli')?'local-project':null);
+        if(record.sourceType==='local-project'){
+            setLocalSourceKind('local-project');
             setLocalDirHandle(null);
         }else{
             setLocalSourceKind(record.localSourceKind||record.sourceType);
@@ -14296,71 +14187,69 @@ function App(){
         pendingRecentDeleteTimerRef.current=setTimeout(function(){setPendingRecentDelete(null);},4000);
     }
 
-    function clearCliLiveDiffs(){
-        cliDiffEpochRef.current=bumpCliWatchDiffEpoch(cliDiffEpochRef.current);
-        cliDiffPendingRef.current=[];
-        cliDiffGenRef.current=Object.create(null);
-        if(cliDiffTimerRef.current){
-            clearTimeout(cliDiffTimerRef.current);
-            cliDiffTimerRef.current=null;
+    function clearProjectLiveDiffs(){
+        projectDiffEpochRef.current=bumpProjectWatchDiffEpoch(projectDiffEpochRef.current);
+        projectDiffPendingRef.current=[];
+        projectDiffGenRef.current=Object.create(null);
+        if(projectDiffTimerRef.current){
+            clearTimeout(projectDiffTimerRef.current);
+            projectDiffTimerRef.current=null;
         }
-        setCliLiveByPath(Object.create(null));
+        setProjectLiveByPath(Object.create(null));
     }
 
-    function flushCliWatchDiffs(paths){
-        if(!cliWatchAppliesToAnalysis(localSourceKind,cliStatus,currentAnalysisSource()))return;
-        var wanted=cliWatchDiffPaths(dataRef.current&&dataRef.current.files,paths);
+    function flushProjectWatchDiffs(paths){
+        if(!projectWatchAppliesToAnalysis(localSourceKind,projectStatus,currentAnalysisSource()))return;
+        var wanted=projectWatchDiffPaths(dataRef.current&&dataRef.current.files,paths);
         if(!wanted.length)return;
         wanted.forEach(function(path){
-            var epoch=cliDiffEpochRef.current;
-            var gen=(cliDiffGenRef.current[path]||0)+1;
-            cliDiffGenRef.current[path]=gen;
-            readCliWatchLiveSource(path).then(function(result){
-                if(!cliWatchDiffRequestIsCurrent(cliDiffEpochRef.current,epoch,cliDiffGenRef.current,path,gen))return;
-                if(!shouldApplyCliWatchLive(result))return;
+            var epoch=projectDiffEpochRef.current;
+            var gen=(projectDiffGenRef.current[path]||0)+1;
+            projectDiffGenRef.current[path]=gen;
+            readProjectWatchLiveSource(path).then(function(result){
+                if(!projectWatchDiffRequestIsCurrent(projectDiffEpochRef.current,epoch,projectDiffGenRef.current,path,gen))return;
+                if(!shouldApplyProjectWatchLive(result))return;
                 var live=result.kind==='missing'?'':result.content;
-                var file=analyzedFileForCliWatchPath(dataRef.current&&dataRef.current.files,path);
-                if(cliWatchLiveClearsDirty(file,live,result.kind)){
-                    setCliLiveByPath(function(prev){return mergeCliLiveContents(prev,[{path:path,content:null}]);});
-                    setCliDirty(function(prev){return forgetCliWatchPath(prev,path);});
+                var file=analyzedFileForProjectWatchPath(dataRef.current&&dataRef.current.files,path);
+                if(projectWatchLiveClearsDirty(file,live,result.kind)){
+                    setProjectLiveByPath(function(prev){return mergeProjectLiveContents(prev,[{path:path,content:null}]);});
+                    setProjectDirty(function(prev){return forgetProjectWatchPath(prev,path);});
                     return;
                 }
-                setCliLiveByPath(function(prev){return mergeCliLiveContents(prev,[{path:path,content:live}]);});
+                setProjectLiveByPath(function(prev){return mergeProjectLiveContents(prev,[{path:path,content:live}]);});
             });
         });
     }
 
-    function enqueueCliWatchDiff(path,rev){
-        var next=normalizeCliWatchPath(path);
+    function enqueueProjectWatchDiff(path,rev){
+        var next=normalizeProjectWatchPath(path);
         if(!next)return;
-        if(cliAnalyzingRef.current)cliWatchDuringRef.current=noteCliWatchDuringEvent(cliWatchDuringRef.current,next,rev);
-        if(!cliWatchAppliesToAnalysis(localSourceKind,cliStatus,currentAnalysisSource()))return;
-        setCliDirty(function(prev){return noteCliWatchPath(prev,next);});
-        cliDiffPendingRef.current=noteCliWatchPath(cliDiffPendingRef.current,next);
-        if(cliDiffTimerRef.current)clearTimeout(cliDiffTimerRef.current);
-        cliDiffTimerRef.current=setTimeout(function(){
-            var pending=cliDiffPendingRef.current;
-            cliDiffPendingRef.current=[];
-            cliDiffTimerRef.current=null;
-            flushCliWatchDiffs(pending);
-        },CLI_WATCH_DIFF_MS);
+        if(projectAnalyzingRef.current)projectWatchDuringRef.current=noteProjectWatchDuringEvent(projectWatchDuringRef.current,next,rev);
+        if(!projectWatchAppliesToAnalysis(localSourceKind,projectStatus,currentAnalysisSource()))return;
+        setProjectDirty(function(prev){return noteProjectWatchPath(prev,next);});
+        projectDiffPendingRef.current=noteProjectWatchPath(projectDiffPendingRef.current,next);
+        if(projectDiffTimerRef.current)clearTimeout(projectDiffTimerRef.current);
+        projectDiffTimerRef.current=setTimeout(function(){
+            var pending=projectDiffPendingRef.current;
+            projectDiffPendingRef.current=[];
+            projectDiffTimerRef.current=null;
+            flushProjectWatchDiffs(pending);
+        },PROJECT_WATCH_DIFF_MS);
     }
-    enqueueCliWatchDiffRef.current=enqueueCliWatchDiff;
+    enqueueProjectWatchDiffRef.current=enqueueProjectWatchDiff;
 
     function loadActiveProject(){
         fetch('/__codeflow/status').then(function(res){return res.ok?res.json():null;}).then(function(status){
             if(status&&status.missing&&!data){showNotification('The last selected project is missing or was moved. Pick a project in the Project dropdown.','warning');}
             if(!status||!status.ok)return;
-            setCliStatus(status);
-            if(!window.location.search||window.location.search.indexOf('repo=')<0){
-                analyzeLocalProject(false,status);
-            }
+            setProjectStatus(status);
+            analyzeLocalProject(false,status);
             if(window.EventSource){
                 var src=new EventSource('/__codeflow/events');
                 src.onmessage=function(ev){
                     try{
                         var payload=JSON.parse(ev.data||'{}');
-                        if(payload.path&&enqueueCliWatchDiffRef.current)enqueueCliWatchDiffRef.current(payload.path,payload.rev);
+                        if(payload.path&&enqueueProjectWatchDiffRef.current)enqueueProjectWatchDiffRef.current(payload.path,payload.rev);
                     }catch(e){}
                 };
             }
@@ -14368,16 +14257,16 @@ function App(){
     }
 
     useEffect(function(){
-        if(!cliWatchAppliesToAnalysis(localSourceKind,cliStatus,currentAnalysisSource()))return;
-        if(!data||!data.files||!cliDirty.length)return;
-        var started=startedCliWatchDiffPaths(cliDiffPendingRef.current,cliDiffGenRef.current);
-        var missing=pendingCliWatchDiffPaths(cliDirty,cliLiveByPath,started);
+        if(!projectWatchAppliesToAnalysis(localSourceKind,projectStatus,currentAnalysisSource()))return;
+        if(!data||!data.files||!projectDirty.length)return;
+        var started=startedProjectWatchDiffPaths(projectDiffPendingRef.current,projectDiffGenRef.current);
+        var missing=pendingProjectWatchDiffPaths(projectDirty,projectLiveByPath,started);
         if(!missing.length)return;
-        flushCliWatchDiffs(missing);
-    },[currentHydrationId,cliDirty,localSourceKind,cliStatus,cliLiveByPath]);
+        flushProjectWatchDiffs(missing);
+    },[currentHydrationId,projectDirty,localSourceKind,projectStatus,projectLiveByPath]);
 
     async function analyzeLocalProject(force,statusHint,wantedRoot){
-        var status=statusHint||cliStatus;
+        var status=statusHint||projectStatus;
         if(!status||!status.ok){
             try{
                 var statusRes=await fetch('/__codeflow/status');
@@ -14388,19 +14277,19 @@ function App(){
             }catch(e){}
             if((!status||!status.ok)&&!force)return;
         }
-        if(wantedRoot&&!cliRecordMatchesStatus({sourceKey:wantedRoot},status)){
+        if(wantedRoot&&!projectRecordMatchesStatus({sourceKey:wantedRoot},status)){
             showNotification('That project is no longer the selected project. Pick it again in the Project dropdown to re-analyze.','warning');
             return false;
         }
-        if(status&&status.ok)setCliStatus(status);
-        var cliMeta=cliWatchCacheMeta(status);
+        if(status&&status.ok)setProjectStatus(status);
+        var projectMeta=projectWatchCacheMeta(status);
         // Per-project server-side exclusions participate in the analysis cache key,
         // so changing a project's excluded folders invalidates its cached analysis.
         var serverExcludes=(status&&Array.isArray(status.exclusions))?status.exclusions:[];
-        cliWatchDuringRef.current=[];
-        cliWatchReadRef.current=Object.create(null);
-        cliWatchSnapRevRef.current=Object.create(null);
-        cliAnalyzingRef.current=true;
+        projectWatchDuringRef.current=[];
+        projectWatchReadRef.current=Object.create(null);
+        projectWatchSnapRevRef.current=Object.create(null);
+        projectAnalyzingRef.current=true;
         resetAnalysisState();
         var analysisRun=analysisRunRef.current;
         setLocalDirHandle(null);
@@ -14411,11 +14300,11 @@ function App(){
         zipFileRef.current=null;
         zipKeyRef.current=null;
         setLoading(true);
-        setProgress('Reading local folder from CLI...');
+        setProgress('Reading local folder from local server...');
         try{
             await Parser.initTreeSitter().catch(function(){return null;});
             var listRes=await fetch('/__codeflow/files?pid='+encodeURIComponent(status.pid||''));
-            if(listRes.status===409){setLoading(false);cliAnalyzingRef.current=false;return;}// No project selected: stay on the neutral empty state.
+            if(listRes.status===409){setLoading(false);projectAnalyzingRef.current=false;return;}// No project selected: stay on the neutral empty state.
             if(listRes.status===410)throw new Error('The selected project folder is missing or was moved. Select another project in the Project dropdown.');
             if(!listRes.ok)throw new Error('Could not read the selected project’s files.');
             var list=await listRes.json();
@@ -14439,10 +14328,10 @@ function App(){
                     analyzed.push(makeFetchFailedAnalysisFile(f));
                     continue;
                 }
-                var pathKey=normalizeCliWatchPath(f.path);
-                cliWatchReadRef.current[pathKey]=true;
-                var snapRev=cliWatchSnapRevFromResponse(fileRes);
-                if(snapRev!=null)cliWatchSnapRevRef.current[pathKey]=snapRev;
+                var pathKey=normalizeProjectWatchPath(f.path);
+                projectWatchReadRef.current[pathKey]=true;
+                var snapRev=projectWatchSnapRevFromResponse(fileRes);
+                if(snapRev!=null)projectWatchSnapRevRef.current[pathKey]=snapRev;
                 var content=await fileRes.text();
                 if(analysisRun!==analysisRunRef.current)return false;
                 if(Parser.isOversized(content.length)){
@@ -14462,28 +14351,28 @@ function App(){
                 progress:setProgress,
                 yieldFn:yieldToBrowser
             });
-            var cliInfo={owner:'local',repo:'local-project',name:cliMeta.title,cliRoot:cliMeta.sourceKey};
+            var projectInfo={name:projectMeta.title,projectRoot:projectMeta.sourceKey};
             if(analysisRun!==analysisRunRef.current)return false;
-            var keep=retainCliWatchPathsAfterAnalysis(cliWatchDuringRef.current,cliWatchReadRef.current,cliWatchSnapRevRef.current);
-            cliAnalyzingRef.current=false;
-            cliWatchDuringRef.current=[];
-            cliWatchReadRef.current=Object.create(null);
-            cliWatchSnapRevRef.current=Object.create(null);
+            var keep=retainProjectWatchPathsAfterAnalysis(projectWatchDuringRef.current,projectWatchReadRef.current,projectWatchSnapRevRef.current);
+            projectAnalyzingRef.current=false;
+            projectWatchDuringRef.current=[];
+            projectWatchReadRef.current=Object.create(null);
+            projectWatchSnapRevRef.current=Object.create(null);
             setData(dataObj);
             setExpandedPaths(new Set(['']));
-            setRepoInfo(cliInfo);
+            setRepoInfo(projectInfo);
             setCachedFromId(null);
-            setCliDirty(keep);
-            clearCliLiveDiffs();
-            persistCurrentAnalysis(dataObj,{sourceType:'local-project',sourceKey:cliMeta.sourceKey,title:cliMeta.title,repoUrl:'',repoInfo:cliInfo,localSourceKind:'local-project'});
+            setProjectDirty(keep);
+            clearProjectLiveDiffs();
+            persistCurrentAnalysis(dataObj,{sourceType:'local-project',sourceKey:projectMeta.sourceKey,title:projectMeta.title,repoInfo:projectInfo,localSourceKind:'local-project'});
             setLoading(false);
             return true;
         }catch(err){
             if(analysisRun!==analysisRunRef.current)return false;
-            cliAnalyzingRef.current=false;
-            cliWatchDuringRef.current=[];
-            cliWatchReadRef.current=Object.create(null);
-            cliWatchSnapRevRef.current=Object.create(null);
+            projectAnalyzingRef.current=false;
+            projectWatchDuringRef.current=[];
+            projectWatchReadRef.current=Object.create(null);
+            projectWatchSnapRevRef.current=Object.create(null);
             setError(err&&err.message?err.message:String(err));
             setLoading(false);
         }
@@ -14495,15 +14384,14 @@ function App(){
         setData(null);
         setSelected(null);
         setBlastRadius(null);
-        setOwnership(null);
         setFolderFilter(null);
         setFilePreview(null);
         setMobilePanel(null);
         setShowGraphConfig(false);
         setCachedFromId(null);
         setActiveSymbol(null);
-        setCliDirty([]);
-        clearCliLiveDiffs();
+        setProjectDirty([]);
+        clearProjectLiveDiffs();
     }
 
     function openExcludeModal(){
@@ -14630,14 +14518,14 @@ function App(){
         var source=record&&record.sourceType?record:null;
         var kind=source?source.sourceType:localSourceKind;
         setCachedFromId(null);
-        if(kind==='local-project'||(!source&&cliStatus&&cliStatus.ok&&localSourceKind==='local-project')){
+        if(kind==='local-project'||(!source&&projectStatus&&projectStatus.ok&&localSourceKind==='local-project')){
             var wantedRoot=source&&source.sourceType==='local-project'?source.sourceKey:'';
-            if(wantedRoot&&cliStatus&&cliStatus.ok&&!cliRecordMatchesStatus(source,cliStatus)){
+            if(wantedRoot&&projectStatus&&projectStatus.ok&&!projectRecordMatchesStatus(source,projectStatus)){
                 applyCachedAnalysis(source);
                 showNotification('That project is no longer the selected project. Pick it again in the Project dropdown to re-analyze.','warning');
                 return;
             }
-            Promise.resolve(analyzeLocalProject(true,cliStatus,wantedRoot||null)).then(function(ok){
+            Promise.resolve(analyzeLocalProject(true,projectStatus,wantedRoot||null)).then(function(ok){
                 if(ok===false&&source)applyCachedAnalysis(source);
             });
             return;
@@ -14787,13 +14675,13 @@ function App(){
                 });
                 if(!localFolderSelectionRef.current)localFolderSelectionRef.current=newLocalSelectionId();
                 var folderMeta=localFolderCacheMeta({title:dirHandle&&dirHandle.name,paths:analyzed.map(function(af){return af.path;}),selectionId:localFolderSelectionRef.current});
-                var folderInfo={owner:'local',repo:'folder',name:folderMeta.title,folderKey:folderMeta.sourceKey,folderSelectionId:folderMeta.selectionId};
+                var folderInfo={name:folderMeta.title,folderKey:folderMeta.sourceKey,folderSelectionId:folderMeta.selectionId};
                 localFolderKeyRef.current=folderMeta.sourceKey;
                 setData(dataObj);
                 setExpandedPaths(new Set(['']));
                 setRepoInfo(folderInfo);
                 setCachedFromId(null);
-                persistCurrentAnalysis(dataObj,{sourceType:'folder',sourceKey:folderMeta.sourceKey,title:folderMeta.title,repoUrl:'',repoInfo:folderInfo,localSourceKind:'folder'});
+                persistCurrentAnalysis(dataObj,{sourceType:'folder',sourceKey:folderMeta.sourceKey,title:folderMeta.title,repoInfo:folderInfo,localSourceKind:'folder'});
                 setLoading(false);
             }catch(err){
                 setError('Analysis failed: '+(err.message||err)+'. Try a smaller folder or subfolder.');
@@ -14899,13 +14787,13 @@ function App(){
             });
             if(!localFolderSelectionRef.current)localFolderSelectionRef.current=newLocalSelectionId();
             var folderMeta=localFolderCacheMeta({title:'',rootPrefix:rootPrefix,paths:analyzed.map(function(af){return af.path;}),selectionId:localFolderSelectionRef.current});
-            var folderInfo={owner:'local',repo:'folder',name:folderMeta.title,folderKey:folderMeta.sourceKey,folderSelectionId:folderMeta.selectionId};
+            var folderInfo={name:folderMeta.title,folderKey:folderMeta.sourceKey,folderSelectionId:folderMeta.selectionId};
             localFolderKeyRef.current=folderMeta.sourceKey;
             setData(dataObj);
             setExpandedPaths(new Set(['']));
             setRepoInfo(folderInfo);
             setCachedFromId(null);
-            persistCurrentAnalysis(dataObj,{sourceType:'folder',sourceKey:folderMeta.sourceKey,title:folderMeta.title,repoUrl:'',repoInfo:folderInfo,localSourceKind:'folder'});
+            persistCurrentAnalysis(dataObj,{sourceType:'folder',sourceKey:folderMeta.sourceKey,title:folderMeta.title,repoInfo:folderInfo,localSourceKind:'folder'});
             setLoading(false);
         }catch(err){
             setError('Analysis failed: '+(err.message||err)+'. Try a smaller folder or subfolder.');
@@ -15012,13 +14900,13 @@ function App(){
                 lastModified:zipFile.lastModified,
                 paths:analyzed.map(function(af){return af.path;})
             });
-            var zipInfo={owner:'local',repo:'zip',name:zipMeta.title,zipKey:zipMeta.sourceKey};
+            var zipInfo={name:zipMeta.title,zipKey:zipMeta.sourceKey};
             zipKeyRef.current=zipMeta.sourceKey;
             setData(dataObj);
             setExpandedPaths(new Set(['']));
             setRepoInfo(zipInfo);
             setCachedFromId(null);
-            persistCurrentAnalysis(dataObj,{sourceType:'zip',sourceKey:zipMeta.sourceKey,title:zipMeta.title,repoUrl:'',repoInfo:zipInfo,localSourceKind:'zip'});
+            persistCurrentAnalysis(dataObj,{sourceType:'zip',sourceKey:zipMeta.sourceKey,title:zipMeta.title,repoInfo:zipInfo,localSourceKind:'zip'});
             setLoading(false);
         }catch(err){
             setLocalSourceKind(null);
@@ -15041,10 +14929,6 @@ function App(){
             }
             var blast=calcBlast(path,data.connections,data.files);
             setBlastRadius(blast);
-            // Ownership came from GitHub commit history (git blame), which is no
-            // longer fetched. There is no local history source, so it stays empty.
-            setOwnership([]);
-            setOwnerLoading(false);
             setExpandedFns(new Set());
             selectedPathRef.current=path;
             codeLinkParticlesHiddenRef.current=false;
@@ -15160,10 +15044,10 @@ function App(){
     }
 
     function liveSourceKindForRead(){
-        if(localSourceKind==='local-project'&&cliStatus&&cliStatus.ok&&guideScopeValid)return 'local-project';
+        if(localSourceKind==='local-project'&&projectStatus&&projectStatus.ok&&guideScopeValid)return 'local-project';
         if(folderSourceIsLive())return 'folder';
         if(zipSourceIsLive())return 'zip';
-        if(cliStatus&&cliStatus.ok&&guideScopeValid&&localSourceKind!=='folder'&&localSourceKind!=='zip')return 'local-project';
+        if(projectStatus&&projectStatus.ok&&guideScopeValid&&localSourceKind!=='folder'&&localSourceKind!=='zip')return 'local-project';
         return null;
     }
 
@@ -15184,16 +15068,16 @@ function App(){
             .then(function(fileObj){return fileObj.text();});
     }
 
-    function readCliWatchLiveSource(path){
+    function readProjectWatchLiveSource(path){
         if(!path)return Promise.resolve({kind:'error'});
-        return fetch('/__codeflow/file?path='+encodeURIComponent(path)+'&pid='+encodeURIComponent(cliStatus&&cliStatus.pid||'')).then(function(res){
+        return fetch('/__codeflow/file?path='+encodeURIComponent(path)+'&pid='+encodeURIComponent(projectStatus&&projectStatus.pid||'')).then(function(res){
             var length=Number(res.headers&&res.headers.get?res.headers.get('content-length'):NaN);
-            if(cliWatchLiveRejectsOversized(length)){
+            if(projectWatchLiveRejectsOversized(length)){
                 if(res.body&&typeof res.body.cancel==='function')res.body.cancel();
                 return{kind:'error'};
             }
-            if(res.ok)return res.text().then(function(text){return cliWatchLiveFromResponse(res.status,text,true,length);});
-            return cliWatchLiveFromResponse(res.status,'',false);
+            if(res.ok)return res.text().then(function(text){return projectWatchLiveFromResponse(res.status,text,true,length);});
+            return projectWatchLiveFromResponse(res.status,'',false);
         }).catch(function(){return{kind:'error'};});
     }
 
@@ -15201,7 +15085,7 @@ function App(){
         var kind=liveSourceKindForRead();
         if(!path||!kind)return Promise.resolve(null);
         if(kind==='local-project'){
-            return fetch('/__codeflow/file?path='+encodeURIComponent(path)+'&pid='+encodeURIComponent(cliStatus&&cliStatus.pid||''))
+            return fetch('/__codeflow/file?path='+encodeURIComponent(path)+'&pid='+encodeURIComponent(projectStatus&&projectStatus.pid||''))
                 .then(function(res){return res.ok?res.text():null;})
                 .catch(function(){return null;});
         }
@@ -15265,7 +15149,7 @@ function App(){
     // authorized currentRoot. Results are tagged with a sequence number so a
     // superseded (or project-switched) response can never overwrite newer state.
     function searchIsAvailable(){
-        return !!(localSourceKind==='local-project'&&cliStatus&&cliStatus.ok&&cliStatus.pid);
+        return !!(localSourceKind==='local-project'&&projectStatus&&projectStatus.ok&&projectStatus.pid);
     }
     function clearSearch(){
         searchSeqRef.current++;
@@ -15300,7 +15184,7 @@ function App(){
         if(opts.regex)params.set('regex','1');
         if(opts.include)params.set('include',opts.include);
         if(opts.exclude)params.set('exclude',opts.exclude);
-        params.set('pid',cliStatus.pid);
+        params.set('pid',projectStatus.pid);
         params.set('rev',String(seq));
         fetch('/__codeflow/search?'+params.toString(),{cache:'no-store',signal:controller?controller.signal:undefined})
             .then(function(res){return res.json().then(function(body){return{status:res.status,body:body};});})
@@ -15318,7 +15202,7 @@ function App(){
                     setSearchError(msg);setSearchDidRun(true);setSearchLoading(false);setSearchStale(false);
                     return;
                 }
-                if(r.body.pid&&cliStatus.pid&&r.body.pid!==cliStatus.pid)return;// project changed under us
+                if(r.body.pid&&projectStatus.pid&&r.body.pid!==projectStatus.pid)return;// project changed under us
                 setSearchResults(r.body.results||[]);
                 setSearchStats(r.body.stats||null);
                 setSearchTruncated(!!r.body.truncated);
@@ -15380,17 +15264,17 @@ function App(){
     },[isMobile]);
     // Watched-file changes mark existing results potentially stale (Refresh Search).
     useEffect(function(){
-        if(searchDidRun&&searchResults.length&&cliDirty&&cliDirty.length)setSearchStale(true);
-    },[cliDirty]);
+        if(searchDidRun&&searchResults.length&&projectDirty&&projectDirty.length)setSearchStale(true);
+    },[projectDirty]);
     // A project switch / exclusion change updates the active pid; drop stale results.
     var searchPidRef=useRef(null);
     useEffect(function(){
-        var pid=cliStatus&&cliStatus.ok?cliStatus.pid:null;
+        var pid=projectStatus&&projectStatus.ok?projectStatus.pid:null;
         if(searchPidRef.current!==null&&searchPidRef.current!==pid){
             clearSearch();
         }
         searchPidRef.current=pid;
-    },[cliStatus]);
+    },[projectStatus]);
 
     var colorMap=useMemo(function(){
         if(!data)return{};
@@ -15502,7 +15386,7 @@ function App(){
         var overrides=codeCardUserSizeRef.current;
         var sizes=Object.create(null);
         codeViewFiles.forEach(function(file){
-            var rows=codeCardDiffRows(file,cliLiveByPath[file.path]);
+            var rows=codeCardDiffRows(file,projectLiveByPath[file.path]);
             sizes[file.path]=applyCodeCardUserSize(codeCardSizeForDiff(file,prefs,rows),overrides[file.path]);
         });
         codeCardSizesRef.current=sizes;
@@ -15947,7 +15831,7 @@ function App(){
                 setCodeSourceFailed(function(prev){return recordCodeSourceFailureIfCurrent(prev,path,hydrationId,analysisHydrationIdRef.current);});
             });
         });
-    },[codeViewFiles,localSourceKind,cliStatus,repoInfo,localDirHandle,codeSourceFailed]);
+    },[codeViewFiles,localSourceKind,projectStatus,repoInfo,localDirHandle,codeSourceFailed]);
 
     useEffect(function(){
         if(!data||!svgRef.current)return;
@@ -16371,7 +16255,7 @@ function App(){
         syncCodeCards();
         if(updateHullsRef.current)updateHullsRef.current();
         if(drawMinimapRef.current)drawMinimapRef.current();
-    },[codeViewFiles,graphConfig.vizType,graphConfig.linkDist,codeViewExpand,codeViewWrap,cliLiveByPath]);
+    },[codeViewFiles,graphConfig.vizType,graphConfig.linkDist,codeViewExpand,codeViewWrap,projectLiveByPath]);
 
     useEffect(function(){
         return subscribePrefersReducedMotion(function(){
@@ -17193,7 +17077,7 @@ function App(){
     }
     function exportPDF(){
         if(graphConfig.vizType!=='graph'||!svgRef.current){showNotification('Switch to Graph view to export PDF.','error');return;}
-        if(typeof window.jspdf==='undefined'||!window.jspdf.jsPDF){showNotification('PDF library failed to load. Check your connection.','error');return;}
+        if(typeof window.jspdf==='undefined'||!window.jspdf.jsPDF){showNotification('PDF library failed to load. Restart the local app.','error');return;}
         var svgNode=svgRef.current;
         var prevTransform=d3.zoomTransform(svgNode);
         var fitT=computeGraphFitTransform(160);
@@ -17235,7 +17119,7 @@ function App(){
     function getAnalysisSourceLabel(){
         if(localSourceKind==='folder')return(repoInfo&&repoInfo.name)||'Local Folder';
         if(localSourceKind==='zip')return repoInfo&&repoInfo.name?repoInfo.name:'ZIP Archive';
-        return repoInfo?repoInfo.owner+'/'+repoInfo.repo:'Unknown Repository';
+        return repoInfo?repoInfo.name:'Local project';
     }
     function generateReport(format){
         if(!data)return;
@@ -17467,7 +17351,7 @@ function App(){
         showNotification('Report exported as '+format.toUpperCase(),'success');
     }
     function showNotification(msg,type){setToast({msg:msg,type:type||'success'});setTimeout(function(){setToast(null);},3000);}
-    function resetAnalysis(){analysisRunRef.current++;setData(null);setSelected(null);setBlastRadius(null);setOwnership(null);setRepoInfo(null);setFolderFilter(null);setLocalDirHandle(null);setLocalSourceKind(null);setCachedFromId(null);setActiveSymbol(null);setCliDirty([]);clearCliLiveDiffs();localFolderKeyRef.current=null;localFolderSelectionRef.current=null;localFilesRef.current=null;zipKeyRef.current=null;zipArchiveRef.current=null;zipFileRef.current=null;window.history.replaceState({},'',window.location.pathname);}
+    function resetAnalysis(){analysisRunRef.current++;setData(null);setSelected(null);setBlastRadius(null);setRepoInfo(null);setFolderFilter(null);setLocalDirHandle(null);setLocalSourceKind(null);setCachedFromId(null);setActiveSymbol(null);setProjectDirty([]);clearProjectLiveDiffs();localFolderKeyRef.current=null;localFolderSelectionRef.current=null;localFilesRef.current=null;zipKeyRef.current=null;zipArchiveRef.current=null;zipFileRef.current=null;window.history.replaceState({},'',window.location.pathname);}
     function filterByFolder(path){setFolderFilter(function(prev){return prev===path?null:path;});}
     function renderRecentsList(){
         return React.createElement('div',{className:'sidebar-scroll'},
@@ -17569,7 +17453,7 @@ function App(){
     }
     function renderSearchPane(){
         if(!searchIsAvailable())return renderSidebarEmpty('Search','Select or add a project to search its files.');
-        var scopeName=(cliStatus&&cliStatus.name)||'current project';
+        var scopeName=(projectStatus&&projectStatus.name)||'current project';
         var totalMatches=searchResults.reduce(function(a,r){return a+(r.matches?r.matches.length:0);},0);
         var header=React.createElement('div',{className:'search-head'},
             React.createElement('div',{className:'search-scope'},
@@ -17663,8 +17547,8 @@ function App(){
                     React.createElement('div',{className:'health-label'},'Health Score')
                 )
             ),
-            (cachedFromId||cliDirty.length>0)&&React.createElement('div',{className:'stale-banner'},
-                React.createElement('span',null,cliDirty.length?'Watched files changed. Re-analyze to refresh.':'Cached analysis. Re-analyze to refresh.'),
+            (cachedFromId||projectDirty.length>0)&&React.createElement('div',{className:'stale-banner'},
+                React.createElement('span',null,projectDirty.length?'Watched files changed. Re-analyze to refresh.':'Cached analysis. Re-analyze to refresh.'),
                 React.createElement('button',{className:'top-btn primary',onClick:refreshAnalysis,disabled:loading},'Re-analyze')
             ),
             React.createElement('div',{className:'stats-grid'},
@@ -17873,7 +17757,7 @@ function App(){
         e.stopPropagation();
         e.preventDefault();
         var node=graphNodesByIdRef.current[file.path];
-        var size=codeCardSizesRef.current[file.path]||applyCodeCardUserSize(codeCardSizeForDiff(file,currentCodeCardPrefs(),codeCardDiffRows(file,cliLiveByPath[file.path])),codeCardUserSizeRef.current[file.path]);
+        var size=codeCardSizesRef.current[file.path]||applyCodeCardUserSize(codeCardSizeForDiff(file,currentCodeCardPrefs(),codeCardDiffRows(file,projectLiveByPath[file.path])),codeCardUserSizeRef.current[file.path]);
         if(!node)return;
         var transform=codeZoomTransformRef.current||{k:1,x:0,y:0};
         var k=Number(transform.k);
@@ -17883,7 +17767,7 @@ function App(){
         var dragFrame={raf:0};
         function writeSize(nextSize){
             codeCardUserSizeRef.current[file.path]={width:nextSize.width,height:nextSize.height};
-            codeCardSizesRef.current[file.path]=applyCodeCardUserSize(codeCardSizeForDiff(file,currentCodeCardPrefs(),codeCardDiffRows(file,cliLiveByPath[file.path])),nextSize);
+            codeCardSizesRef.current[file.path]=applyCodeCardUserSize(codeCardSizeForDiff(file,currentCodeCardPrefs(),codeCardDiffRows(file,projectLiveByPath[file.path])),nextSize);
             var live=codeCardSizesRef.current[file.path];
             node.x=node.fx=left+live.width/2;
             node.y=node.fy=top+live.height/2;
@@ -17946,7 +17830,7 @@ function App(){
         var sourceState=fileSourceDisplayState(file,canReadLiveFileSource(),codeSourceFailed);
         var body;
         if(sourceState==='ready'){
-            var diffRows=codeCardDiffRows(file,cliLiveByPath[file.path]);
+            var diffRows=codeCardDiffRows(file,projectLiveByPath[file.path]);
             if(diffRows){
                 var diffSource=diffRows.map(function(row){return row.text;}).join('\n');
                 var diffLines=asCodeLines(highlightSyntax(diffSource,file.name));
@@ -18122,7 +18006,7 @@ function App(){
                         ),
                         data&&React.createElement('button',{className:'refresh-btn','aria-label':'Re-analyze',onClick:refreshAnalysis,disabled:loading,title:'Re-analyze',type:'button'},
                             React.createElement(Icon,{name:'refresh',size:'m'}),
-                            cachedFromId||cliDirty.length?'Re-analyze':'Refresh'
+                            cachedFromId||projectDirty.length?'Re-analyze':'Refresh'
                         ),
                         data&&React.createElement('button',{className:'reset-btn','aria-label':'Reset analysis',onClick:resetAnalysis,title:'Clear & Reset',type:'button'},
                             React.createElement(Icon,{name:'close',size:'m'}),
@@ -18212,7 +18096,7 @@ function App(){
                     React.createElement(Icon,{name:'logo',size:'xxl',className:'empty-icon'}),
                     React.createElement('div',{className:'empty-title'},'CodeFlow'),
                     React.createElement('div',{className:'empty-desc'},'Visualize architecture, blast radius, patterns & security\n\nSelect a local project from the Project dropdown (or open a folder or ZIP) to begin'),
-                    cliStatus&&cliStatus.ok&&React.createElement('div',{className:'cli-chip',style:{marginTop:10}},'Watching ',cliStatus.name||cliStatus.root)
+                    projectStatus&&projectStatus.ok&&React.createElement('div',{className:'project-chip',style:{marginTop:10}},'Watching ',projectStatus.name||projectStatus.root)
                 ):
                 React.createElement(React.Fragment,null,
                     React.createElement('div',{className:'viz-selector'},
@@ -18353,7 +18237,7 @@ function App(){
                         React.createElement('button',{className:'panel-tab'+(rightTab==='suggestions'?' active':''),onClick:function(){setRightTab('suggestions');setDrillDown(null);}},iconLabel('action','ACTIONS'),data.suggestions&&data.suggestions.length>0&&React.createElement('span',{className:'panel-tab-pill alert'},data.suggestions.length))
                     ),
                     React.createElement('div',{className:'panel-content'},
-                        rightTab==='guide'&&React.createElement(ArchitectureGuide,{key:currentHydrationId+':'+guideRevisionRef.current.revision,index:guideIndex,path:guideSelected&&guideSelected.path,activeSymbol:activeSymbol,stale:cliDirty.length>0,onNavigate:goToFile,onSource:openFilePreview,onRefresh:refreshAnalysis}),
+                        rightTab==='guide'&&React.createElement(ArchitectureGuide,{key:currentHydrationId+':'+guideRevisionRef.current.revision,index:guideIndex,path:guideSelected&&guideSelected.path,activeSymbol:activeSymbol,stale:projectDirty.length>0,onNavigate:goToFile,onSource:openFilePreview,onRefresh:refreshAnalysis}),
                         rightTab==='details'&&(selected?React.createElement(React.Fragment,null,
                             React.createElement('button',{className:'top-btn',style:{width:'100%',marginBottom:12},onClick:function(){setSelected(null);setBlastRadius(null);selectedPathRef.current=null;if(nodesRef.current){nodesRef.current.selectAll('.nc,.nb').transition().duration(200).attr('opacity',1).attr('fill',function(n){return d3.select(this).classed('nb')?graphColorBlockFill(getNodeColor(n)):getNodeColor(n);});}if(vizUsesForceLinkParticles(graphConfig.vizType))queueForceLinkVisuals();else if(linksRef.current)linksRef.current.transition().duration(200).attr('stroke-opacity',0.4).attr('stroke',theme==='light'?'#ccc':'#333');}},'← Back to Issues'),
                             React.createElement('div',{className:'panel-header',style:{margin:'0 -12px 12px',padding:12}},
@@ -18471,16 +18355,6 @@ function App(){
                                     )
                                 );
                             })(),
-                            React.createElement('div',{className:'card',style:{marginBottom:12}},
-                                React.createElement('div',{className:'card-header',onClick:function(){toggleCard('own');}},React.createElement('div',{className:'card-title'},React.createElement('span',{className:'card-toggle'+(expandedCards.has('own')?' open':'')},'▶'),React.createElement(Icon,{name:'users',size:'s'}),' Ownership')),
-                                expandedCards.has('own')&&React.createElement('div',{className:'card-body'},
-                                    ownerLoading?React.createElement('div',{className:'loading-owner'},'Loading ownership data...'):
-                                    ownership&&ownership.length>0?React.createElement(React.Fragment,null,
-                                        React.createElement('div',{className:'owner-bar'},ownership.slice(0,5).map(function(o,i){return React.createElement('div',{key:i,className:'owner-segment',style:{width:o.percent+'%',background:COLORS[i%COLORS.length]}});})),
-                                        React.createElement('div',{className:'owner-list'},ownership.slice(0,5).map(function(o,i){return React.createElement('div',{key:i,className:'owner-item'},React.createElement('div',{className:'owner-avatar',style:{background:COLORS[i%COLORS.length]}},o.name[0].toUpperCase()),React.createElement('span',{className:'owner-name'},o.name),React.createElement('span',{className:'owner-percent'},o.percent,'%'));}))
-                                    ):React.createElement('div',{style:{fontSize:10,color:'var(--t3)',padding:8}},'No ownership data available')
-                                )
-                            ),
                             React.createElement('div',{className:'card'},
                                 React.createElement('div',{className:'card-header',onClick:function(){toggleCard('fns');}},React.createElement('div',{className:'card-title'},React.createElement('span',{className:'card-toggle'+(expandedCards.has('fns')?' open':'')},'▶'),React.createElement(Icon,{name:'bolt',size:'s'}),' Functions (',selected.functions.length,')')),
                                 expandedCards.has('fns')&&React.createElement('div',{className:'card-body',style:{padding:8}},

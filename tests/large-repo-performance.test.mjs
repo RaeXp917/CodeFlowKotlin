@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const { loadAnalyzer } = require(join(__dirname, '..', 'card', 'lib', 'analyzer.js'));
+const { loadAnalyzer } = require(join(__dirname, 'helpers', 'analyzer.cjs'));
 
 test('bounded duplicate similarity keeps near-copies distinct from unrelated code', () => {
   const { Parser } = loadAnalyzer(join(__dirname, '..', 'index.html'));

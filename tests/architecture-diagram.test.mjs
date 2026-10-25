@@ -140,58 +140,6 @@ function hasDependency(diagram, fromSuffix, toSuffix, label) {
   );
 }
 
-test('codeflow architecture diagram hides tests by default', async () => {
-  const data = await analyzeCodeflowRepo();
-  const diagram = data.architectureDiagram;
-
-  assert.ok(diagram);
-  assert.equal(diagram.framework, 'Browser App');
-
-  const visiblePaths = blockPaths(diagram, false, false);
-  assert.ok(visiblePaths.some((path) => /index\.html$/i.test(path)));
-  assert.ok(visiblePaths.some((path) => path === 'card/index.js'));
-  assert.ok(visiblePaths.some((path) => path === 'card/lib/analyzer.js'));
-  assert.ok(visiblePaths.some((path) => path === 'card/lib/collect.js'));
-  assert.equal(
-    visiblePaths.some((path) => /tests\//i.test(path) || /\.test\.mjs$/i.test(path)),
-    false
-  );
-  assert.equal(
-    visiblePaths.some((path) => /fixtures\//i.test(path)),
-    false
-  );
-
-  const mermaid = generateMermaidBlockDiagram(diagram, false, false);
-  assert.match(mermaid, /Browser App Shell/);
-  assert.doesNotMatch(mermaid, /uses \d+ calls/i);
-});
-
-test('codeflow architecture diagram uses semantic module dependencies', async () => {
-  const data = await analyzeCodeflowRepo();
-  const diagram = data.architectureDiagram;
-
-  assert.ok(hasDependency(diagram, 'card/index.js', 'card/lib/analysis.js'));
-  assert.ok(hasDependency(diagram, 'card/lib/analysis.js', 'card/lib/collect.js'));
-  assert.ok(hasDependency(diagram, 'card/index.js', 'card/lib/git.js'));
-  assert.ok(hasDependency(diagram, 'card/lib/collect.js', 'card/lib/git.js', 'uses GitHub API'));
-  assert.ok(hasDependency(diagram, 'card/lib/analyzer.js', 'card/lib/state.js', 'stores derived state'));
-  assert.ok(hasDependency(diagram, 'card/lib/pr.js', 'card/lib/git.js', 'analyzes pull requests'));
-  assert.ok(hasDependency(diagram, 'index.html', 'card/lib/analyzer.js', 'runs analysis'));
-
-  const labels = diagram.dependencies.map((dep) => dep.label);
-  assert.equal(labels.some((label) => /^uses \d+ calls?$/i.test(label)), false);
-});
-
-test('codeflow architecture diagram can include tests', async () => {
-  const data = await analyzeCodeflowRepo();
-  const diagram = data.architectureDiagram;
-  const withTests = blockPaths(diagram, true);
-
-  assert.ok(withTests.some((path) => path === 'tests/codeflow-golden.test.mjs'));
-  const mermaid = generateMermaidBlockDiagram(diagram, true, false);
-  assert.match(mermaid, /Testing/);
-});
-
 async function analyzeFixture(name) {
   const root = join(__dirname, 'fixtures', name);
   const files = await collectRepoFiles(root);

@@ -1,4 +1,4 @@
-// Shared local-server utilities (cli/server-utils.mjs) — the filesystem,
+// Shared local-server utilities (server/server-utils.mjs) — the filesystem,
 // path-security, watch-revision, request-guard and browser-launcher helpers used
 // by the local project server. (Formerly tests/cli-codeflow.test.mjs; the
 // standalone-CLI server tests were retired with the CLI and replaced by
@@ -9,15 +9,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
-  isAllowedCliRequest,
+  isAllowedProjectRequest,
   isLoopbackHost,
   isWatchableFile,
   listWatchFiles,
-  resolveSafeCliPath,
+  resolveSafeProjectPath,
   resolveSafeExistingPath,
   shouldSkipName,
   openBrowser,
-  CLI_FILE_MAX_BYTES,
+  SOURCE_FILE_MAX_BYTES,
   isMissingFsError,
   bumpWatchRev,
   currentWatchRev,
@@ -25,12 +25,12 @@ import {
   isSameOriginMutation,
   isValidCsrf,
   startFileWatchers,
-} from '../cli/server-utils.mjs';
+} from '../server/server-utils.mjs';
 
 const slash = (p) => String(p).replace(/\\/g, '/');
 
 test('file errors distinguish missing files from read failures', () => {
-  assert.equal(CLI_FILE_MAX_BYTES, 2 * 1024 * 1024);
+  assert.equal(SOURCE_FILE_MAX_BYTES, 2 * 1024 * 1024);
   const revs = new Map();
   assert.equal(bumpWatchRev(revs, 'src/app.js'), 1);
   assert.equal(bumpWatchRev(revs, 'src/app.js'), 2);
@@ -52,9 +52,9 @@ test('skips junk directories and binary-looking names', () => {
 });
 
 test('path resolver stays inside the project root', () => {
-  assert.equal(resolveSafeCliPath('/tmp/proj', '../secret'), null);
+  assert.equal(resolveSafeProjectPath('/tmp/proj', '../secret'), null);
   // Separator-agnostic so the assertion is correct on Windows and POSIX.
-  assert.ok(slash(resolveSafeCliPath('/tmp/proj', 'src/app.js')).endsWith('/src/app.js'));
+  assert.ok(slash(resolveSafeProjectPath('/tmp/proj', 'src/app.js')).endsWith('/src/app.js'));
 });
 
 test('request guard only allows loopback Host and Origin', () => {
@@ -62,10 +62,10 @@ test('request guard only allows loopback Host and Origin', () => {
   assert.equal(isLoopbackHost('localhost:4173'), true);
   assert.equal(isLoopbackHost('[::1]:4173'), true);
   assert.equal(isLoopbackHost('evil.example'), false);
-  assert.equal(isAllowedCliRequest({ headers: { host: '127.0.0.1:4173' } }), true);
-  assert.equal(isAllowedCliRequest({ headers: { host: '127.0.0.1:4173', origin: 'http://127.0.0.1:4173' } }), true);
-  assert.equal(isAllowedCliRequest({ headers: { host: 'evil.example', origin: 'http://evil.example' } }), false);
-  assert.equal(isAllowedCliRequest({ headers: { host: '127.0.0.1:4173', origin: 'http://evil.example' } }), false);
+  assert.equal(isAllowedProjectRequest({ headers: { host: '127.0.0.1:4173' } }), true);
+  assert.equal(isAllowedProjectRequest({ headers: { host: '127.0.0.1:4173', origin: 'http://127.0.0.1:4173' } }), true);
+  assert.equal(isAllowedProjectRequest({ headers: { host: 'evil.example', origin: 'http://evil.example' } }), false);
+  assert.equal(isAllowedProjectRequest({ headers: { host: '127.0.0.1:4173', origin: 'http://evil.example' } }), false);
 });
 
 test('rejects escaping symlinks after resolving the real path', async () => {

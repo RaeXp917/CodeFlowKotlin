@@ -13,7 +13,7 @@ import vm from 'node:vm';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const html = await readFile(join(__dirname, '..', 'index.html'), 'utf8');
-const selectorSrc = await readFile(join(__dirname, '..', 'cli', 'project-selector.js'), 'utf8');
+const selectorSrc = await readFile(join(__dirname, '..', 'server', 'project-selector.js'), 'utf8');
 
 test('no GitHub authentication controls remain (desktop or mobile)', () => {
   assert.doesNotMatch(html, /auth-select/, 'auth-select class still present');

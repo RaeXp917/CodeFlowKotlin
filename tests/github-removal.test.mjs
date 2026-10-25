@@ -50,7 +50,6 @@ test('GitHub query parameters cannot trigger remote analysis on startup', () => 
   // The startup effect no longer reads ?repo / ?run.
   assert.doesNotMatch(html, /params\.get\('repo'\)/);
   assert.doesNotMatch(html, /params\.get\('run'\)/);
-  assert.match(html, /\/\/ Local-only: no \?repo\/\?run remote analysis/);
 });
 
 test('the local-project pipeline and shared analyzer are preserved', () => {

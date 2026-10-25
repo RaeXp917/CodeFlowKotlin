@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const selectorSrc = await readFile(join(__dirname, '..', 'cli', 'project-selector.js'), 'utf8');
+const selectorSrc = await readFile(join(__dirname, '..', 'server', 'project-selector.js'), 'utf8');
 
 test('selector wires the privileged endpoints with the CSRF header', () => {
   assert.match(selectorSrc, /'X-Codeflow-CSRF'/);

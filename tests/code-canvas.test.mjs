@@ -1348,9 +1348,9 @@ test('cache keys and records stay stable', () => {
 });
 
 test('CLI path helper rejects traversal', () => {
-  assert.equal(context.resolveSafeCliPath('/tmp/proj', '../etc/passwd'), null);
-  assert.equal(context.resolveSafeCliPath('/tmp/proj', '/etc/passwd'), null);
-  assert.equal(context.resolveSafeCliPath('/tmp/proj', 'src/app.js'), '/tmp/proj/src/app.js');
+  assert.equal(context.resolveSafeProjectPath('/tmp/proj', '../etc/passwd'), null);
+  assert.equal(context.resolveSafeProjectPath('/tmp/proj', '/etc/passwd'), null);
+  assert.equal(context.resolveSafeProjectPath('/tmp/proj', 'src/app.js'), '/tmp/proj/src/app.js');
 });
 
 test('folder cache keys differ per selected directory', () => {
@@ -1365,10 +1365,10 @@ test('folder cache keys differ per selected directory', () => {
 });
 
 test('CLI re-analyze only matches the active watch root', () => {
-  const record = { sourceType: 'cli', sourceKey: '/tmp/alpha' };
-  assert.equal(context.cliRecordMatchesStatus(record, { ok: true, root: '/tmp/alpha' }), true);
-  assert.equal(context.cliRecordMatchesStatus(record, { ok: true, root: '/tmp/beta' }), false);
-  assert.equal(context.cliRecordMatchesStatus(record, null), false);
+  const record = { sourceType: 'server', sourceKey: '/tmp/alpha' };
+  assert.equal(context.projectRecordMatchesStatus(record, { ok: true, root: '/tmp/alpha' }), true);
+  assert.equal(context.projectRecordMatchesStatus(record, { ok: true, root: '/tmp/beta' }), false);
+  assert.equal(context.projectRecordMatchesStatus(record, null), false);
 });
 
 test('retained ZIP only matches its own recent record', () => {
@@ -1380,9 +1380,9 @@ test('retained ZIP only matches its own recent record', () => {
 });
 
 test('CLI cache keys use the watched root instead of a shared fallback', () => {
-  const a = context.cliWatchCacheMeta({ ok: true, root: '/tmp/alpha', name: 'alpha' });
-  const b = context.cliWatchCacheMeta({ ok: true, root: '/tmp/beta', name: 'beta' });
-  const missing = context.cliWatchCacheMeta(null);
+  const a = context.projectWatchCacheMeta({ ok: true, root: '/tmp/alpha', name: 'alpha' });
+  const b = context.projectWatchCacheMeta({ ok: true, root: '/tmp/beta', name: 'beta' });
+  const missing = context.projectWatchCacheMeta(null);
   assert.equal(a.sourceKey, '/tmp/alpha');
   assert.equal(a.title, 'alpha');
   assert.notEqual(a.sourceKey, b.sourceKey);
@@ -1604,8 +1604,8 @@ test('selection reads the live body scrollTop of a previously scrolled card', ()
 test('hydration IDs follow the loaded analysis, not a live session', () => {
   const data = { files: [{ path: 'src/index.js', name: 'index.js' }], connections: [] };
   const graph = context.analysisGraphKey(data);
-  const alpha = context.loadedAnalysisSourceIdentity({ localSourceKind: 'local-project', cliOk: true, cliRoot: '/projects/alpha' });
-  const beta = context.loadedAnalysisSourceIdentity({ localSourceKind: 'local-project', cliOk: true, cliRoot: '/projects/beta' });
+  const alpha = context.loadedAnalysisSourceIdentity({ localSourceKind: 'local-project', projectOk: true, projectRoot: '/projects/alpha' });
+  const beta = context.loadedAnalysisSourceIdentity({ localSourceKind: 'local-project', projectOk: true, projectRoot: '/projects/beta' });
   assert.equal(alpha.sourceType, 'local-project');
   assert.equal(alpha.sourceKey, '/projects/alpha');
   assert.equal(beta.sourceKey, '/projects/beta');
@@ -1690,21 +1690,21 @@ test('empty code cards always render from an array of lines', () => {
   assert.deepEqual(J(context.asCodeLines(['const x = 1;'])), ['const x = 1;']);
 });
 
-test('CLI watch paths stay unique and only flush analyzed files', () => {
-  assert.equal(context.normalizeCliWatchPath('\\src\\app.js'), 'src/app.js');
-  assert.deepEqual(J(context.noteCliWatchPath([], 'src/app.js')), ['src/app.js']);
-  assert.deepEqual(J(context.noteCliWatchPath(['src/app.js'], 'src/app.js')), ['src/app.js']);
-  assert.deepEqual(J(context.noteCliWatchPath(['src/app.js'], 'src/math.js')), ['src/app.js', 'src/math.js']);
+test('Project watch paths stay unique and only flush analyzed files', () => {
+  assert.equal(context.normalizeProjectWatchPath('\\src\\app.js'), 'src/app.js');
+  assert.deepEqual(J(context.noteProjectWatchPath([], 'src/app.js')), ['src/app.js']);
+  assert.deepEqual(J(context.noteProjectWatchPath(['src/app.js'], 'src/app.js')), ['src/app.js']);
+  assert.deepEqual(J(context.noteProjectWatchPath(['src/app.js'], 'src/math.js')), ['src/app.js', 'src/math.js']);
   const files = [{ path: 'src/app.js', content: 'export const n = 1;\n' }, { path: 'src/math.js', content: '' }];
-  assert.deepEqual(J(context.cliWatchDiffPaths(files, ['src/app.js', 'README.md', 'src/app.js'])), ['src/app.js']);
+  assert.deepEqual(J(context.projectWatchDiffPaths(files, ['src/app.js', 'README.md', 'src/app.js'])), ['src/app.js']);
   const skipped = [{ path: 'src/app.js', content: '', analysisSkipped: 'oversized' }, { path: 'src/math.js', content: 'export const n = 1;\n' }];
-  assert.deepEqual(J(context.cliWatchDiffPaths(skipped, ['src/app.js', 'src/math.js'])), ['src/math.js']);
+  assert.deepEqual(J(context.projectWatchDiffPaths(skipped, ['src/app.js', 'src/math.js'])), ['src/math.js']);
   assert.equal(context.fileHasAnalyzedSourceForDiff(skipped[0]), false);
   assert.equal(context.fileHasAnalyzedSourceForDiff({ path: 'src/gone.js', content: '', analysisSkipped: 'fetch-failed' }), false);
   assert.equal(context.fileHasAnalyzedSourceForDiff(files[0]), true);
-  const live = context.mergeCliLiveContents(null, [{ path: 'src/app.js', content: 'export const n = 1;\n' }]);
+  const live = context.mergeProjectLiveContents(null, [{ path: 'src/app.js', content: 'export const n = 1;\n' }]);
   assert.equal(live['src/app.js'], 'export const n = 1;\n');
-  const cleared = context.mergeCliLiveContents(live, [{ path: 'src/app.js', content: null }]);
+  const cleared = context.mergeProjectLiveContents(live, [{ path: 'src/app.js', content: null }]);
   assert.equal(Object.prototype.hasOwnProperty.call(cleared, 'src/app.js'), false);
 });
 
@@ -1799,88 +1799,88 @@ test('color blocks follow the painted diff row, not the stale analysis line', ()
   assert.ok(topPainted.top > topBase.top);
 });
 
-test('cleared CLI watch generations do not reuse an in-flight token', () => {
-  assert.equal(context.bumpCliWatchDiffEpoch(1), 2);
+test('cleared Project watch generations do not reuse an in-flight token', () => {
+  assert.equal(context.bumpProjectWatchDiffEpoch(1), 2);
   const gens = { 'src/app.js': 1 };
-  assert.equal(context.cliWatchDiffRequestIsCurrent(1, 1, gens, 'src/app.js', 1), true);
-  assert.equal(context.cliWatchDiffRequestIsCurrent(2, 1, gens, 'src/app.js', 1), false);
-  assert.equal(context.cliWatchDiffRequestIsCurrent(2, 2, { 'src/app.js': 1 }, 'src/app.js', 1), true);
-  assert.equal(context.cliWatchDiffRequestIsCurrent(2, 2, { 'src/app.js': 2 }, 'src/app.js', 1), false);
+  assert.equal(context.projectWatchDiffRequestIsCurrent(1, 1, gens, 'src/app.js', 1), true);
+  assert.equal(context.projectWatchDiffRequestIsCurrent(2, 1, gens, 'src/app.js', 1), false);
+  assert.equal(context.projectWatchDiffRequestIsCurrent(2, 2, { 'src/app.js': 1 }, 'src/app.js', 1), true);
+  assert.equal(context.projectWatchDiffRequestIsCurrent(2, 2, { 'src/app.js': 2 }, 'src/app.js', 1), false);
 });
 
-test('CLI analysis keeps watch paths received while files were being read', () => {
+test('Project analysis keeps watch paths received while files were being read', () => {
   const read = { 'src/app.js': true, 'src/math.js': true };
-  assert.deepEqual(J(context.retainCliWatchPathsAfterAnalysis(['src/app.js', '/src/math.js', 'src/app.js', ''], read)), ['src/app.js', 'src/math.js']);
-  assert.deepEqual(J(context.retainCliWatchPathsAfterAnalysis(['src/app.js', 'src/unread.js'], { 'src/app.js': true })), ['src/app.js']);
-  assert.deepEqual(J(context.retainCliWatchPathsAfterAnalysis(['src/unread.js'], { 'src/app.js': true })), []);
-  assert.deepEqual(J(context.retainCliWatchPathsAfterAnalysis(null)), []);
-  assert.deepEqual(J(context.noteCliWatchDuringEvent([], 'src/app.js', 2)), [{ path: 'src/app.js', rev: 2 }]);
-  assert.deepEqual(J(context.noteCliWatchDuringEvent([{ path: 'src/app.js', rev: 1 }], 'src/app.js', 3)), [{ path: 'src/app.js', rev: 3 }]);
-  assert.equal(context.cliWatchEventIsAfterSnapshot(2, 1), true);
-  assert.equal(context.cliWatchEventIsAfterSnapshot(1, 1), false);
-  assert.equal(context.cliWatchEventIsAfterSnapshot(null, 1), true);
-  assert.deepEqual(J(context.retainCliWatchPathsAfterAnalysis([{ path: 'src/app.js', rev: 1 }], read, { 'src/app.js': 1 })), []);
-  assert.deepEqual(J(context.retainCliWatchPathsAfterAnalysis([{ path: 'src/app.js', rev: 2 }], read, { 'src/app.js': 1 })), ['src/app.js']);
-  assert.equal(context.cliWatchSnapRevFromResponse({ headers: { get(name) { return name === 'x-codeflow-rev' ? '4' : null; } } }), 4);
-  assert.deepEqual(J(context.noteCliWatchPathIfRead([], 'src/app.js', read)), ['src/app.js']);
-  assert.deepEqual(J(context.noteCliWatchPathIfRead([], 'src/later.js', read)), []);
-  assert.deepEqual(J(context.noteCliWatchPathIfRead(['src/app.js'], 'src/later.js', { 'src/app.js': true })), ['src/app.js']);
-  assert.deepEqual(J(context.noteCliWatchPathIfRead([], 'src/app.js', {})), []);
-  assert.deepEqual(J(context.noteCliWatchPathIfRead([], 'src/app.js', null)), []);
-  assert.deepEqual(J(context.forgetCliWatchPath(['src/app.js', 'src/math.js'], 'src/app.js')), ['src/math.js']);
-  assert.deepEqual(J(context.forgetCliWatchPath(['src/app.js'], 'src/math.js')), ['src/app.js']);
-  assert.deepEqual(J(context.forgetCliWatchPath(['src/app.js'], '')), ['src/app.js']);
+  assert.deepEqual(J(context.retainProjectWatchPathsAfterAnalysis(['src/app.js', '/src/math.js', 'src/app.js', ''], read)), ['src/app.js', 'src/math.js']);
+  assert.deepEqual(J(context.retainProjectWatchPathsAfterAnalysis(['src/app.js', 'src/unread.js'], { 'src/app.js': true })), ['src/app.js']);
+  assert.deepEqual(J(context.retainProjectWatchPathsAfterAnalysis(['src/unread.js'], { 'src/app.js': true })), []);
+  assert.deepEqual(J(context.retainProjectWatchPathsAfterAnalysis(null)), []);
+  assert.deepEqual(J(context.noteProjectWatchDuringEvent([], 'src/app.js', 2)), [{ path: 'src/app.js', rev: 2 }]);
+  assert.deepEqual(J(context.noteProjectWatchDuringEvent([{ path: 'src/app.js', rev: 1 }], 'src/app.js', 3)), [{ path: 'src/app.js', rev: 3 }]);
+  assert.equal(context.projectWatchEventIsAfterSnapshot(2, 1), true);
+  assert.equal(context.projectWatchEventIsAfterSnapshot(1, 1), false);
+  assert.equal(context.projectWatchEventIsAfterSnapshot(null, 1), true);
+  assert.deepEqual(J(context.retainProjectWatchPathsAfterAnalysis([{ path: 'src/app.js', rev: 1 }], read, { 'src/app.js': 1 })), []);
+  assert.deepEqual(J(context.retainProjectWatchPathsAfterAnalysis([{ path: 'src/app.js', rev: 2 }], read, { 'src/app.js': 1 })), ['src/app.js']);
+  assert.equal(context.projectWatchSnapRevFromResponse({ headers: { get(name) { return name === 'x-codeflow-rev' ? '4' : null; } } }), 4);
+  assert.deepEqual(J(context.noteProjectWatchPathIfRead([], 'src/app.js', read)), ['src/app.js']);
+  assert.deepEqual(J(context.noteProjectWatchPathIfRead([], 'src/later.js', read)), []);
+  assert.deepEqual(J(context.noteProjectWatchPathIfRead(['src/app.js'], 'src/later.js', { 'src/app.js': true })), ['src/app.js']);
+  assert.deepEqual(J(context.noteProjectWatchPathIfRead([], 'src/app.js', {})), []);
+  assert.deepEqual(J(context.noteProjectWatchPathIfRead([], 'src/app.js', null)), []);
+  assert.deepEqual(J(context.forgetProjectWatchPath(['src/app.js', 'src/math.js'], 'src/app.js')), ['src/math.js']);
+  assert.deepEqual(J(context.forgetProjectWatchPath(['src/app.js'], 'src/math.js')), ['src/app.js']);
+  assert.deepEqual(J(context.forgetProjectWatchPath(['src/app.js'], '')), ['src/app.js']);
   const analyzed = [{ path: 'src/app.js', content: 'export const n = 1;\n' }, { path: 'src/math.js', content: 'export const n = 2;\n' }];
-  assert.equal(context.analyzedFileForCliWatchPath(analyzed, '/src/app.js').content, 'export const n = 1;\n');
-  assert.equal(context.cliWatchLiveMatchesBaseline(analyzed[0], 'export const n = 1;\n'), true);
-  assert.equal(context.cliWatchLiveMatchesBaseline(analyzed[0], 'export const n = 2;\n'), false);
-  assert.equal(context.cliWatchLiveMatchesBaseline(analyzed[0], ''), false);
-  assert.equal(context.cliWatchLiveMatchesBaseline({ path: 'src/app.js', content: 'export const n = 1;\n', analysisSkipped: 'fetch-failed' }, 'export const n = 1;\n'), false);
+  assert.equal(context.analyzedFileForProjectWatchPath(analyzed, '/src/app.js').content, 'export const n = 1;\n');
+  assert.equal(context.projectWatchLiveMatchesBaseline(analyzed[0], 'export const n = 1;\n'), true);
+  assert.equal(context.projectWatchLiveMatchesBaseline(analyzed[0], 'export const n = 2;\n'), false);
+  assert.equal(context.projectWatchLiveMatchesBaseline(analyzed[0], ''), false);
+  assert.equal(context.projectWatchLiveMatchesBaseline({ path: 'src/app.js', content: 'export const n = 1;\n', analysisSkipped: 'fetch-failed' }, 'export const n = 1;\n'), false);
   const emptyFile = { path: 'src/empty.js', content: '' };
-  assert.equal(context.cliWatchLiveClearsDirty(emptyFile, '', 'ok'), true);
-  assert.equal(context.cliWatchLiveClearsDirty(emptyFile, '', 'missing'), false);
-  assert.equal(context.cliWatchLiveClearsDirty(analyzed[0], 'export const n = 1;\n', 'ok'), true);
-  assert.equal(context.cliWatchLiveClearsDirty(analyzed[0], 'export const n = 1;\n', 'missing'), false);
-  assert.deepEqual(J(context.cliWatchLiveFromResponse(200, 'ok\n', true)), { kind: 'ok', content: 'ok\n' });
-  assert.deepEqual(J(context.cliWatchLiveFromResponse(404, 'nope', false)), { kind: 'missing', content: '' });
-  assert.deepEqual(J(context.cliWatchLiveFromResponse(500, 'err', false)), { kind: 'error' });
-  assert.equal(context.shouldApplyCliWatchLive({ kind: 'ok', content: '' }), true);
-  assert.equal(context.shouldApplyCliWatchLive({ kind: 'missing', content: '' }), true);
-  assert.equal(context.shouldApplyCliWatchLive({ kind: 'error' }), false);
+  assert.equal(context.projectWatchLiveClearsDirty(emptyFile, '', 'ok'), true);
+  assert.equal(context.projectWatchLiveClearsDirty(emptyFile, '', 'missing'), false);
+  assert.equal(context.projectWatchLiveClearsDirty(analyzed[0], 'export const n = 1;\n', 'ok'), true);
+  assert.equal(context.projectWatchLiveClearsDirty(analyzed[0], 'export const n = 1;\n', 'missing'), false);
+  assert.deepEqual(J(context.projectWatchLiveFromResponse(200, 'ok\n', true)), { kind: 'ok', content: 'ok\n' });
+  assert.deepEqual(J(context.projectWatchLiveFromResponse(404, 'nope', false)), { kind: 'missing', content: '' });
+  assert.deepEqual(J(context.projectWatchLiveFromResponse(500, 'err', false)), { kind: 'error' });
+  assert.equal(context.shouldApplyProjectWatchLive({ kind: 'ok', content: '' }), true);
+  assert.equal(context.shouldApplyProjectWatchLive({ kind: 'missing', content: '' }), true);
+  assert.equal(context.shouldApplyProjectWatchLive({ kind: 'error' }), false);
 });
 
-test('CLI live watch reads reject oversized files before painting', () => {
-  const limit = context.CLI_WATCH_MAX_BYTES;
+test('Project live watch reads reject oversized files before painting', () => {
+  const limit = context.PROJECT_WATCH_MAX_BYTES;
   assert.equal(limit, 2 * 1024 * 1024);
-  assert.equal(context.cliWatchLiveRejectsOversized(limit), false);
-  assert.equal(context.cliWatchLiveRejectsOversized(limit + 1), true);
-  assert.equal(context.cliWatchLiveRejectsOversized(String(limit + 1)), true);
-  assert.equal(context.cliWatchLiveRejectsOversized(NaN), false);
-  assert.deepEqual(J(context.cliWatchLiveFromResponse(200, 'ok', true, limit + 1)), { kind: 'error' });
-  assert.deepEqual(J(context.cliWatchLiveFromResponse(200, 'x'.repeat(limit + 1), true)), { kind: 'error' });
-  assert.equal(context.shouldApplyCliWatchLive(context.cliWatchLiveFromResponse(200, 'ok', true, limit + 1)), false);
+  assert.equal(context.projectWatchLiveRejectsOversized(limit), false);
+  assert.equal(context.projectWatchLiveRejectsOversized(limit + 1), true);
+  assert.equal(context.projectWatchLiveRejectsOversized(String(limit + 1)), true);
+  assert.equal(context.projectWatchLiveRejectsOversized(NaN), false);
+  assert.deepEqual(J(context.projectWatchLiveFromResponse(200, 'ok', true, limit + 1)), { kind: 'error' });
+  assert.deepEqual(J(context.projectWatchLiveFromResponse(200, 'x'.repeat(limit + 1), true)), { kind: 'error' });
+  assert.equal(context.shouldApplyProjectWatchLive(context.projectWatchLiveFromResponse(200, 'ok', true, limit + 1)), false);
 });
 
-test('CLI watch recovery skips already flushed and in-flight paths', () => {
+test('Project watch recovery skips already flushed and in-flight paths', () => {
   const dirty = ['src/app.js', 'src/math.js', 'src/new.js'];
   const live = { 'src/app.js': 'export const n = 1;\n' };
-  assert.deepEqual(J(context.pendingCliWatchDiffPaths(dirty, live, ['src/math.js'])), ['src/new.js']);
-  assert.deepEqual(J(context.pendingCliWatchDiffPaths(dirty, live, [])), ['src/math.js', 'src/new.js']);
-  assert.deepEqual(J(context.pendingCliWatchDiffPaths(dirty, live, dirty)), []);
-  assert.deepEqual(J(context.pendingCliWatchDiffPaths([], live, [])), []);
-  const started = J(context.startedCliWatchDiffPaths(['src/math.js'], { 'src/app.js': 1, 'src/util.js': 2 }));
+  assert.deepEqual(J(context.pendingProjectWatchDiffPaths(dirty, live, ['src/math.js'])), ['src/new.js']);
+  assert.deepEqual(J(context.pendingProjectWatchDiffPaths(dirty, live, [])), ['src/math.js', 'src/new.js']);
+  assert.deepEqual(J(context.pendingProjectWatchDiffPaths(dirty, live, dirty)), []);
+  assert.deepEqual(J(context.pendingProjectWatchDiffPaths([], live, [])), []);
+  const started = J(context.startedProjectWatchDiffPaths(['src/math.js'], { 'src/app.js': 1, 'src/util.js': 2 }));
   assert.deepEqual(started, ['src/math.js', 'src/app.js', 'src/util.js']);
-  assert.deepEqual(J(context.pendingCliWatchDiffPaths(dirty, {}, started)), ['src/new.js']);
+  assert.deepEqual(J(context.pendingProjectWatchDiffPaths(dirty, {}, started)), ['src/new.js']);
 });
 
-test('CLI watch diffs only apply to the matching CLI analysis', () => {
+test('Project watch diffs only apply to the matching Project analysis', () => {
   const status = { ok: true, root: '/tmp/alpha', name: 'alpha' };
-  assert.equal(context.cliWatchAppliesToAnalysis('local-project', status, { sourceType: 'local-project', sourceKey: '/tmp/alpha' }), true);
-  assert.equal(context.cliWatchAppliesToAnalysis('local-project', status, { sourceType: 'local-project', sourceKey: '/tmp/beta' }), false);
-  assert.equal(context.cliWatchAppliesToAnalysis('folder', status, { sourceType: 'folder' }), false);
-  assert.equal(context.cliWatchAppliesToAnalysis('zip', status, { sourceType: 'zip' }), false);
-  assert.equal(context.cliWatchAppliesToAnalysis(null, status, { sourceType: 'github' }), false);
-  assert.equal(context.cliWatchAppliesToAnalysis('local-project', { ok: false }, { sourceType: 'local-project', sourceKey: '/tmp/alpha' }), false);
+  assert.equal(context.projectWatchAppliesToAnalysis('local-project', status, { sourceType: 'local-project', sourceKey: '/tmp/alpha' }), true);
+  assert.equal(context.projectWatchAppliesToAnalysis('local-project', status, { sourceType: 'local-project', sourceKey: '/tmp/beta' }), false);
+  assert.equal(context.projectWatchAppliesToAnalysis('folder', status, { sourceType: 'folder' }), false);
+  assert.equal(context.projectWatchAppliesToAnalysis('zip', status, { sourceType: 'zip' }), false);
+  assert.equal(context.projectWatchAppliesToAnalysis(null, status, { sourceType: 'github' }), false);
+  assert.equal(context.projectWatchAppliesToAnalysis('local-project', { ok: false }, { sourceType: 'local-project', sourceKey: '/tmp/alpha' }), false);
 });
 
 test('HTML attribute sanitizer encodes quotes before they reach data-sym', () => {
@@ -2011,50 +2011,50 @@ test('index.html ships a working Code view, not a stub', () => {
   assert.match(htmlSource, /analyzeLocalProject\(false,status\)/);
   assert.match(htmlSource, /retainedFolderMatchesRecord/);
   assert.match(htmlSource, /retainedZipMatchesRecord/);
-  assert.match(htmlSource, /cliRecordMatchesStatus/);
+  assert.match(htmlSource, /projectRecordMatchesStatus/);
   assert.match(htmlSource, /folderFilterAfterCodeNav/);
   assert.match(htmlSource, /setFolderFilter\(nextFilter\)/);
   assert.match(htmlSource, /allowReplace=!!\(replace\|\|reveal\)/);
   assert.match(htmlSource, /filterAnalyzableLocalFiles\(/);
   assert.match(htmlSource, /asCodeLines\(highlightSyntax/);
-  assert.match(htmlSource, /codeCardDiffRows\(file,cliLiveByPath/);
+  assert.match(htmlSource, /codeCardDiffRows\(file,projectLiveByPath/);
   assert.match(htmlSource, /asCodeLines\(highlightSyntax\(diffSource,file\.name\)\)/);
   assert.match(htmlSource, /className:'file-preview-line'\+codeCardDiffClass\(row\)/);
   assert.match(htmlSource, /diff-add/);
   assert.match(htmlSource, /diff-del/);
-  assert.match(htmlSource, /enqueueCliWatchDiffRef/);
-  assert.match(htmlSource, /flushCliWatchDiffs/);
-  assert.match(htmlSource, /startedCliWatchDiffPaths\(cliDiffPendingRef\.current,cliDiffGenRef\.current\)/);
-  assert.match(htmlSource, /pendingCliWatchDiffPaths\(cliDirty,cliLiveByPath,started\)/);
-  assert.match(htmlSource, /flushCliWatchDiffs\(missing\)/);
-  assert.match(htmlSource, /cliWatchAppliesToAnalysis\(localSourceKind,cliStatus,currentAnalysisSource\(\)\)/);
-  assert.match(htmlSource, /function applyCachedAnalysis\(record\)\{[\s\S]*?setCliDirty\(\[\]\);[\s\S]*?clearCliLiveDiffs\(\);/);
-  assert.match(htmlSource, /cliWatchDuringRef\.current=noteCliWatchDuringEvent\(cliWatchDuringRef\.current,next,rev\)/);
-  assert.match(htmlSource, /var keep=retainCliWatchPathsAfterAnalysis\(cliWatchDuringRef\.current,cliWatchReadRef\.current,cliWatchSnapRevRef\.current\)/);
-  assert.match(htmlSource, /enqueueCliWatchDiffRef\.current\(payload\.path,payload\.rev\)/);
-  assert.match(htmlSource, /cliWatchSnapRevFromResponse\(fileRes\)/);
+  assert.match(htmlSource, /enqueueProjectWatchDiffRef/);
+  assert.match(htmlSource, /flushProjectWatchDiffs/);
+  assert.match(htmlSource, /startedProjectWatchDiffPaths\(projectDiffPendingRef\.current,projectDiffGenRef\.current\)/);
+  assert.match(htmlSource, /pendingProjectWatchDiffPaths\(projectDirty,projectLiveByPath,started\)/);
+  assert.match(htmlSource, /flushProjectWatchDiffs\(missing\)/);
+  assert.match(htmlSource, /projectWatchAppliesToAnalysis\(localSourceKind,projectStatus,currentAnalysisSource\(\)\)/);
+  assert.match(htmlSource, /function applyCachedAnalysis\(record\)\{[\s\S]*?setProjectDirty\(\[\]\);[\s\S]*?clearProjectLiveDiffs\(\);/);
+  assert.match(htmlSource, /projectWatchDuringRef\.current=noteProjectWatchDuringEvent\(projectWatchDuringRef\.current,next,rev\)/);
+  assert.match(htmlSource, /var keep=retainProjectWatchPathsAfterAnalysis\(projectWatchDuringRef\.current,projectWatchReadRef\.current,projectWatchSnapRevRef\.current\)/);
+  assert.match(htmlSource, /enqueueProjectWatchDiffRef\.current\(payload\.path,payload\.rev\)/);
+  assert.match(htmlSource, /projectWatchSnapRevFromResponse\(fileRes\)/);
   assert.match(htmlSource, /if\(!fileRes\.ok\)\{[\s\S]*?analyzed\.push\(makeFetchFailedAnalysisFile\(f\)\);[\s\S]*?continue;/);
-  assert.match(htmlSource, /cliWatchLiveRejectsOversized\(length\)/);
-  assert.match(htmlSource, /cliWatchLiveFromResponse\(res\.status,text,true,length\)/);
-  assert.match(htmlSource, /cliWatchReadRef\.current\[pathKey\]=true;[\s\S]*?cliWatchSnapRevFromResponse\(fileRes\);[\s\S]*?var content=await fileRes\.text\(\);/);
-  assert.match(htmlSource, /readCliWatchLiveSource\(path\)/);
-  assert.match(htmlSource, /if\(!shouldApplyCliWatchLive\(result\)\)return/);
-  assert.match(htmlSource, /if\(cliWatchLiveClearsDirty\(file,live,result\.kind\)\)/);
-  assert.match(htmlSource, /setCliDirty\(function\(prev\)\{return forgetCliWatchPath\(prev,path\);\}/);
-  assert.match(htmlSource, /setCliDirty\(keep\)/);
-  assert.doesNotMatch(htmlSource, /setCachedFromId\(null\);\s*setCliDirty\(\[\]\);\s*clearCliLiveDiffs\(\);/);
+  assert.match(htmlSource, /projectWatchLiveRejectsOversized\(length\)/);
+  assert.match(htmlSource, /projectWatchLiveFromResponse\(res\.status,text,true,length\)/);
+  assert.match(htmlSource, /projectWatchReadRef\.current\[pathKey\]=true;[\s\S]*?projectWatchSnapRevFromResponse\(fileRes\);[\s\S]*?var content=await fileRes\.text\(\);/);
+  assert.match(htmlSource, /readProjectWatchLiveSource\(path\)/);
+  assert.match(htmlSource, /if\(!shouldApplyProjectWatchLive\(result\)\)return/);
+  assert.match(htmlSource, /if\(projectWatchLiveClearsDirty\(file,live,result\.kind\)\)/);
+  assert.match(htmlSource, /setProjectDirty\(function\(prev\)\{return forgetProjectWatchPath\(prev,path\);\}/);
+  assert.match(htmlSource, /setProjectDirty\(keep\)/);
+  assert.doesNotMatch(htmlSource, /setCachedFromId\(null\);\s*setProjectDirty\(\[\]\);\s*clearProjectLiveDiffs\(\);/);
   assert.match(htmlSource, /codeCardSizeForDiff\(file,prefs,rows\)/);
   assert.match(htmlSource, /codeCardSizeForDiff\(file,cardPrefs,diffRows\)/);
-  assert.match(htmlSource, /applyCodeCardUserSize\(codeCardSizeForDiff\(file,currentCodeCardPrefs\(\),codeCardDiffRows\(file,cliLiveByPath\[file\.path\]\)\),nextSize\)/);
+  assert.match(htmlSource, /applyCodeCardUserSize\(codeCardSizeForDiff\(file,currentCodeCardPrefs\(\),codeCardDiffRows\(file,projectLiveByPath\[file\.path\]\)\),nextSize\)/);
   assert.match(htmlSource, /applyCodeCardResizeFrame\(findCodeCardElement\(codeCardsLayerRef\.current,file\.path\),codeCardSizesRef\.current\[file\.path\]\)/);
-  assert.match(htmlSource, /\[codeViewFiles,graphConfig\.vizType,graphConfig\.linkDist,codeViewExpand,codeViewWrap,cliLiveByPath\]/);
+  assert.match(htmlSource, /\[codeViewFiles,graphConfig\.vizType,graphConfig\.linkDist,codeViewExpand,codeViewWrap,projectLiveByPath\]/);
   assert.match(htmlSource, /codeCardSymbolPills\(file,data\?data\.connections:\[\],cardPrefs,diffRows\)/);
   assert.match(htmlSource, /codeColorBlockSections\(file,data\?data\.connections:\[\],cardPrefs,diffRows\)/);
-  assert.match(htmlSource, /cliDiffEpochRef\.current=bumpCliWatchDiffEpoch\(cliDiffEpochRef\.current\)/);
-  assert.match(htmlSource, /cliWatchDiffRequestIsCurrent\(cliDiffEpochRef\.current,epoch,cliDiffGenRef\.current,path,gen\)/);
+  assert.match(htmlSource, /projectDiffEpochRef\.current=bumpProjectWatchDiffEpoch\(projectDiffEpochRef\.current\)/);
+  assert.match(htmlSource, /projectWatchDiffRequestIsCurrent\(projectDiffEpochRef\.current,epoch,projectDiffGenRef\.current,path,gen\)/);
   assert.match(htmlSource, /var live=result\.kind==='missing'\?'':result\.content/);
   assert.match(htmlSource, /EventSource\('\/__codeflow\/events'\)/);
-  assert.match(htmlSource, /CLI_WATCH_DIFF_MS/);
+  assert.match(htmlSource, /PROJECT_WATCH_DIFF_MS/);
   assert.match(htmlSource, /zipArchiveCacheMeta/);
   assert.match(htmlSource, /compactAnalysisForCache/);
   assert.match(htmlSource, /fileHasLoadedSource/);
@@ -2192,7 +2192,7 @@ test('index.html ships a working Code view, not a stub', () => {
   assert.match(htmlSource, /readCodeCardWorldBoxes\(codeCardsLayerRef\.current\)/);
   assert.match(htmlSource, /codeFolderHullBounds\(cardNodes,leftover/);
   assert.match(htmlSource, /if\(updateHullsRef\.current\)updateHullsRef\.current\(\)/);
-  assert.match(htmlSource, /codeViewExpand,codeViewWrap,cliLiveByPath\]/);
+  assert.match(htmlSource, /codeViewExpand,codeViewWrap,projectLiveByPath\]/);
   assert.match(htmlSource, /cardSize\.expand\?' expand'/);
   assert.match(htmlSource, /cardSize\.wrap\?' wrap'/);
   assert.match(htmlSource, /\.code-card\.wrap \.file-preview-text/);

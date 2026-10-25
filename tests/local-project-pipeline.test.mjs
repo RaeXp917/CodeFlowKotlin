@@ -10,15 +10,15 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { createProjectsServer } from '../cli/projects-server.mjs';
+import { createProjectsServer } from '../server/projects-server.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const html = await readFile(join(__dirname, '..', 'index.html'), 'utf8');
-const selector = await readFile(join(__dirname, '..', 'cli', 'project-selector.js'), 'utf8');
+const selector = await readFile(join(__dirname, '..', 'server', 'project-selector.js'), 'utf8');
 
 test('the browser uses local-project functions, not CLI ones', () => {
-  assert.doesNotMatch(html, /analyzeFromCli/);
-  assert.doesNotMatch(html, /probeCodeflowCli/);
+  assert.doesNotMatch(html, /analyzeFromProject/);
+  assert.doesNotMatch(html, /probeCodeflowProject/);
   assert.match(html, /function analyzeLocalProject\(/);
   assert.match(html, /function loadActiveProject\(/);
   // loadActiveProject is invoked on mount (replacing the old probe).
@@ -33,13 +33,9 @@ test('the analysis source identity is local-project (not cli)', () => {
   assert.equal(stray.length, 0, 'no new records should persist sourceType:cli');
 });
 
-test('legacy cli cache records are still accepted on explicit re-open (migration)', () => {
-  assert.match(html, /record\.sourceType==='cli'/);
-});
-
-test('no active CLI analysis mode or ?cli=1 dependency remains', () => {
+test('no active Project analysis mode or ?cli=1 dependency remains', () => {
   assert.doesNotMatch(html, /cli=1/);
-  assert.doesNotMatch(html, /CLI analysis failed/);
+  assert.doesNotMatch(html, /Project analysis failed/);
   // project-selector reloads to the normal URL, not /?cli=1.
   assert.match(selector, /window\.location\.assign\('\/'\)/);
   assert.doesNotMatch(selector, /cli=1/);

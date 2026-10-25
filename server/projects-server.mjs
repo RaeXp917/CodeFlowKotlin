@@ -4,7 +4,7 @@
  * The original CodeFlow index.html and all existing views are served unchanged.
  * Adds only a project dropdown (+ Add Folder / Remove / Exclusions) via the
  * optional project-selector.js runtime overlay.
- * Start: node cli/projects-server.mjs "C:\\Users\\MainPc\\AndroidStudioProjects"
+ * Start: node server/projects-server.mjs "C:\\Users\\MainPc\\AndroidStudioProjects"
  */
 import http from 'node:http';
 import path from 'node:path';
@@ -13,10 +13,10 @@ import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  isAllowedCliRequest, isSameOriginMutation, isValidCsrf,
-  safeRequestPath, resolveSafeExistingPath, resolveSafeCliPath,
+  isAllowedProjectRequest, isSameOriginMutation, isValidCsrf,
+  safeRequestPath, resolveSafeExistingPath, resolveSafeProjectPath,
   startFileWatchers, listWatchFiles, openBrowser, makeExcludeMatcher,
-  bumpWatchRev, currentWatchRev, CLI_FILE_MAX_BYTES, shouldSkipName,
+  bumpWatchRev, currentWatchRev, SOURCE_FILE_MAX_BYTES, shouldSkipName,
   isSourceCodeFile,
 } from './server-utils.mjs';
 import {
@@ -305,7 +305,7 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
     if (!entry) return { error: 'unknown-project' };
     const norm = normalizeExclusions(exclusions).slice(0, MAX_EXCLUSIONS);
     for (const ex of norm) {
-      if (!resolveSafeCliPath(entry.root, ex)) return { error: 'unsafe-exclusion', value: ex };
+      if (!resolveSafeProjectPath(entry.root, ex)) return { error: 'unsafe-exclusion', value: ex };
     }
     const record = getRootRecord(config, projectsRoot);
     if (entry.source === 'manual') {
@@ -334,7 +334,7 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
 
   const server = http.createServer(async (req, res) => {
     try {
-      if (!isAllowedCliRequest(req)) return plain(res, 403, 'Forbidden');
+      if (!isAllowedProjectRequest(req)) return plain(res, 403, 'Forbidden');
       const parsed = safeRequestPath(req.url);
       if (!parsed.ok) return plain(res, parsed.status, 'Invalid request');
       const { url, pathname } = parsed;
@@ -455,7 +455,7 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
       }
 
       if (pathname === '/__codeflow/search') {
-        // Read-only, same-origin-guarded (top-level isAllowedCliRequest) content
+        // Read-only, same-origin-guarded (top-level isAllowedProjectRequest) content
         // search scoped to the ACTIVE project only. The root is never taken from
         // the client — it is the authorized currentRoot — and the active project's
         // exclusions are enforced, so excluded files never appear or are read.
@@ -510,7 +510,7 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
         if (pid !== currentId || exclusions !== currentExclusions) return plain(res, 409, 'Project scope changed');
         // Sampling the revision before opening matches CodeFlow's existing watcher semantics.
         const rev = currentWatchRev(revisions, rel);
-        return sendFile(res, file, { contentType: 'text/plain; charset=utf-8', maxBytes: CLI_FILE_MAX_BYTES, revision: rev });
+        return sendFile(res, file, { contentType: 'text/plain; charset=utf-8', maxBytes: SOURCE_FILE_MAX_BYTES, revision: rev });
       }
 
       if (pathname === '/__codeflow/events') {
@@ -583,7 +583,7 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
 async function main() {
   const parsed = parseArguments(process.argv);
   if (parsed.help) {
-    console.log('Usage: node cli/projects-server.mjs "C:\\Users\\MainPc\\AndroidStudioProjects" [--port 4173]');
+    console.log('Usage: node server/projects-server.mjs "C:\\Users\\MainPc\\AndroidStudioProjects" [--port 4173]');
     return;
   }
   const st = await fs.stat(parsed.projectsRoot).catch(() => null);

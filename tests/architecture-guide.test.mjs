@@ -203,12 +203,12 @@ test('a slower preview cannot replace the most recently selected file',async()=>
 });
 test('late analyzer results cannot overwrite a newer project or reanalysis',async()=>{
  let release,started;const entered=new Promise(resolve=>started=resolve),runRef={current:0};const writes=[];
- const nav={console,cliStatus:{ok:true,pid:'A',root:'A'},cliRecordMatchesStatus:()=>true,cliWatchCacheMeta:()=>({title:'A',sourceKey:'A'}),analysisRunRef:runRef,activeExcludePatterns:[],
- cliWatchDuringRef:{},cliWatchReadRef:{},cliWatchSnapRevRef:{},cliAnalyzingRef:{},localFolderKeyRef:{},localFolderSelectionRef:{},zipArchiveRef:{},zipFileRef:{},zipKeyRef:{},
- setError(e){throw new Error(e);},resetAnalysisState(){runRef.current++;},setData:data=>writes.push(data),setCliStatus(){},setLocalDirHandle(){},setLocalSourceKind(){},setLoading(){},setProgress(){},
+ const nav={console,projectStatus:{ok:true,pid:'A',root:'A'},projectRecordMatchesStatus:()=>true,projectWatchCacheMeta:()=>({title:'A',sourceKey:'A'}),analysisRunRef:runRef,activeExcludePatterns:[],
+ projectWatchDuringRef:{},projectWatchReadRef:{},projectWatchSnapRevRef:{},projectAnalyzingRef:{},localFolderKeyRef:{},localFolderSelectionRef:{},zipArchiveRef:{},zipFileRef:{},zipKeyRef:{},
+ setError(e){throw new Error(e);},resetAnalysisState(){runRef.current++;},setData:data=>writes.push(data),setProjectStatus(){},setLocalDirHandle(){},setLocalSourceKind(){},setLoading(){},setProgress(){},
  Parser:{initTreeSitter:()=>Promise.resolve(),isCode:()=>true,isOversized:()=>false,isScriptContainer:()=>false,extract:()=>[],detectLayer:()=> 'ui'},
- fetch:async url=>({ok:true,status:200,json:async()=>({files:[file('A.kt')]}),text:async()=> 'class A {}'}),filterAnalyzableLocalFiles:files=>files,normalizeCliWatchPath:p=>p,cliWatchSnapRevFromResponse:()=>null,
+ fetch:async url=>({ok:true,status:200,json:async()=>({files:[file('A.kt')]}),text:async()=> 'class A {}'}),filterAnalyzableLocalFiles:files=>files,normalizeProjectWatchPath:p=>p,projectWatchSnapRevFromResponse:()=>null,
  yieldToBrowser:()=>Promise.resolve(),runAnalysisData:()=>{started();return new Promise(resolve=>release=resolve);}};
  vm.createContext(nav);vm.runInContext(block('    async function analyzeLocalProject(','    function resetAnalysisState('),nav);
- const pending=nav.analyzeLocalProject(true,nav.cliStatus);await entered;runRef.current++;release({files:[file('old-A.kt')]});assert.equal(await pending,false);assert.equal(writes.length,0);
+ const pending=nav.analyzeLocalProject(true,nav.projectStatus);await entered;runRef.current++;release({files:[file('old-A.kt')]});assert.equal(await pending,false);assert.equal(writes.length,0);
 });

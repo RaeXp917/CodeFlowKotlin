@@ -8,8 +8,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createProjectsServer } from '../cli/projects-server.mjs';
-import { projectId } from '../cli/project-registry.mjs';
+import { createProjectsServer } from '../server/projects-server.mjs';
+import { projectId } from '../server/project-registry.mjs';
 
 function rawRequest(port, method, pathname, { headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {

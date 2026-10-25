@@ -9,9 +9,9 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   isSourceCodeFile, isWatchableFile, listWatchFiles, startFileWatchers,
-} from '../cli/server-utils.mjs';
-import { searchProjectRoot } from '../cli/project-search.mjs';
-import { createProjectsServer } from '../cli/projects-server.mjs';
+} from '../server/server-utils.mjs';
+import { searchProjectRoot } from '../server/project-search.mjs';
+import { createProjectsServer } from '../server/projects-server.mjs';
 
 test('the eligibility policy includes source code and excludes docs/data/media', () => {
   for (const f of ['Main.kt', 'build.gradle.kts', 'App.java', 'View.swift', 'main.dart', 'a.js', 'b.ts', 'c.tsx', 'd.py', 'e.go', 'f.rs', 'index.html', 'App.vue']) {

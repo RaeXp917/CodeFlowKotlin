@@ -316,7 +316,7 @@ role stays unknown. No compiler verification or runtime behavior is claimed.
 inside `buildAnalysisData`, before contents are discarded. Compact `file.guide`
 metadata contains component names, roles, real declaration/import lines, framework
 context and import names/targets. It contains no copied source snippets. Worker,
-card and browser analysis use this same pass. Old cache entries without this
+browser and test analysis use this same pass. Old cache entries without this
 metadata display an unavailable message and ask for Re-analyze.
 
 `buildGuideIndex` indexes existing files, `data.connections` and the **full**
@@ -377,10 +377,10 @@ preserved; new guide metadata adds no source snippets.
 
 ```sh
 node --test tests/architecture-guide.test.mjs tests/architecture-guide-scope.test.mjs
-node --test tests/architecture-insights.test.mjs tests/architecture-foundation.test.mjs tests/kotlin-architecture-phase-c.test.mjs tests/swift-architecture-phase-d.test.mjs tests/flutter-architecture.test.mjs tests/security-precision.test.mjs tests/security-selfscan.test.mjs tests/card-analyzer-security.test.mjs
+node --test tests/architecture-insights.test.mjs tests/architecture-foundation.test.mjs tests/kotlin-architecture-phase-c.test.mjs tests/swift-architecture-phase-d.test.mjs tests/flutter-architecture.test.mjs tests/security-precision.test.mjs tests/security-selfscan.test.mjs tests/local-only-runtime.test.mjs
 npm test
 node --test tests/inline-babel-parse.smoke.js tests/html-inline-script-analysis.smoke.js
-node --check cli/projects-server.mjs
+node --check server/projects-server.mjs
 node tests/verify-architecture-guide.mjs
 ```
 

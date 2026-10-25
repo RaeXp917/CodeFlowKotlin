@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
-const { compileExcludePatterns, matchesExcludePattern } = require('../card/lib/exclude.js');
+import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
+const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
+const context={};vm.createContext(context);
+vm.runInContext(html.slice(html.indexOf('function normalizeExcludePath('),html.indexOf('function shouldIgnoreDirectory(')),context);
+const {compileExcludePatterns,matchesExcludePattern}=context;
 
 function matches(pattern, path, name = path.split('/').pop()) {
   return matchesExcludePattern(compileExcludePatterns(pattern), path, name);

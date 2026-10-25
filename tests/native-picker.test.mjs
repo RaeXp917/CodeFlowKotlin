@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
-import { pickFolder, PICK_SCRIPT } from '../cli/pick-folder.mjs';
+import { pickFolder, PICK_SCRIPT } from '../server/pick-folder.mjs';
 
 // Build a fake child process whose stdout emits `stdoutText`, then closes with
 // `code`. Records the (cmd, args, opts) it was launched with.

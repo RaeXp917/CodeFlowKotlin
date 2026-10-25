@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { createProjectsServer } from '../cli/projects-server.mjs';
+import { createProjectsServer } from '../server/projects-server.mjs';
 
 // Issue a raw request with custom Host/Origin (fetch forbids setting Origin).
 function rawRequest(port, pathname, headers) {
@@ -171,7 +171,7 @@ test('switching projects never mixes files from the previous project', async () 
 
 test('index.html no longer shows the misleading CLI/watched-folder copy', async () => {
   const html = await readFile(join(__dirname, '..', 'index.html'), 'utf8');
-  assert.doesNotMatch(html, /CLI analysis failed/);
+  assert.doesNotMatch(html, /Project analysis failed/);
   assert.doesNotMatch(html, /No code files found in the watched folder/);
   assert.doesNotMatch(html, /Restart the CLI in that folder/);
   // Accurate local-project messages are present.

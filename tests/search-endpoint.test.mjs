@@ -7,7 +7,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createProjectsServer } from '../cli/projects-server.mjs';
+import { createProjectsServer } from '../server/projects-server.mjs';
 
 function rawRequest(port, method, pathname, headers = {}) {
   return new Promise((resolve, reject) => {

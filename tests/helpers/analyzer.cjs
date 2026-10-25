@@ -5,7 +5,6 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
 const vm = require('vm');
 
 const START_MARKER = '// ===== CODEFLOW_ANALYZER_START =====';
@@ -65,13 +64,4 @@ function loadAnalyzer(htmlPath) {
   };
 }
 
-function locateIndexHtml(actionDir) {
-  // Always load the analyzer from the action package, not the repository being analyzed.
-  const adjacent = path.resolve(actionDir, '..', 'index.html');
-  if (fs.existsSync(adjacent)) return adjacent;
-  throw new Error(
-    'Could not find CodeFlow analyzer source at ' + adjacent + '.'
-  );
-}
-
-module.exports = { loadAnalyzer, locateIndexHtml, START_MARKER, END_MARKER };
+module.exports = { loadAnalyzer };

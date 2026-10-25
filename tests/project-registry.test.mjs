@@ -8,7 +8,7 @@ import test from 'node:test';
 import {
   rootKey, projectId, normalizeExclusion, normalizeExclusions, migrateConfig,
   loadConfig, saveConfig, isReasonableProjectRoot, buildProjectList, getRootRecord,
-} from '../cli/project-registry.mjs';
+} from '../server/project-registry.mjs';
 
 test('project id is stable and identity-based (not name-based)', () => {
   const a = projectId('C:/Users/me/AndroidStudioProjects/app');

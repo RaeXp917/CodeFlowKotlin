@@ -9,8 +9,8 @@ import test from 'node:test';
 import {
   makeMatcher, scanContent, splitLines, buildGlobMatcher, parseGlobList,
   globToRegExpSource, searchProjectRoot, SEARCH_LIMITS,
-} from '../cli/project-search.mjs';
-import { makeExcludeMatcher } from '../cli/server-utils.mjs';
+} from '../server/project-search.mjs';
+import { makeExcludeMatcher } from '../server/server-utils.mjs';
 
 test('literal matcher finds every occurrence with correct columns', () => {
   const m = makeMatcher({ query: 'vm', caseSensitive: true });
