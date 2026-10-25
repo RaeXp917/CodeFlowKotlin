@@ -83,6 +83,32 @@ CodeFlow stays a general-purpose, multi-language analyzer, and adds focused, evi
 
 See [docs/architecture-analysis.md](docs/architecture-analysis.md) for the full rule catalog, severity/confidence semantics, parser/fallback behavior, limitations, and how to run the regression tests.
 
+### Architecture Guide (GUIDE)
+Select a source file on the Code canvas, in **Files**, or from **Global Search**,
+then open **GUIDE** in the existing right-hand panel. Selecting another file keeps
+GUIDE open and updates its context. Source previews and architecture findings
+also select their file. The other panel tabs remain available; the tab strip
+scrolls horizontally on narrow screens.
+
+GUIDE explains Kotlin/Android, Swift/SwiftUI and Flutter/Dart component roles,
+responsibilities, dependency boundaries, common mistakes and valid alternatives.
+Expand **Relationships** to follow one analyzed dependency at a time, use
+**Previous component** to return, or open the existing source preview at a real
+line. Static call matches are labeled heuristic; imports do not prove runtime
+calls, and unresolved relationships are reported honestly. Naming-based roles
+are labeled inferred. No fixed MVVM chain is fabricated.
+
+**Architecture findings** uses the complete per-file insight list, with severity,
+confidence, classification, source expression, remediation and linked lessons.
+**Learn** contains bundled offline explanations and clearly illustrative examples;
+official documentation opens only when clicked. No source is uploaded or edited.
+Watch changes require **Re-analyze** before showing refreshed guide analysis;
+project switches and exclusions clear invalid context. Older caches need a
+Re-analyze to populate component metadata.
+
+See [the Guide implementation and verification notes](docs/architecture-analysis.md#interactive-architecture-guide-phase-e)
+for supported roles, evidence limits and executable tests.
+
 ### Health Score
 Get an instant A-F grade for your codebase based on:
 - Dead code percentage

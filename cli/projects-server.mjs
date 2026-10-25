@@ -445,9 +445,13 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
 
       if (pathname === '/__codeflow/files') {
         if (!currentProject || !currentRoot) return json(res, 409, { error: 'No project selected', code: 'no-project' });
-        if (!(await dirExists(currentRoot))) return json(res, 410, { error: 'Project folder is missing', code: 'project-missing' });
-        const isExcluded = makeExcludeMatcher(currentExclusions);
-        return json(res, 200, { files: await listWatchFiles(currentRoot, isExcluded), exclusions: currentExclusions });
+        const root = currentRoot, pid = currentId, exclusions = currentExclusions;
+        const wantPid = url.searchParams.get('pid');
+        if (wantPid && wantPid !== pid) return json(res, 409, { error: 'Active project changed', code: 'project-changed' });
+        if (!(await dirExists(root))) return json(res, 410, { error: 'Project folder is missing', code: 'project-missing' });
+        const files = await listWatchFiles(root, makeExcludeMatcher(exclusions));
+        if (pid !== currentId || exclusions !== currentExclusions) return json(res, 409, { error: 'Project scope changed', code: 'project-changed' });
+        return json(res, 200, { files, exclusions, pid });
       }
 
       if (pathname === '/__codeflow/search') {
@@ -492,14 +496,18 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
 
       if (pathname === '/__codeflow/file') {
         if (!currentRoot) return plain(res, 409, 'Select a project');
+        const root = currentRoot, pid = currentId, exclusions = currentExclusions;
+        const wantPid = url.searchParams.get('pid');
+        if (wantPid && wantPid !== pid) return plain(res, 409, 'Active project changed');
         const rel = url.searchParams.get('path') || '';
         // Source-code only: never read Markdown/docs/data/binary content, even if
         // the path is inside the authorized project.
         if (!isSourceCodeFile(String(rel).split('/').pop())) return plain(res, 404, 'Not found');
-        const isExcluded = makeExcludeMatcher(currentExclusions);
+        const isExcluded = makeExcludeMatcher(exclusions);
         if (isExcluded(rel)) return plain(res, 404, 'Not found'); // excluded files are not readable
-        const file = await resolveSafeExistingPath(currentRoot, rel);
+        const file = await resolveSafeExistingPath(root, rel);
         if (!file) return plain(res, 404, 'Not found');
+        if (pid !== currentId || exclusions !== currentExclusions) return plain(res, 409, 'Project scope changed');
         // Sampling the revision before opening matches CodeFlow's existing watcher semantics.
         const rev = currentWatchRev(revisions, rel);
         return sendFile(res, file, { contentType: 'text/plain; charset=utf-8', maxBytes: CLI_FILE_MAX_BYTES, revision: rev });

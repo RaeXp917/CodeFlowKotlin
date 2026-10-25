@@ -185,13 +185,24 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .legend-color{width:12px;height:12px;border-radius:3px;flex-shrink:0}
 .right-panel{width:360px;min-width:280px;max-width:500px;background:var(--bg1);border-left:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;position:relative;min-height:0}
 .right-panel .resize-handle{right:auto;left:-4px}
-.panel-tabs{display:flex;flex-wrap:nowrap;align-items:stretch;border-bottom:1px solid var(--border);background:var(--bg2)}
-.panel-tab{flex:1 1 0;min-width:0;display:inline-flex;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:center;gap:4px;height:34px;padding:0 4px;line-height:16px;white-space:nowrap;overflow:hidden;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--t3);font-family:inherit;font-size:9px;font-weight:600;cursor:pointer}
+.panel-tabs{display:flex;overflow-x:auto;flex-wrap:nowrap;align-items:stretch;border-bottom:1px solid var(--border);background:var(--bg2)}
+.panel-tab{flex:0 0 auto;min-width:64px;display:inline-flex;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:center;gap:4px;height:34px;padding:0 8px;line-height:16px;white-space:nowrap;overflow:hidden;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--t3);font-family:inherit;font-size:9px;font-weight:600;cursor:pointer}
 .panel-tab:hover{color:var(--t1)}
 .panel-tab.active{color:var(--acc);border-bottom-color:var(--acc)}
 .panel-tab .icon{flex-shrink:0}
 .panel-tab-pill{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;height:14px;min-width:14px;padding:0 5px;margin:0;border-radius:8px;font-size:8px;font-weight:600;line-height:14px;background:var(--bg3);color:var(--t2)}
 .panel-tab-pill.alert{background:var(--red);color:#fff}
+.architecture-guide{font-size:12px;line-height:1.55;color:var(--t1)}
+.architecture-guide h3{font-size:15px;margin:0 0 12px}.architecture-guide h4{font-size:12px;margin:8px 0}
+.architecture-guide p{margin:8px 0}.architecture-guide a{color:var(--acc)}
+.guide-section{border-top:1px solid var(--border);margin-top:16px;padding-top:10px}
+.guide-section summary{cursor:pointer;font-weight:600;padding:4px 0}
+.guide-card{background:var(--bg0);border:1px solid var(--border);border-radius:6px;padding:10px;margin:8px 0;overflow-wrap:anywhere}
+.guide-path{overflow-wrap:anywhere;font-family:monospace;color:var(--t2)}
+.architecture-guide pre{overflow-x:auto;white-space:pre;max-height:240px;background:var(--bg2);padding:10px;color:var(--t1);font-size:11px}
+.architecture-guide button{margin:3px 4px 3px 0}.architecture-guide button:disabled{opacity:.5;cursor:default}
+.architecture-guide :focus-visible,.panel-tab:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+.guide-note{color:var(--t2);font-size:11px}
 .panel-content{flex:1;overflow-y:auto;padding:12px}
 .panel-content::-webkit-scrollbar{width:6px}
 .panel-content::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
@@ -1568,7 +1579,7 @@ var LEARNING_TOPICS={
     'swift-concurrency':{
         topicId:'swift-concurrency',title:'Swift concurrency & actor isolation',ecosystem:'swift',
         roles:['View','Model','Actor'],
-        explanation:'Structured Task { } inherits the enclosing actor isolation (e.g. @MainActor), so updating UI state from it is safe. Task.detached opts out of isolation and must hop back (await MainActor.run { } or call actor-isolated methods with await) before touching isolated state. SwiftUI .task is lifecycle-aware and cancelled when the view disappears.',
+        explanation:'Task { } inherits actor context when created in an actor-isolated context (e.g. @MainActor); its spelling alone does not prove UI safety. Task.detached opts out of isolation and must hop back (await MainActor.run { } or call actor-isolated methods with await) before touching isolated state. SwiftUI .task is lifecycle-aware and cancelled when the view disappears.',
         example:'Task { await viewModel.refresh() }',
         docUrl:'https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/',
         relatedRuleIds:['swift-detached-task-captures-self']
@@ -1580,6 +1591,12 @@ var LEARNING_TOPICS={
         example:'@State private var isPresented = false',
         docUrl:'https://developer.apple.com/documentation/swiftui/state',
         relatedRuleIds:['swiftui-state-not-private']
+    },
+    'swiftui-bindings':{
+        topicId:'swiftui-bindings',title:'Binding and Bindable',ecosystem:'swift',roles:['View','Observable model'],
+        explanation:'@Binding receives read/write access to state owned elsewhere; it does not create that state. @Bindable exposes bindings to properties of a modern @Observable model. Use an explicit action callback instead when a child should request a change without controlling the value directly. Avoid treating either wrapper as ownership of a legacy ObservableObject.',
+        example:'struct Editor: View { @Binding var title: String }\n// Modern Observation: @Bindable var model: EditorModel',
+        docUrl:'https://developer.apple.com/documentation/swiftui/bindable',relatedRuleIds:[]
     },
     'flutter-architecture-layers':{
         topicId:'flutter-architecture-layers',title:'Flutter app architecture',ecosystem:'flutter',
@@ -1619,6 +1636,66 @@ function getLearningTopic(topicId){return topicId?(LEARNING_TOPICS[topicId]||nul
 function listLearningTopics(ecosystem){
     return Object.keys(LEARNING_TOPICS).map(function(k){return LEARNING_TOPICS[k];})
         .filter(function(t){return !ecosystem||t.ecosystem===ecosystem;});
+}
+// Compact guide metadata is computed once in the existing analysis pass, before
+// source is released. It contains declarations/imports, never source snippets.
+function describeGuideFile(file){
+    var path=file.path||'',source=String(file.content||'');
+    var language=/\.kts?$/.test(path)?'Kotlin':/\.swift$/.test(path)?'Swift':/\.dart$/.test(path)?'Dart':null;
+    var result={language:language||'Other',framework:'Not detected',ecosystem:null,components:[],imports:[]};
+    if(!language||file.analysisSkipped||!source){result.unavailable=file.analysisSkipped||(!source?'Source not available':null);return result;}
+    var masked=language==='Dart'?maskDartLiterals(source):maskKotlinJavaLiterals(source);
+    var constructs=language==='Kotlin'?detectKotlinConstructs(source):language==='Swift'?detectSwiftConstructs(source):detectDartConstructs(source);
+    result.ecosystem=language==='Kotlin'?'kotlin':language==='Swift'?'swift':constructs.isFlutter?'flutter':null;
+    result.framework=language==='Kotlin'?(constructs.isAndroid?'Android'+(constructs.composables?' / Compose':''):'Not detected'):language==='Swift'?(constructs.isSwiftUI?'SwiftUI':constructs.hasObservationImport?'Observation':'Not detected'):(constructs.isFlutter?'Flutter':'Not detected');
+    result.stateManagement=constructs.stateMgmt?Object.keys(constructs.stateMgmt).filter(function(k){return constructs.stateMgmt[k];}).join(', '):'';
+    function add(name,role,confirmed){
+        var declaration=new RegExp('\\b(?:class|struct|actor|interface|object|fun)\\s+'+name+'\\b').exec(masked);
+        result.components.push({name:name,role:role,confidence:confirmed?'high':'medium',evidence:confirmed?'Source syntax (heuristic)':'Inferred from naming / partial syntax',line:declaration?archLineAt(source,declaration.index):null});
+    }
+    function group(key,role,confirmed){(constructs[key]||[]).forEach(function(name){add(name,role,typeof confirmed==='function'?confirmed(name):confirmed);});}
+    function header(name){var m=new RegExp('\\b(?:class|struct|interface|object)\\s+'+name+'\\b([^\\{]*)').exec(masked);return m?m[1]:'';}
+    if(language==='Kotlin'){
+        group('activities','Activity',true);group('fragments','Fragment',true);
+        group('viewModels','ViewModel',function(n){return /:\s*[\s\S]*\b(?:ViewModel|AndroidViewModel)\b/.test(header(n));});
+        group('repositories','Repository',false);group('services','Service',function(n){return /:\s*[\s\S]*\bService\b/.test(header(n));});
+        group('daos','DAO',function(n){var m=new RegExp('@Dao\\s+(?:(?:public|internal)\\s+)?(?:interface|class)\\s+'+n+'\\b').exec(masked);return !!m;});
+        var cm,re=/@Composable\s+(?:(?:private|public|internal|suspend|inline)\s+)*fun\s+(\w+)/g;
+        while((cm=re.exec(masked)))add(cm[1],'Composable',true);
+        re=/@Dao\s+(?:(?:public|internal|abstract)\s+)*(?:interface|class)\s+(\w+)/g;
+        while((cm=re.exec(masked)))if(!result.components.some(function(c){return c.name===cm[1]&&c.role==='DAO';}))add(cm[1],'DAO',true);
+        re=/\bclass\s+(\w+)[^{\n]*:\s*Service\s*\(/g;
+        while((cm=re.exec(masked)))if(!result.components.some(function(c){return c.name===cm[1]&&c.role==='Service';}))add(cm[1],'Service',true);
+        re=/\b(?:class|interface|object)\s+(\w+)([^\{]*)\{/g;
+        while((cm=re.exec(masked))){
+            if(/UseCase$/.test(cm[1]))add(cm[1],'UseCase',false);
+            var end=kjMatchBrace(masked,re.lastIndex-1),body=masked.slice(re.lastIndex,end);
+            if(masked.slice(cm.index,cm.index+9)==='interface'&&/@(?:GET|POST|PUT|DELETE|PATCH|HTTP)\b/.test(body))add(cm[1],'Retrofit API',true);
+        }
+    }else if(language==='Swift'){
+        group('views','SwiftUI View',true);group('observableObjects','ObservableObject',true);
+        group('observableMacroTypes','@Observable model',true);group('actors','Actor',true);
+        group('repositories','Repository',false);group('services','Service',false);
+    }else{
+        group('widgets','Widget / View',true);group('states','State object',true);
+        (constructs.viewModels||[]).forEach(function(n){var h=header(n),base=/\b(?:extends|with)\s+(ChangeNotifier|StateNotifier|Notifier|AsyncNotifier|Cubit|Bloc)\b/.exec(h);add(n,base?base[1]:/ViewModel$/.test(n)?'ViewModel':'State controller',!!base);});
+        // Riverpod's Notifier/AsyncNotifier bases are not covered by the older recognizer.
+        var dm,dr=/\bclass\s+(\w+)\s+extends\s+(AsyncNotifier|Notifier)\b/g;
+        while((dm=dr.exec(masked)))if(!result.components.some(function(c){return c.name===dm[1];}))add(dm[1],dm[2],true);
+        group('repositories','Repository',false);group('services','Service',false);
+    }
+    // Match imports only where the keyword survives masking (not comments/strings).
+    var im,ir=language==='Dart'?/\bimport\s+r?['"]([^'"\r\n]+)['"]/g:/\bimport\s+([\w.*]+)/g;
+    while((im=ir.exec(source)))if(masked.slice(im.index,im.index+6)==='import')result.imports.push({name:im[1],line:archLineAt(source,im.index)});
+    // Framework names must come from real imports/declarations, not raw comments.
+    if(language==='Swift')result.framework=result.imports.some(function(i){return i.name==='SwiftUI';})?'SwiftUI':result.imports.some(function(i){return i.name==='Observation';})?'Observation':'Not detected';
+    if(language==='Dart'){
+        var flutter=result.imports.some(function(i){return i.name.indexOf('package:flutter/')===0;});
+        result.framework=flutter?'Flutter':'Not detected';result.ecosystem=flutter?'flutter':null;
+        result.stateManagement=['provider','riverpod','bloc'].filter(function(k){return result.imports.some(function(i){return new RegExp('^package:(?:flutter_)?'+k+'/').test(i.name);});}).concat(constructs.stateMgmt.changeNotifier?['changeNotifier']:[]).join(', ');
+    }
+    if(language==='Kotlin')result.framework=result.imports.some(function(i){return /^androidx?\./.test(i.name);})||constructs.activities.length||constructs.fragments.length||constructs.composables?'Android'+(constructs.composables?' / Compose':''):'Not detected';
+    return result;
 }
 function pushArchInsight(insights,o){
     // Enrich from the shared catalog so docUrl / learning topic stay in one place.
@@ -9404,7 +9481,14 @@ async function buildAnalysisData(options){
     progress('Finalizing (6/6)...');
     await yieldFn();
     var refactorSuggestions=Parser.collectRemoveDebugStatementSuggestions(analyzed);
-    analyzed.forEach(function(f){f.content=null;});
+    analyzed.forEach(function(f){
+        f.guide=describeGuideFile(f);
+        f.guide.importTargets=Array.from(new Set(f.guide.imports.map(function(im){return Parser.resolveCallGraphImportPath(im.name,f.path,callGraphPathIndex);}).filter(Boolean)));
+        f.content=null;
+    });
+    if(analyzed.some(function(f){return f.guide.ecosystem==='flutter';}))analyzed.forEach(function(f){
+        if(f.guide.language==='Dart'&&!f.guide.ecosystem){f.guide.ecosystem='flutter';f.guide.framework='Flutter project (inferred; no framework import in this file)';}
+    });
 
     var folders=[...new Set(analyzed.map(function(f){return f.folder;}))].sort();
     var tree=buildTree(analyzed);
@@ -13623,6 +13707,159 @@ function HealthRing(props){
 // React Application
 // ---------------------------------------------------------------------------
 
+
+// ===== CODEFLOW_GUIDE_START =====
+function guideSafePath(path){
+    return typeof path==='string'&&!!path&&!/^(?:[a-z]:|[/\\])|[\\\x00-\x1f]/i.test(path)&&!path.split('/').some(function(p){return p==='..'||p==='.';});
+}
+function buildGuideIndex(data,patterns){
+    var index={files:new Map(),outgoing:new Map(),incoming:new Map(),findings:new Map(),ecosystems:new Set()};
+    (data&&data.files||[]).forEach(function(f){
+        if(!guideSafePath(f.path)||f.isCode===false||!Parser.isCode(f.path)||matchesExcludePattern(patterns||[],f.path,f.name||f.path.split('/').pop()))return;
+        index.files.set(f.path,f);
+        if(f.guide&&f.guide.ecosystem)index.ecosystems.add(f.guide.ecosystem);
+        else if(/\.kts?$/.test(f.path))index.ecosystems.add('kotlin');
+        else if(/\.swift$/.test(f.path))index.ecosystems.add('swift');
+    });
+    function edge(from,to,kind,label,line){
+        if(from===to||!index.files.has(from)||!index.files.has(to))return;
+        var row={from:from,to:to,kind:kind,label:label,line:line||null};
+        if(!index.outgoing.has(from))index.outgoing.set(from,[]);
+        if(!index.incoming.has(to))index.incoming.set(to,[]);
+        index.outgoing.get(from).push(row);index.incoming.get(to).push(row);
+    }
+    // Existing call edges point definition -> caller; GUIDE presents caller -> dependency.
+    (data&&data.connections||[]).forEach(function(c){
+        if(c.kind)return; // Markdown/wiki edges are not source calls.
+        var def=typeof c.source==='object'?c.source.id:c.source;
+        var caller=typeof c.target==='object'?c.target.id:c.target;
+        if(!c.functionKey)return; // Do not upgrade legacy/unknown edge evidence.
+        var stat=data.fnStats&&data.fnStats[c.functionKey];
+        edge(caller,def,'Function call (heuristic)',c.fn,stat&&stat.line);
+    });
+    index.files.forEach(function(f){
+        (f.guide&&f.guide.importTargets||[]).forEach(function(target){edge(f.path,target,'Imported file','Resolved import',null);});
+    });
+    (data&&data.architectureInsights||[]).forEach(function(f){
+        var path=f.path||f.file;
+        if(!index.files.has(path))return;
+        if(!index.findings.has(path))index.findings.set(path,[]);
+        index.findings.get(path).push(f);
+    });
+    return index;
+}
+function guideWalkStep(trail,target,index){
+    if(!index.files.has(target)||trail.indexOf(target)>=0||trail.length>=12)return null;
+    if(trail.length){var last=trail[trail.length-1];
+        var related=(index.outgoing.get(last)||[]).concat(index.incoming.get(last)||[]);
+        if(!related.some(function(e){return e.from===target||e.to===target;}))return null;
+    }
+    return trail.concat(target);
+}
+function guideDocUrl(url){
+    try{var u=new URL(url);return u.protocol==='https:'&&!u.username&&!u.password&&['developer.android.com','developer.apple.com','docs.swift.org','kotlinlang.org','docs.flutter.dev','api.flutter.dev','dart.dev','react.dev'].indexOf(u.hostname)>=0?u.href:null;}catch(e){return null;}
+}
+function guideTopics(meta,findings,index,related){
+    var ids=new Set((findings||[]).map(function(f){return f.topicId||(getArchitectureRule(f.ruleId)||{}).learnTopicId;}));
+    var ecosystems=meta?new Set(meta.ecosystem?[meta.ecosystem]:[]):index.ecosystems;
+    return listLearningTopics().filter(function(t){return ecosystems.has(t.ecosystem);}).sort(function(a,b){
+        function score(t){return (ids.has(t.topicId)?10:0)+(meta&&(meta.components||[]).concat((related||[]).filter(function(m){return m&&m.ecosystem===meta.ecosystem;}).flatMap(function(m){return m.components||[];})).some(function(c){return t.roles.some(function(r){return r.toLowerCase().indexOf(c.role.toLowerCase())>=0||c.role.toLowerCase().indexOf(r.toLowerCase())>=0;});})?2:0);}
+        return score(b)-score(a);
+    });
+}
+var GUIDE_RESPONSIBILITIES={
+    'UI':['Describe UI and translate user events into state changes.','Depend on state holders and narrow application interfaces.','Avoid constructing databases or network clients in rendering code.','Small local UI state and self-contained prototypes can remain in the view.'],
+    'state':['Own observable screen state and handle user intentions.','Depend on repositories or application operations; expose read-only state when appropriate.','Avoid leaking UI lifetimes, exposing uncontrolled mutable state, or starting unmanaged work.','Simple screens may keep local state; a separate ViewModel is optional.'],
+    'data':['Provide a stable boundary for data access, caching, and source coordination.','Depend on narrow services, DAOs or data-source abstractions.','Avoid exposing transport/storage details to rendering code or mixing UI concerns into data access.','Small applications may combine boundaries; separate them when ownership or testing benefits.'],
+    'operation':['Represent an application operation or reusable domain policy.','Depend on repositories or domain abstractions.','Avoid adding a pass-through layer solely to complete an architecture diagram.','A domain/UseCase layer is optional; direct repository access can be appropriate.'],
+    'actor':['Protect shared mutable state through actor isolation.','Depend on Sendable values or explicitly isolated operations.','Do not assume a detached task inherits isolation or that every UI model is MainActor-isolated.','Actor requirements depend on the verified declarations and compiler settings; this guide does not type-check isolation.']
+};
+function guideResponsibility(c,meta){
+    var role=c.role,key=/Actor/.test(role)?'actor':/UseCase/.test(role)?'operation':/Repository|DAO|Service|Retrofit/.test(role)?'data':/Activity|Fragment|Composable|View|Widget/.test(role)&&! /ViewModel/.test(role)?'UI':'state';
+    var framework=meta.language==='Kotlin'?(key==='state'?'Android ViewModels can expose Flow/StateFlow with unidirectional data flow. viewModelScope cancels work with the ViewModel; lifecycle-sensitive UI references need careful ownership.':'Compose uses recomposition and state hoisting; Activities and Fragments have their own lifecycle. Collect screen flows with lifecycle awareness.'):
+        meta.language==='Swift'?'SwiftUI observes state reads. ObservableObject uses @StateObject/@ObservedObject; modern @Observable uses @State and @Bindable for model bindings. @Binding passes a binding to existing state. Both observation systems are valid.':
+        'Flutter rebuilds widget descriptions from state. Respect the detected approach'+(meta.stateManagement?' ('+meta.stateManagement+')':'')+'; Provider, Riverpod, BLoC and local setState are valid choices. Release controllers only when this component owns them.';
+    var specific={
+        'Activity':['Host an Android screen and coordinate lifecycle entry points.','Depend on UI state holders; keep durable data operations behind application/data interfaces.'],
+        'Fragment':['Host a reusable Android screen region; its view has a shorter lifecycle than the Fragment.','Depend on state holders and release view bindings when the view is destroyed.'],
+        'Composable':['Describe UI from state and emit events; keep recomposition cheap.','Receive state and callbacks; hoist shared state to its appropriate owner.'],
+        'DAO':['Declare typed database queries and persistence operations.','Depend on database entities and query types, rather than UI or network clients.'],
+        'Retrofit API':['Declare an HTTP transport contract.','Use request/response types; expose application-facing policy through a repository when useful.'],
+        'Repository':['Coordinate data sources, caching and data policy behind a stable interface.','Depend on services, DAOs or data-source interfaces, rather than UI components.'],
+        'State object':['Own mutable state and resources tied to a Flutter widget lifetime.','Use widget inputs and state/application interfaces; release owned controllers in dispose().'],
+        'ChangeNotifier':['Publish state changes to listeners with notifyListeners().','Depend on application/data abstractions; keep listener notification and disposal ownership explicit.'],
+        'Notifier':['Own Riverpod provider state and coordinate updates.','Use provider dependencies through ref; respect the provider lifecycle.'],
+        'AsyncNotifier':['Own asynchronous Riverpod state, including loading and errors.','Use provider dependencies through ref and keep cancellation/resource ownership explicit.'],
+        'Cubit':['Expose BLoC-family states through explicit methods.','Depend on repositories or application interfaces and close owned subscriptions.'],
+        'Bloc':['Translate events into states using the BLoC approach.','Depend on application/data interfaces; consider event concurrency and close owned resources.']
+    }[role];
+    if(role==='DAO')framework='Room generates DAO implementations from annotations and validates supported queries at build time; this guide does not run Room.';
+    if(role==='Retrofit API')framework='Retrofit generates an implementation from the annotated interface; an import alone does not establish a network request.';
+    var advice=[GUIDE_RESPONSIBILITIES[key][0],framework].concat(GUIDE_RESPONSIBILITIES[key].slice(1));
+    if(specific){advice[0]=specific[0];advice[2]=specific[1];}
+    return advice;
+}
+function ArchitectureGuide(props){
+    var h=React.createElement,index=props.index,file=index.files.get(props.path),meta=file&&file.guide;
+    var _trail=useState(file?[file.path]:[]),trail=_trail[0],setTrail=_trail[1];
+    var _message=useState(''),message=_message[0],setMessage=_message[1];
+    var _limit=useState(20),limit=_limit[0],setLimit=_limit[1];
+    var _rels=useState(20),relLimit=_rels[0],setRelLimit=_rels[1];
+    var _components=useState(20),componentLimit=_components[0],setComponentLimit=_components[1];
+    useEffect(function(){
+        setLimit(20);setRelLimit(20);setComponentLimit(20);
+        if(trail[trail.length-1]!==props.path){setTrail(file?[file.path]:[]);setMessage('');}
+    },[props.path]);
+    function docs(url){var safe=guideDocUrl(url);return safe?h('a',{href:safe,target:'_blank',rel:'noopener noreferrer'},'Official documentation ↗'):null;}
+    function section(title,children,open){return h('details',{className:'guide-section',open:open},h('summary',null,title),children);}
+    function source(path,line,label){return h('button',{className:'view-file-btn',onClick:function(){props.onSource(path,line);},'aria-label':'View source '+path+(line?':'+line:'')},label||path+(line?':'+line:''));}
+    var findings=file?(index.findings.get(file.path)||[]):[];
+    var related=file?(index.outgoing.get(file.path)||[]).concat(index.incoming.get(file.path)||[]).slice(0,20).map(function(e){var f=index.files.get(e.from===file.path?e.to:e.from);return f&&f.guide;}):[];
+    var topics=guideTopics(meta||null,findings,index,related);
+    if(props.stale)return h('div',{className:'architecture-guide',role:'status'},h('h3',null,'Analysis needs refreshing'),h('p',null,'Source files changed. Re-analyze to refresh component details, relationships and findings.'),h('button',{className:'top-btn',onClick:props.onRefresh},'Re-analyze'));
+    return h('div',{className:'architecture-guide','aria-label':'Architecture Guide'},
+        h('h3',null,'Architecture Guide'),
+        !file?h('p',null,'Select a source file to explore its architecture.'):h(React.Fragment,null,
+            h('h4',null,file.name),h('p',{className:'guide-path'},file.path),
+            h('p',null,(meta?meta.language:'Language unavailable')+' · '+(meta?meta.framework:'Re-analyze to populate guide metadata')),
+            meta&&meta.stateManagement&&h('p',null,'State management: '+meta.stateManagement),
+            meta&&meta.unavailable&&h('p',{role:'status'},'Component recognition unavailable: '+meta.unavailable),
+            source(file.path,null,'View source'),
+            props.activeSymbol&&h('p',null,'Selected symbol: '+props.activeSymbol+' (file context)'),
+            section('Components & responsibilities',meta?(meta.components.length?h(React.Fragment,null,meta.components.slice(0,componentLimit).map(function(c,i){return h('details',{key:i,className:'guide-card',open:meta.components.length===1},
+                h('summary',null,c.name+' · '+c.role),h('p',null,c.confidence+' confidence · '+c.evidence),
+                guideResponsibility(c,meta).map(function(text,n){return h('p',{key:n},h('strong',null,['Responsibility: ','Framework: ','Dependencies: ','Common mistakes: ','Exceptions: '][n]),text);}),
+                c.line&&source(file.path,c.line,'Declaration :'+c.line));}),meta.components.length>componentLimit&&h('button',{className:'view-file-btn',onClick:function(){setComponentLimit(componentLimit+20);}},'Show 20 more components')):h('p',null,'Architectural role unknown. No supported app component was recognized.')):h('p',null,'Guide metadata unavailable in this older analysis. Re-analyze to populate it.'),true),
+            section('Functions ('+(file.functions||[]).length+')',h(React.Fragment,null,(file.functions||[]).slice(0,20).map(function(fn,i){return h('p',{key:i},source(file.path,fn.line,fn.name));}),(file.functions||[]).length>20&&h('p',null,'First 20 functions shown. View source for the complete file.'))),
+            section('Relationships',h(React.Fragment,null,
+                h('p',null,'Source relationships describe static evidence, not a runtime execution path. Type resolution is limited; imports do not prove calls.'),
+                trail.length>1&&h('button',{className:'view-file-btn','aria-label':'Return to previous guide component',onClick:function(){var next=trail.slice(0,-1);setTrail(next);setMessage('Returned to previous component.');props.onNavigate(next[next.length-1]);}},'← Previous component'),
+                message&&h('p',{role:'status'},message),
+                h('p',null,'Walkthrough: '+trail.length+'/12 components'),
+                ['outgoing','incoming'].map(function(direction){
+                    var rows=index[direction].get(file.path)||[];
+                    return h('div',{key:direction},h('h4',null,direction==='outgoing'?'Depends on':'Used by'),!rows.length&&h('p',null,'Relationship not resolved'),rows.slice(0,relLimit).map(function(e,i){
+                        var target=direction==='outgoing'?e.to:e.from,targetFile=index.files.get(target);
+                        return h('div',{key:i,className:'guide-card'},h('strong',null,e.kind+': '+e.label),h('p',{className:'guide-path'},target),
+                            h('p',null,'Analyzer layers: '+(file.layer||'unknown')+' → '+(targetFile.layer||'unknown')+' (inferred labels)'),
+                            h('button',{className:'view-file-btn',disabled:trail.indexOf(target)>=0||trail.length>=12,'aria-label':'Explore related file '+target,onClick:function(){var next=guideWalkStep(trail,target,index);if(!next)return;setTrail(next);setMessage((direction==='outgoing'?'Previous component depends on this file via ':'This file depends on the previous component via ')+e.kind.toLowerCase()+'. This does not establish runtime order.');props.onNavigate(target);}},'Explore component →'),
+                            source(target,direction==='outgoing'?e.line:null,'View related source'));
+                    }));
+                }),
+                ((index.outgoing.get(file.path)||[]).length>relLimit||(index.incoming.get(file.path)||[]).length>relLimit||(meta&&meta.imports.length>relLimit))&&h('button',{className:'view-file-btn',onClick:function(){setRelLimit(relLimit+20);}},'Show 20 more relationships / imports'),
+                section('Relevant imports',meta&&meta.imports.length?meta.imports.slice(0,relLimit).map(function(im,i){return h('p',{key:i},'Imported module: '+im.name+' · Relationship not resolved to a type or runtime call ',source(file.path,im.line,'Import :'+im.line));}):h('p',null,'No import metadata available.'))
+            ),true),
+            section('Architecture findings ('+findings.length+')',!findings.length?h('p',null,'No architecture findings were reported for this file by the currently implemented rules.'):h(React.Fragment,null,
+                findings.slice(0,limit).map(function(f,i){var rule=getArchitectureRule(f.ruleId)||{},topic=getLearningTopic(f.topicId||rule.learnTopicId);return h('article',{key:i,className:'guide-card'},h('h4',null,f.title||rule.title),h('p',null,f.severity+' severity · '+f.confidence+' confidence · '+f.kind),source(file.path,f.line),f.code&&h('pre',null,f.code),h('p',null,f.problem||rule.explanation),h('p',null,h('strong',null,'Remediation: '),f.remediation),topic&&h('a',{href:'#guide-topic-'+topic.topicId,onClick:function(){var el=document.getElementById('guide-topic-'+topic.topicId);if(el)el.open=true;}},'Learn: '+topic.title),h('p',null,docs(rule.docUrl)));}),
+                findings.length>limit&&h('button',{className:'view-file-btn',onClick:function(){setLimit(limit+20);}},'Show 20 more findings')
+            ),true)
+        ),
+        section('Learn · offline lessons',topics.length?topics.map(function(t){return h('details',{key:t.topicId,id:'guide-topic-'+t.topicId,className:'guide-card'},h('summary',null,t.title),h('p',null,t.explanation),h('strong',null,'Illustrative example — not project code'),h('pre',null,t.example),t.relatedRuleIds.length>0&&h('p',null,'Related rules: '+t.relatedRuleIds.map(function(id){return (getArchitectureRule(id)||{}).title||id;}).join('; ')),docs(t.docUrl));}):h('p',null,'No bundled lessons match this language/framework yet.'),true),
+        h('p',{className:'guide-note'},'Read-only, offline guidance. Recognition is lexical and heuristic; naming-based roles are inferred. This is not compiler/type-checker verification.')
+    );
+}
+// ===== CODEFLOW_GUIDE_END =====
+
 function App(){
     var _a=useState(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'),theme=_a[0],setTheme=_a[1];
     var _d=useState(false),loading=_d[0],setLoading=_d[1];
@@ -13691,6 +13928,7 @@ function App(){
     var graph3dInstanceRef=useRef(null);
     var topbarRef=useRef(null);
     var filePreviewRef=useRef(null);
+    var filePreviewRequestRef=useRef(0);
     var dendroRef=useRef(null);
     var sankeyRef=useRef(null);
     var bundleRef=useRef(null);
@@ -13743,6 +13981,7 @@ function App(){
     var codeCardStackRef=useRef([]);
     var analysisHydrationIdRef=useRef('');
     var dataRef=useRef(null);
+    var analysisRunRef=useRef(0);
     dataRef.current=data;
     var enqueueCliWatchDiffRef=useRef(null);
     var cliDiffTimerRef=useRef(null);
@@ -13915,6 +14154,16 @@ function App(){
         return analysisHydrationIdFromParts(loadedSourceIdentity,analysisGraphIdentity);
     },[loadedSourceIdentity,analysisGraphIdentity]);
     analysisHydrationIdRef.current=currentHydrationId;
+    var guideScopeValid=localSourceKind!=='local-project'||!!(repoInfo&&repoInfo.cliRoot&&cliStatus&&cliStatus.ok&&cliRecordMatchesStatus({sourceKey:repoInfo.cliRoot},cliStatus));
+    var guideIndex=useMemo(function(){return buildGuideIndex(guideScopeValid?data:null,activeExcludePatterns.concat(compileExcludePatterns((cliStatus&&cliStatus.exclusions||[]).join('\n'))));},[data&&data.architectureInsights,data&&data.connections,activeExcludePatterns,cliStatus,guideScopeValid]);
+    var guideRevisionRef=useRef({insights:null,revision:0});
+    if(guideRevisionRef.current.insights!==(data&&data.architectureInsights))guideRevisionRef.current={insights:data&&data.architectureInsights,revision:guideRevisionRef.current.revision+1};
+    // Always resolve the selected path against this analysis, never a retained file object.
+    var guideSelected=selected&&guideIndex.files.get(selected.path);
+    useEffect(function(){
+        if(selected&&!guideSelected){setSelected(null);setActiveSymbol(null);selectedPathRef.current=null;}
+    },[guideSelected,selected]);
+
     var namedGroupsSession=useMemo(function(){
         if(!loadedSourceIdentity)return '';
         return namedGroupsSessionKey(loadedSourceIdentity.sourceType,loadedSourceIdentity.sourceKey);
@@ -13965,6 +14214,7 @@ function App(){
 
     function applyCachedAnalysis(record){
         if(!record||!record.data)return;
+        analysisRunRef.current++;
         setData(compactAnalysisForCache(record.data));
         setExpandedPaths(new Set(['']));
         setSelected(null);
@@ -14152,6 +14402,7 @@ function App(){
         cliWatchSnapRevRef.current=Object.create(null);
         cliAnalyzingRef.current=true;
         resetAnalysisState();
+        var analysisRun=analysisRunRef.current;
         setLocalDirHandle(null);
         localFolderKeyRef.current=null;
         localFolderSelectionRef.current=null;
@@ -14163,16 +14414,18 @@ function App(){
         setProgress('Reading local folder from CLI...');
         try{
             await Parser.initTreeSitter().catch(function(){return null;});
-            var listRes=await fetch('/__codeflow/files');
+            var listRes=await fetch('/__codeflow/files?pid='+encodeURIComponent(status.pid||''));
             if(listRes.status===409){setLoading(false);cliAnalyzingRef.current=false;return;}// No project selected: stay on the neutral empty state.
             if(listRes.status===410)throw new Error('The selected project folder is missing or was moved. Select another project in the Project dropdown.');
             if(!listRes.ok)throw new Error('Could not read the selected project’s files.');
             var list=await listRes.json();
+            if(analysisRun!==analysisRunRef.current)return false;
             var files=filterAnalyzableLocalFiles(list&&list.files?list.files:[],activeExcludePatterns);
             if(!files.length)throw new Error(activeExcludePatterns.length?'No supported source files found in the selected project after applying exclude patterns.':'No supported source files found in the selected project.');
             var analyzed=[];
             var allFns=[];
             for(var i=0;i<files.length;i++){
+                if(analysisRun!==analysisRunRef.current)return false;
                 var f=files[i];
                 if(i>0&&i%40===0)await yieldToBrowser();
                 setProgress('Analyzing '+(i+1)+'/'+files.length+': '+f.name);
@@ -14181,7 +14434,7 @@ function App(){
                     analyzed.push(makeOversizedAnalysisFile(f,f.size,isCodeFile));
                     continue;
                 }
-                var fileRes=await fetch('/__codeflow/file?path='+encodeURIComponent(f.path));
+                var fileRes=await fetch('/__codeflow/file?path='+encodeURIComponent(f.path)+'&pid='+encodeURIComponent(status.pid||''));
                 if(!fileRes.ok){
                     analyzed.push(makeFetchFailedAnalysisFile(f));
                     continue;
@@ -14191,6 +14444,7 @@ function App(){
                 var snapRev=cliWatchSnapRevFromResponse(fileRes);
                 if(snapRev!=null)cliWatchSnapRevRef.current[pathKey]=snapRev;
                 var content=await fileRes.text();
+                if(analysisRun!==analysisRunRef.current)return false;
                 if(Parser.isOversized(content.length)){
                     analyzed.push(makeOversizedAnalysisFile(f,content.length,isCodeFile));
                     continue;
@@ -14209,6 +14463,7 @@ function App(){
                 yieldFn:yieldToBrowser
             });
             var cliInfo={owner:'local',repo:'local-project',name:cliMeta.title,cliRoot:cliMeta.sourceKey};
+            if(analysisRun!==analysisRunRef.current)return false;
             var keep=retainCliWatchPathsAfterAnalysis(cliWatchDuringRef.current,cliWatchReadRef.current,cliWatchSnapRevRef.current);
             cliAnalyzingRef.current=false;
             cliWatchDuringRef.current=[];
@@ -14224,6 +14479,7 @@ function App(){
             setLoading(false);
             return true;
         }catch(err){
+            if(analysisRun!==analysisRunRef.current)return false;
             cliAnalyzingRef.current=false;
             cliWatchDuringRef.current=[];
             cliWatchReadRef.current=Object.create(null);
@@ -14234,6 +14490,7 @@ function App(){
     }
 
     function resetAnalysisState(){
+        analysisRunRef.current++;
         setError(null);
         setData(null);
         setSelected(null);
@@ -14772,11 +15029,12 @@ function App(){
     }
 
     var selectFile=useCallback(function(path){
-        if(!data)return;
+        if(!data||!guideIndex.files.has(path))return;
         var file=data.files.find(function(f){return f.path===path;});
         if(file){
+            if(selectedPathRef.current!==path)setActiveSymbol(null);
             setSelected(file);
-            setRightTab('details');
+            setRightTab(function(tab){return tab==='guide'?'guide':'details';});
             if(isMobile){
                 setMobilePanel('details');
                 setLegendCollapsed(true);
@@ -14793,9 +15051,10 @@ function App(){
             if(graphConfig.vizType!=='code')updateGraphHighlight(path,blast);
             else queueForceLinkVisuals();
         }
-    },[data,repoInfo,localSourceKind,isMobile,graphConfig.vizType]);
+    },[data,guideIndex,repoInfo,localSourceKind,isMobile,graphConfig.vizType]);
     selectFileRef.current=selectFile;
     function openCodeFile(path,replace){
+        if(!guideIndex.files.has(path))return;
         var nextFilter=folderFilterAfterCodeNav(path,data,folderFilter);
         var reveal=nextFilter!==folderFilter;
         if(reveal)setFolderFilter(nextFilter);
@@ -14901,10 +15160,10 @@ function App(){
     }
 
     function liveSourceKindForRead(){
-        if(localSourceKind==='local-project'&&cliStatus&&cliStatus.ok)return 'local-project';
+        if(localSourceKind==='local-project'&&cliStatus&&cliStatus.ok&&guideScopeValid)return 'local-project';
         if(folderSourceIsLive())return 'folder';
         if(zipSourceIsLive())return 'zip';
-        if(cliStatus&&cliStatus.ok&&localSourceKind!=='folder'&&localSourceKind!=='zip')return 'local-project';
+        if(cliStatus&&cliStatus.ok&&guideScopeValid&&localSourceKind!=='folder'&&localSourceKind!=='zip')return 'local-project';
         return null;
     }
 
@@ -14927,7 +15186,7 @@ function App(){
 
     function readCliWatchLiveSource(path){
         if(!path)return Promise.resolve({kind:'error'});
-        return fetch('/__codeflow/file?path='+encodeURIComponent(path)).then(function(res){
+        return fetch('/__codeflow/file?path='+encodeURIComponent(path)+'&pid='+encodeURIComponent(cliStatus&&cliStatus.pid||'')).then(function(res){
             var length=Number(res.headers&&res.headers.get?res.headers.get('content-length'):NaN);
             if(cliWatchLiveRejectsOversized(length)){
                 if(res.body&&typeof res.body.cancel==='function')res.body.cancel();
@@ -14942,7 +15201,7 @@ function App(){
         var kind=liveSourceKindForRead();
         if(!path||!kind)return Promise.resolve(null);
         if(kind==='local-project'){
-            return fetch('/__codeflow/file?path='+encodeURIComponent(path))
+            return fetch('/__codeflow/file?path='+encodeURIComponent(path)+'&pid='+encodeURIComponent(cliStatus&&cliStatus.pid||''))
                 .then(function(res){return res.ok?res.text():null;})
                 .catch(function(){return null;});
         }
@@ -14965,7 +15224,9 @@ function App(){
 
     // Open file preview
     function openFilePreview(path,line){
-        if(!repoInfo)return;
+        if(!repoInfo||!guideIndex.files.has(path))return;
+        var previewRequest=++filePreviewRequestRef.current;
+        selectFile(path);
         var filename=path.split('/').pop();
         setFilePreview({path:path,filename:filename,content:null,line:line||null,loading:true,error:null});
         var existingFile=data&&data.files?data.files.find(function(f){return f.path===path;}):null;
@@ -14979,7 +15240,7 @@ function App(){
         }
         var previewId=analysisHydrationIdRef.current;
         readLiveFileSource(path).then(function(content){
-            if(analysisHydrationIdRef.current!==previewId)return;
+            if(analysisHydrationIdRef.current!==previewId||previewRequest!==filePreviewRequestRef.current)return;
             if(typeof content==='string'){
                 setFilePreview({path:path,filename:filename,content:content,line:line||null,loading:false,error:null});
                 rememberHydratedSources([{path:path,content:content,hydrationId:previewId}]);
@@ -17206,7 +17467,7 @@ function App(){
         showNotification('Report exported as '+format.toUpperCase(),'success');
     }
     function showNotification(msg,type){setToast({msg:msg,type:type||'success'});setTimeout(function(){setToast(null);},3000);}
-    function resetAnalysis(){setData(null);setSelected(null);setBlastRadius(null);setOwnership(null);setRepoInfo(null);setFolderFilter(null);setLocalDirHandle(null);setLocalSourceKind(null);setCachedFromId(null);setActiveSymbol(null);setCliDirty([]);clearCliLiveDiffs();localFolderKeyRef.current=null;localFolderSelectionRef.current=null;localFilesRef.current=null;zipKeyRef.current=null;zipArchiveRef.current=null;zipFileRef.current=null;window.history.replaceState({},'',window.location.pathname);}
+    function resetAnalysis(){analysisRunRef.current++;setData(null);setSelected(null);setBlastRadius(null);setOwnership(null);setRepoInfo(null);setFolderFilter(null);setLocalDirHandle(null);setLocalSourceKind(null);setCachedFromId(null);setActiveSymbol(null);setCliDirty([]);clearCliLiveDiffs();localFolderKeyRef.current=null;localFolderSelectionRef.current=null;localFilesRef.current=null;zipKeyRef.current=null;zipArchiveRef.current=null;zipFileRef.current=null;window.history.replaceState({},'',window.location.pathname);}
     function filterByFolder(path){setFolderFilter(function(prev){return prev===path?null:path;});}
     function renderRecentsList(){
         return React.createElement('div',{className:'sidebar-scroll'},
@@ -18084,13 +18345,15 @@ function App(){
                     document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
                 }}),
                 data?React.createElement(React.Fragment,null,
-                    React.createElement('div',{className:'panel-tabs'},
+                    React.createElement('div',{className:'panel-tabs','aria-label':'Details panel sections'},
+                        React.createElement('button',{className:'panel-tab'+(rightTab==='guide'?' active':''),'aria-pressed':rightTab==='guide',onClick:function(){setRightTab('guide');setDrillDown(null);}},'GUIDE'),
                         React.createElement('button',{className:'panel-tab'+(rightTab==='details'?' active':''),onClick:function(){setRightTab('details');setDrillDown(null);}},selected?iconLabel('file','FILE'):iconLabel('search','ISSUES')),
                         React.createElement('button',{className:'panel-tab'+(rightTab==='patterns'?' active':''),onClick:function(){setRightTab('patterns');setDrillDown(null);}},iconLabel('puzzle','PATTERNS'),React.createElement('span',{className:'panel-tab-pill'},data.patterns.length)),
                         React.createElement('button',{className:'panel-tab'+(rightTab==='security'?' active':''),onClick:function(){setRightTab('security');setDrillDown(null);}},iconLabel('security','SECURITY'),data.stats.security>0&&React.createElement('span',{className:'panel-tab-pill alert'},data.stats.security)),
                         React.createElement('button',{className:'panel-tab'+(rightTab==='suggestions'?' active':''),onClick:function(){setRightTab('suggestions');setDrillDown(null);}},iconLabel('action','ACTIONS'),data.suggestions&&data.suggestions.length>0&&React.createElement('span',{className:'panel-tab-pill alert'},data.suggestions.length))
                     ),
                     React.createElement('div',{className:'panel-content'},
+                        rightTab==='guide'&&React.createElement(ArchitectureGuide,{key:currentHydrationId+':'+guideRevisionRef.current.revision,index:guideIndex,path:guideSelected&&guideSelected.path,activeSymbol:activeSymbol,stale:cliDirty.length>0,onNavigate:goToFile,onSource:openFilePreview,onRefresh:refreshAnalysis}),
                         rightTab==='details'&&(selected?React.createElement(React.Fragment,null,
                             React.createElement('button',{className:'top-btn',style:{width:'100%',marginBottom:12},onClick:function(){setSelected(null);setBlastRadius(null);selectedPathRef.current=null;if(nodesRef.current){nodesRef.current.selectAll('.nc,.nb').transition().duration(200).attr('opacity',1).attr('fill',function(n){return d3.select(this).classed('nb')?graphColorBlockFill(getNodeColor(n)):getNodeColor(n);});}if(vizUsesForceLinkParticles(graphConfig.vizType))queueForceLinkVisuals();else if(linksRef.current)linksRef.current.transition().duration(200).attr('stroke-opacity',0.4).attr('stroke',theme==='light'?'#ccc':'#333');}},'← Back to Issues'),
                             React.createElement('div',{className:'panel-header',style:{margin:'0 -12px 12px',padding:12}},

@@ -2,8 +2,8 @@
 
 CodeFlow is a general-purpose, multi-language analyzer. On top of its existing
 graph, dependency, pattern, duplication and security analysis, it adds a small,
-high-confidence set of **architecture insights** for three priority ecosystems:
-**Kotlin/Android**, **Swift/SwiftUI** and **React**.
+high-confidence set of **architecture insights** for four priority ecosystems:
+**Kotlin/Android**, **Swift/SwiftUI**, **Flutter/Dart** and **React**.
 
 The design goal is trustworthiness: a smaller number of correct, evidence-based
 rules rather than many superficial keyword matches. Every finding is anchored to
@@ -15,7 +15,7 @@ carries a problem explanation, remediation and an official documentation link.
 Architecture insights are additive and never reduce existing support. All
 previously supported languages, file extensions, Tree-sitter grammars, language
 detection, security rules, code-quality rules, graph/dependency analysis, and
-suggestions continue to work unchanged. The three ecosystems below receive
+suggestions continue to work unchanged. The ecosystems below receive
 *additional* specialized analysis; everything else is untouched.
 
 ## How detection works (and how false positives are avoided)
@@ -275,3 +275,151 @@ TS, and unrelated languages), each architecture rule's precision and recall,
 false-positive guards (comments, strings, idiomatic patterns), identical
 filenames in different directories, accurate line numbers and snippets, and
 integration into `data.suggestions` and `data.architectureInsights`.
+
+## Interactive Architecture Guide (Phase E)
+
+The **GUIDE** tab lives in the existing right-hand details panel. Select a Code
+card, retained visualization node, Files entry, search match, or finding source
+reference. All use the existing file selection and navigation callbacks. GUIDE
+stays active when selecting another file. With no selection it asks you to select
+a source file and offers lessons for detected ecosystems; it creates no component.
+On mobile use the existing Details panel control. Native buttons, disclosure
+summaries, focus outlines and a horizontally scrollable tab strip support keyboard
+and narrow-screen use; examples scroll horizontally.
+
+### Supported components and teaching
+
+- Kotlin: Activity, Fragment, Composable, ViewModel, Repository, Room DAO,
+  Retrofit API, Service and optional UseCase. Lessons cover state hoisting,
+  immutable StateFlow/UI state, lifecycle-aware collection, scope ownership,
+  viewModelScope, repository boundaries and dispatcher injection.
+- Swift: SwiftUI View, ObservableObject, @Observable models and actors, plus
+  inferred repositories/services. State ownership, legacy versus modern
+  Observation, @Binding versus @Bindable, task lifetime and actor isolation are
+  taught without assuming deployment targets or compiler isolation settings.
+- Flutter/Dart: Widget/View, State object, ViewModel/state controller,
+  ChangeNotifier, StateNotifier, Riverpod Notifier/AsyncNotifier, BLoC/Cubit,
+  repository and service. Guidance respects detected Provider/Riverpod/BLoC
+  imports and state management. Data-only Dart files in a detected Flutter
+  project receive explicitly inferred project framework context. Plain Dart
+  without Flutter evidence receives no Flutter lessons.
+
+Multiple declarations remain separate. Each component has responsibility,
+framework context, appropriate dependencies, mistakes and exceptions. Syntax
+recognition has high confidence **within the documented lexical heuristic**;
+naming/partial evidence is medium confidence and explicitly inferred. An unknown
+role stays unknown. No compiler verification or runtime behavior is claimed.
+
+### Data ownership, evidence and navigation
+
+`describeGuideFile` calls the existing Kotlin/Swift/Dart construct recognizers
+inside `buildAnalysisData`, before contents are discarded. Compact `file.guide`
+metadata contains component names, roles, real declaration/import lines, framework
+context and import names/targets. It contains no copied source snippets. Worker,
+card and browser analysis use this same pass. Old cache entries without this
+metadata display an unavailable message and ask for Re-analyze.
+
+`buildGuideIndex` indexes existing files, `data.connections` and the **full**
+`data.architectureInsights`. The memoized index is keyed by analysis result
+references, scope and exclusions; hydrating a card's source does not reconstruct
+it. GUIDE does not read source, run the analyzer on selection, create a second
+graph, or use inferred/synthetic diagram edges.
+
+Existing call edges store definition → caller; GUIDE reverses this for outgoing
+**Depends on** and incoming **Used by**. A function key is required and the label
+is **Function call (heuristic)**. These are existing analyzer name/import matches,
+not compiler-resolved receiver dispatch or runtime traces. Definition navigation
+uses `fnStats`' real line; navigating to a caller without call-site metadata opens
+the file with no invented line. Imports recognized from uncommented source are
+shown as **Imported module**; local targets resolved by the existing import
+resolver are separately labeled **Imported file**. Kotlin package imports,
+Swift modules and most Dart package imports do not resolve to local types in the
+current resolver. GUIDE explicitly reports this limitation instead of fabricating
+type associations. Architectural layer labels are inferred context on actual
+edges, not separate verified edges.
+
+Explore one relationship explicitly to navigate using `goToFile` and existing
+Code cards. Previous returns along the walkthrough. Repeated paths are disabled,
+depth is capped at 12, and no bulk traversal runs. Components, relationships,
+imports and findings initially render at most 20 each, with explicit controls to
+reach further entries; function lists show 20 with a full-source action.
+
+Findings retain exact path matching, one-based lines, expression text, severity,
+confidence and issue/potential/recommendation classification. Explanations,
+remediation, linked `LEARNING_TOPICS` and controlled official URLs reuse the
+catalog. No findings means only that the implemented rules reported none. All
+lessons are bundled original content, filtered by selected ecosystem and ranked
+by findings, roles and bounded related component context. Examples are labeled
+**Illustrative example — not project code**. External pages are never downloaded
+or scraped automatically. Source and examples render as React text; official
+HTTPS links use an explicit hostname allowlist and open only on user interaction.
+
+### Project lifecycle and security
+
+Guide selection resolves against the current analysis, source-code eligibility
+and current exclusions. Missing/excluded/unsafe paths cannot be selected, previewed
+or opened as cards through navigation. Registered-project caches for another
+active root cannot provide GUIDE content or live source reads. Project/session
+and analysis revisions reset walkthrough state; fresh analysis clears selection
+and replaces findings/relationships. Watched edits conservatively hide GUIDE
+analysis until Re-analyze. This avoids treating old findings as current.
+
+Superseded analysis runs and late previews are rejected by generation/identity
+checks. A slower preview cannot replace a newer file preview. Registered-project
+file enumeration and reads carry the selected project id (`pid`); the server
+rejects mismatches with 409, snapshots root/exclusions, and rejects a scope change
+while resolving/enumerating. Reads retain existing root, symlink, source-code-only
+and exclusion enforcement. No analyzed files are changed, no external calls run,
+and no source is saved to general settings. Existing analysis-cache behavior is
+preserved; new guide metadata adds no source snippets.
+
+### Tests and read-only smoke verification
+
+```sh
+node --test tests/architecture-guide.test.mjs tests/architecture-guide-scope.test.mjs
+node --test tests/architecture-insights.test.mjs tests/architecture-foundation.test.mjs tests/kotlin-architecture-phase-c.test.mjs tests/swift-architecture-phase-d.test.mjs tests/flutter-architecture.test.mjs tests/security-precision.test.mjs tests/security-selfscan.test.mjs tests/card-analyzer-security.test.mjs
+npm test
+node --test tests/inline-babel-parse.smoke.js tests/html-inline-script-analysis.smoke.js
+node --check cli/projects-server.mjs
+node tests/verify-architecture-guide.mjs
+```
+
+The optional last command reads only the currently registered/selected project's
+source endpoints on `127.0.0.1:4173`. It runs the shared analyzer, verifies findings
+against source, selects a real Kotlin component, follows an existing relationship,
+checks source navigation, and reports timing/counts without printing source or
+changing registry/project data. It requires a real Kotlin project selected first.
+Unit tests execute classification, React element rendering and handlers, actual
+selection/search/preview callbacks, stale analyzer/preview rejection, scope and
+exclusion HTTP guards, cycles, uncapped findings, language separation, official
+URLs, and bounded large-project rendering. They require no packages or network.
+They do not substitute for visual/browser verification.
+
+Known limits: heuristic declarations may miss multiline/qualified bases, custom
+base types, complex annotations, extension/macro-generated components or generated
+Riverpod classes. Type/receiver resolution, DI wiring and complete execution paths
+are unavailable; these are not guessed. Other source languages keep the existing
+canvas, functions and findings but have no specialized Guide role curriculum.
+This phase does not add a compiler, parser grammar or analyzer pipeline.
+
+### Phase E verification record (2026-10-25)
+
+Inspected base: `305327ec5ae379f69048ce98760be4e74166569c`, clean `main`.
+Guide/scope tests: 43 passed. Combined Guide/analyzer/security checks: 167 passed.
+Complete `npm test`: 480 tests, 465 passed, 14 failed, one skipped. All 14 failure
+names match the untouched baseline (437 tests, 422 passed, 14 failed, one skipped):
+13 debug-patch tests depend on Windows-incompatible paths/newline expectations;
+one existing vendored 3D graph asset hash differs from its manifest. Neither
+baseline issue was changed in Phase E. Both inline-script smoke checks and Node
+syntax checks passed; there is no build script or package installation step.
+
+Read-only MotoTelemetry smoke: 726 source files, 4,971 existing call connections,
+13 findings checked against real source lines/snippets. A Service with one finding
+and a real ViewModel were recognized; related-source endpoint navigation and
+one-based definition bounds were checked. Shared analysis took about 9 seconds;
+GUIDE indexing took about 4 ms. The 1,001-file/1,000-edge synthetic component
+render/index test took about 8–10 ms (Node, not a browser frame-time measurement).
+No registered project contained Swift/Dart source in the filename inventory;
+those ecosystems were verified with executable realistic fixtures. The browser
+control tool reported no available browser, so visual, mobile and real GUI
+interaction verification remain unperformed; HTTP success is not UI verification.
