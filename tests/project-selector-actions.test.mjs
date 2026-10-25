@@ -79,9 +79,10 @@ test('mounting the rich model keeps one dropdown per slot and adds action button
   const selects = slots[0].children.filter((c) => c.tagName === 'SELECT');
   assert.equal(selects.length, 1);
   assert.equal(slots[0].children[0].tagName, 'SELECT', 'select stays the first child for mount compatibility');
-  // Placeholder + one visible project (the hidden one is excluded from the list).
-  assert.equal(selects[0].children.length, 2);
-  assert.equal(selects[0].children[1].value, 'p_1');
+  // Valid selection => no placeholder; one visible project (the hidden one excluded).
+  assert.equal(selects[0].children.length, 1);
+  assert.equal(selects[0].children[0].value, 'p_1');
+  assert.equal(selects[0].value, 'p_1');
   const buttons = slots[0].children.filter((c) => c.tagName === 'BUTTON');
   assert.equal(buttons.length, 3, 'Add Folder / Remove / Excludes');
   // Idempotent on a re-render tick.
@@ -100,8 +101,29 @@ test('duplicate names are disambiguated by parent folder', () => {
     ],
   });
   api.mountAll();
-  const opts = slots[0].children[0].children; // placeholder + 2
+  const opts = slots[0].children[0].children; // selection valid => no placeholder, 2 options
+  assert.equal(opts.length, 2);
+  assert.match(opts[0].textContent, /app — (one|two)/);
   assert.match(opts[1].textContent, /app — (one|two)/);
-  assert.match(opts[2].textContent, /app — (one|two)/);
-  assert.notEqual(opts[1].textContent, opts[2].textContent);
+  assert.notEqual(opts[0].textContent, opts[1].textContent);
+});
+
+test('no placeholder is selectable when a project is active; it appears (disabled) only with no selection', () => {
+  const slots = [makeEl('div')];
+  const api = loadSelector(slots);
+  // Active selection => no empty placeholder option at all.
+  api.setModel({ root: 'C:/', csrf: 't', selected: 'p_1', projects: [{ id: 'p_1', name: 'app', source: 'auto', exclusions: [] }] });
+  api.mountAll();
+  var sel = slots[0].children[0];
+  assert.ok(!sel.children.some((o) => o.value === ''), 'no empty placeholder option when selected');
+  assert.equal(sel.value, 'p_1');
+  // No selection => a disabled placeholder is shown and cannot be chosen.
+  const slots2 = [makeEl('div')];
+  const api2 = loadSelector(slots2);
+  api2.setModel({ root: 'C:/', csrf: 't', selected: null, projects: [{ id: 'p_1', name: 'app', source: 'auto', exclusions: [] }] });
+  api2.mountAll();
+  var sel2 = slots2[0].children[0];
+  var ph = sel2.children.find((o) => o.value === '');
+  assert.ok(ph && ph.disabled, 'placeholder present and disabled when nothing is selected');
+  assert.equal(sel2.value, '');
 });

@@ -21,19 +21,32 @@ suggestions continue to work unchanged. The three ecosystems below receive
 ## How detection works (and how false positives are avoided)
 
 1. **Project-level ecosystem detection** (`detectProjectEcosystems`) decides which
-   ecosystems are present, from reliable evidence:
-   - **Kotlin/Android** — an `AndroidManifest.xml`, or `.kt`/`.kts` files that
-     import `androidx.*` / `android.*`.
+   ecosystems are present, from reliable evidence. Because CodeFlow is
+   **source-code only** (see the note below), detection prefers evidence from
+   actual source imports/declarations rather than reading configuration files:
+   - **Kotlin/Android** — `.kt`/`.kts` files that import `androidx.*` /
+     `android.*`.
    - **Swift/SwiftUI** — `.swift` files that `import SwiftUI`.
-   - **React** — a `package.json` depending on `react`/`react-dom`/`next`, a
-     `.jsx`/`.tsx` file importing `react`, or a `.js`/`.ts` file importing `react`.
-   - **Flutter / Dart** — a `.dart` file or a `pubspec.yaml` marks a **Dart**
-     project; **Flutter** is claimed only with explicit evidence: a flutter SDK
-     dependency in `pubspec.yaml` (`sdk: flutter`) or a `package:flutter/` import.
-     A plain Dart package is therefore detected as Dart but **not** Flutter.
+   - **React** — a `.jsx`/`.tsx` file importing `react`, or a `.js`/`.ts` file
+     importing `react`.
+   - **Flutter / Dart** — a `.dart` file marks a **Dart** project; **Flutter** is
+     claimed only with explicit source evidence: a `package:flutter/` import. A
+     plain Dart package is therefore detected as Dart but **not** Flutter.
    A plain JavaScript/TypeScript project with no React dependency is **not**
    treated as React, so its files are never flagged by React rules. The detector
    (`detectProjectEcosystems`) returns `{android, swiftui, react, flutter, dart}`.
+
+   > **Source-code-only limitation.** CodeFlow no longer bulk-reads non-code files
+   > (`pubspec.yaml`, `package.json`, `AndroidManifest.xml`, Gradle catalogs, …)
+   > for ecosystem identification, because those files are not read for analysis at
+   > all. Detection therefore relies on source imports and declarations. For the
+   > common cases above this is equally reliable (imports are definitive); a
+   > project whose only evidence lived in a config file — e.g. Flutter declared via
+   > `sdk: flutter` in `pubspec.yaml` but with no `package:flutter/` import yet, or
+   > React present only in `package.json` dependencies with no `import react` — may
+   > be detected with lower confidence (as plain Dart, or not as React). This is an
+   > intentional trade-off for a source-code-only analyzer, reported here honestly
+   > rather than pretending the config metadata is still consulted.
 
 2. **Per-file, per-language rules** run only for the detected ecosystems and the
    matching file extension. Build output (`build/`, `dist/`, `.next/`, …) and

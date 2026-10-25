@@ -97,7 +97,7 @@ async function makeTree() {
   return root;
 }
 
-test('searchProjectRoot finds content across Kotlin/Java/Swift/Dart/XML/gradle', async () => {
+test('searchProjectRoot is code-only: Kotlin/Java/Swift/Dart/.kts yes, XML no', async () => {
   const root = await makeTree();
   const out = await searchProjectRoot(root, { query: 'ListViewModel' });
   const byPath = Object.fromEntries(out.results.map((r) => [r.path.replace(/\\/g, '/'), r]));
@@ -105,12 +105,18 @@ test('searchProjectRoot finds content across Kotlin/Java/Swift/Dart/XML/gradle',
   assert.ok(byPath['app/src/ListViewModel.java'].matches.length >= 1);
   // The .java file name also matches the query (filename result).
   assert.equal(byPath['app/src/ListViewModel.java'].fileMatch, true);
-  // The gradle + xml files are searchable (vm search hits them).
   const vm = await searchProjectRoot(root, { query: 'vm' });
   const vmPaths = vm.results.map((r) => r.path.replace(/\\/g, '/'));
-  assert.ok(vmPaths.includes('app/AndroidManifest.xml'));
+  // Source files match.
   assert.ok(vmPaths.includes('app/src/main.dart'));
   assert.ok(vmPaths.includes('app/src/Widget.swift'));
+  // The Gradle Kotlin script is code and remains searchable.
+  const grad = await searchProjectRoot(root, { query: 'implementation' });
+  assert.ok(grad.results.some((r) => r.path.replace(/\\/g, '/') === 'app/build.gradle.kts'));
+  // AndroidManifest.xml is NOT source code and must never be searched.
+  assert.ok(!vmPaths.includes('app/AndroidManifest.xml'), 'XML is not source code');
+  const manifest = await searchProjectRoot(root, { query: 'manifest' });
+  assert.ok(!manifest.results.some((r) => r.path.endsWith('.xml')), 'no .xml results in code-only search');
   await fs.rm(root, { recursive: true, force: true });
 });
 

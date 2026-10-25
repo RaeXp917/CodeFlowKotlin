@@ -17,32 +17,34 @@ const IGNORE = new Set([
   '.eggs', '__macosx'
 ]);
 
-const TEXT_EXT = new Set([
-  'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'py', 'java', 'go', 'rb', 'php',
-  'vue', 'svelte', 'rs', 'c', 'h', 'cpp', 'cc', 'cxx', 'hpp', 'hh', 'hxx',
-  'cs', 'swift', 'kt', 'kts', 'scala', 'sc', 'groovy', 'gvy', 'ex', 'exs',
-  'erl', 'hrl', 'hs', 'lhs', 'lua', 'r', 'jl', 'dart', 'pl', 'pm', 'sh',
-  'bash', 'zsh', 'fish', 'ps1', 'psm1', 'psd1', 'fs', 'fsi', 'fsx', 'ml',
-  'mli', 'clj', 'cljs', 'cljc', 'elm', 'vba', 'bas', 'cls', 'pas', 'pp',
-  'dpr', 'dpk', 'lpr', 'inc', 'html', 'htm', 'xhtml', 'md', 'markdown',
-  'json', 'yml', 'yaml', 'toml', 'css', 'scss', 'sql'
-]);
-
-// Project text/config files that are worth SEARCHING even when they are not part
-// of the source dependency graph (so they are not in TEXT_EXT above). Content
-// search uses this wider allowlist; analysis enumeration keeps using TEXT_EXT.
-const SEARCH_EXT = new Set([
-  ...TEXT_EXT,
-  'xml', 'gradle', 'properties', 'pro', 'cfg', 'ini', 'conf', 'env', 'lock',
-  'plist', 'entitlements', 'xcconfig', 'podspec', 'cmake', 'mk', 'gitignore',
-  'gitattributes', 'editorconfig', 'bat', 'cmd', 'txt', 'rst', 'adoc', 'tf',
-  'tfvars', 'jsonc', 'json5', 'proto', 'graphql', 'gql',
-]);
-// A few important files that have no extension.
-const SEARCH_NAMES = new Set([
-  'dockerfile', 'makefile', 'gemfile', 'rakefile', 'podfile', 'brewfile',
-  'procfile', 'cmakelists.txt', '.gitignore', '.gitattributes', '.editorconfig',
-  '.env', 'local.properties', 'gradle.properties', 'settings.gradle',
+// ===========================================================================
+// SINGLE SOURCE-CODE ELIGIBILITY POLICY
+// ---------------------------------------------------------------------------
+// CodeFlow is a source-code analyzer. Only actual programming-language source is
+// enumerated, read, parsed, visualized, watched and searched. This set mirrors
+// the browser analyzer's own code extensions (Parser.codeExts ∪
+// scriptContainerExts in index.html) so the server enumerates exactly what the
+// analyzer treats as application source — no Markdown, documentation, JSON/YAML/
+// TOML data, CSS, SQL, images or other non-code content.
+// ===========================================================================
+const CODE_EXT = new Set([
+  // JS/TS family
+  'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs',
+  // Python
+  'py', 'pyw', 'pyi',
+  // JVM + common compiled/scripted languages
+  'java', 'go', 'rb', 'php', 'rs', 'c', 'cpp', 'cc', 'cxx', 'h', 'hpp', 'hh',
+  'hxx', 'cs', 'swift', 'kt', 'kts', 'scala', 'sc', 'groovy', 'gvy', 'gradle',
+  // Functional / others
+  'clj', 'cljs', 'cljc', 'ex', 'exs', 'erl', 'hrl', 'hs', 'lhs', 'lua', 'r',
+  'jl', 'dart', 'elm', 'fs', 'fsi', 'fsx', 'ml', 'mli', 'pl', 'pm',
+  // Shells / PowerShell
+  'sh', 'bash', 'zsh', 'fish', 'ps1', 'psm1', 'psd1',
+  // VBA / Office code, Pascal/Delphi
+  'vba', 'bas', 'cls', 'xlsm', 'xlam', 'xlsb', 'xla', 'xlw',
+  'pas', 'pp', 'dpr', 'dpk', 'lpr', 'inc',
+  // Script-container markup the analyzer genuinely parses for embedded code
+  'html', 'htm', 'xhtml', 'vue', 'svelte',
 ]);
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -159,20 +161,14 @@ export function shouldSkipName(name) {
   return !base || base === '.ds_store' || IGNORE.has(base);
 }
 
-export function isWatchableFile(name) {
+// The single source-code eligibility test. `isWatchableFile` is kept as an alias
+// because it is the policy the watcher, enumeration and search all share.
+export function isSourceCodeFile(name) {
   const ext = String(name || '').split('.').pop().toLowerCase();
-  return TEXT_EXT.has(ext);
+  return CODE_EXT.has(ext);
 }
-
-// Wider allowlist for content search: every analyzable source type plus common
-// project text/config files (Gradle, XML layouts/manifests, YAML/JSON/TOML,
-// properties, Swift/Pod metadata, …) and a few extensionless files.
-export function isSearchableTextFile(name) {
-  const base = String(name || '');
-  const lower = base.toLowerCase();
-  if (SEARCH_NAMES.has(lower)) return true;
-  const ext = lower.includes('.') ? lower.split('.').pop() : '';
-  return SEARCH_EXT.has(ext);
+export function isWatchableFile(name) {
+  return isSourceCodeFile(name);
 }
 
 // Shared directory walker: collects files for which `accept(name)` is true,
@@ -208,11 +204,12 @@ async function walkFiles(root, { isExcluded, accept }) {
 }
 
 export async function listWatchFiles(root, isExcluded) {
-  return walkFiles(root, { isExcluded, accept: isWatchableFile });
+  return walkFiles(root, { isExcluded, accept: isSourceCodeFile });
 }
 
+// Search enumerates exactly the same source-code files as analysis (one policy).
 export async function listSearchableFiles(root, isExcluded) {
-  return walkFiles(root, { isExcluded, accept: isSearchableTextFile });
+  return walkFiles(root, { isExcluded, accept: isSourceCodeFile });
 }
 
 export const CLI_FILE_MAX_BYTES = 2 * 1024 * 1024;
@@ -283,6 +280,9 @@ export function startFileWatchers(root, onRelPath, watchFn, isExcluded) {
     const norm = String(rel).replace(/\\/g, '/');
     if (norm.split('/').some(shouldSkipName)) return;
     if (excluded(norm)) return;
+    // Only source-code changes notify clients, so editing a Markdown/doc/data
+    // file never marks the analysis stale or triggers an unnecessary re-analysis.
+    if (!isSourceCodeFile(norm.split('/').pop())) return;
     onRelPath(norm);
   }
 

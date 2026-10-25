@@ -17,7 +17,7 @@
 
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { listSearchableFiles } from './server-utils.mjs';
+import { listWatchFiles } from './server-utils.mjs';
 
 export const SEARCH_LIMITS = Object.freeze({
   maxQueryLen: 200,
@@ -156,7 +156,8 @@ export async function searchProjectRoot(root, opts = {}) {
   const isAborted = typeof opts.isAborted === 'function' ? opts.isAborted : () => false;
   // readFile receives the resolved ABSOLUTE path of each candidate file.
   const readFile = opts.readFile || ((abs) => fsp.readFile(abs, 'utf8'));
-  const enumerate = opts.enumerate || ((r, ex) => listSearchableFiles(r, ex));
+  // Search uses the same source-code enumeration as analysis (code-only policy).
+  const enumerate = opts.enumerate || ((r, ex) => listWatchFiles(r, ex));
 
   const matcher = makeMatcher(opts, limits);
   if (matcher.error) return { error: matcher.error };

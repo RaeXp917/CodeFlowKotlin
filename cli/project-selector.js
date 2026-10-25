@@ -101,6 +101,10 @@
 
   function buildSelect() {
     var all = items();
+    var visible = all.filter(function (p) { return !p.hidden; }); // hidden auto projects stay out
+    var selectedId = (model && model.selected) || '';
+    var hasValidSelection = !!selectedId && visible.some(function (p) { return p.id === selectedId; });
+
     var sel = document.createElement('select');
     sel.className = 'project-select'; // reuse the existing topbar select styling
     sel.setAttribute(OWNED, '1');
@@ -108,18 +112,24 @@
     sel.title = 'Projects in ' + ((model && model.root) || '');
     sel.style.maxWidth = '240px';
     sel.style.minWidth = '140px';
-    var placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = 'Project: Select';
-    sel.appendChild(placeholder);
-    for (var i = 0; i < all.length; i++) {
-      if (all[i].hidden) continue; // hidden auto-discovered projects stay out of the list
+
+    // Only show a placeholder when there is NO valid selection. It is disabled so
+    // it can never be chosen as a real project (no accidental switch to empty),
+    // and it is never a selectable option once a project is active.
+    if (!hasValidSelection) {
+      var placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = visible.length ? 'Select a project…' : 'No projects — use Add Folder…';
+      placeholder.disabled = true;
+      sel.appendChild(placeholder);
+    }
+    for (var i = 0; i < visible.length; i++) {
       var item = document.createElement('option');
-      item.value = all[i].id;
-      item.textContent = labelFor(all[i], all);
+      item.value = visible[i].id;
+      item.textContent = labelFor(visible[i], visible);
       sel.appendChild(item);
     }
-    sel.value = (model && model.selected) || '';
+    sel.value = hasValidSelection ? selectedId : '';
     sel.addEventListener('change', pickProject);
     return sel;
   }

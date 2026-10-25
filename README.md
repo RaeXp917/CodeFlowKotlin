@@ -187,7 +187,27 @@ Open the app at `http://127.0.0.1:4173/` and pick a project from the **Project
 dropdown** in the topbar. It lists the local projects discovered by the project
 server and runs the one unified local pipeline:
 
-**Selected project → read local files → existing parser/analyzer → Code view.**
+**Selected project → read local source files → existing parser/analyzer → Code view.**
+
+> **Source-code only.** CodeFlow is a source-code analyzer. A single shared
+> eligibility policy (mirroring the analyzer's own code extensions) governs
+> enumeration, direct file reads, the Code canvas, the file tree, the watcher,
+> re-analyze and Global Search. **Only actual programming-language source is
+> enumerated, read, parsed, visualized and searched** — Markdown, documentation,
+> `.txt`, JSON/YAML/TOML data, CSS, SQL, images, PDFs, archives, datasets, logs
+> and generated build output are never read for analysis (the `/__codeflow/file`
+> endpoint refuses them even inside the project). This keeps large data assets out
+> of the pipeline: on a real project with 21 MB+ of bundled GeoJSON and many
+> Markdown plans, dropping non-code files cut the files read from ~1,056 to ~726
+> and the bytes read from ~37 MB to ~7 MB. Folder names are still listed for Add
+> Folder / Exclusions without reading any non-code content.
+>
+> *Framework-detection note:* ecosystem detection now prefers evidence from actual
+> source imports/declarations (e.g. a `package:flutter/` import, `androidx.*`
+> imports, an `import react`) rather than bulk-reading config files such as
+> `pubspec.yaml`, `package.json` or `AndroidManifest.xml`, which are no longer read
+> for analysis. Detection that depended solely on those files may be slightly less
+> certain.
 
 The analysis is keyed to a stable project identity (the canonical project root),
 not just the folder name. Switching projects cancels the previous project's work,
@@ -296,13 +316,15 @@ A local, VS Code-style **Find in Files** for the **currently selected project**.
   **without** `/` matches the file's basename (so `*.kt` matches `a/b/C.kt`); a
   pattern **with** `/` matches the whole relative path (e.g. `src/**`,
   `**/test/**`). Patterns are comma- or newline-separated and case-insensitive.
-- **File types:** every analyzable source language (Kotlin/Java/Swift/Dart first,
-  but all supported languages), **plus** project text/config files that are not
-  in the dependency graph — Gradle/`.kts`, XML layouts & `AndroidManifest.xml`,
-  YAML/JSON/TOML, `pubspec.yaml`, Swift/Pod metadata, `.properties`, `.proto`,
-  Markdown, and a few extensionless files (`Dockerfile`, `.gitignore`, …).
-  Binaries, generated build output, caches and dependency directories are skipped,
-  and files over the per-file size limit are not read.
+- **File types (source code only):** search covers exactly the same
+  **source-code** files the analyzer loads — every supported programming language
+  (Kotlin/Java/Swift/Dart first, plus JS/TS and all the others), Gradle Kotlin/
+  Groovy scripts (`.kts`/`.gradle`), and the script-container markup the analyzer
+  parses for embedded code (`.html`/`.vue`/`.svelte`). It does **not** search
+  Markdown, documentation, `.txt`, JSON/YAML/TOML data, CSS, SQL, images, PDFs,
+  logs, datasets, generated build output or other non-code content. Binaries,
+  caches and dependency directories are skipped, and files over the per-file size
+  limit are not read.
 - **Exclusions:** per-project Stage 5 exclusions fully apply — excluded folders
   never appear in results, never contribute to counts, are never read by the
   scanner, and are not reachable via result navigation. Changing exclusions

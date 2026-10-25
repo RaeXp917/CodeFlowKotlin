@@ -17,6 +17,7 @@ import {
   safeRequestPath, resolveSafeExistingPath, resolveSafeCliPath,
   startFileWatchers, listWatchFiles, openBrowser, makeExcludeMatcher,
   bumpWatchRev, currentWatchRev, CLI_FILE_MAX_BYTES, shouldSkipName,
+  isSourceCodeFile,
 } from './server-utils.mjs';
 import {
   loadConfig, saveConfig, getRootRecord, buildProjectList, projectId,
@@ -492,6 +493,9 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
       if (pathname === '/__codeflow/file') {
         if (!currentRoot) return plain(res, 409, 'Select a project');
         const rel = url.searchParams.get('path') || '';
+        // Source-code only: never read Markdown/docs/data/binary content, even if
+        // the path is inside the authorized project.
+        if (!isSourceCodeFile(String(rel).split('/').pop())) return plain(res, 404, 'Not found');
         const isExcluded = makeExcludeMatcher(currentExclusions);
         if (isExcluded(rel)) return plain(res, 404, 'Not found'); // excluded files are not readable
         const file = await resolveSafeExistingPath(currentRoot, rel);

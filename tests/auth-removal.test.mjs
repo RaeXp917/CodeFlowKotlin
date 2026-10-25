@@ -163,9 +163,9 @@ test('mounted dropdown uses project styling, lists projects, and preselects curr
   const sel = slots[0].children[0];
   assert.equal(sel.className, 'project-select');
   assert.equal(sel._attrs['data-codeflow-project-select'], '1');
-  // placeholder + two projects
-  assert.equal(sel.children.length, 3);
-  assert.equal(sel.children[0].value, '');
-  assert.equal(sel.children[1].value, 'alpha');
+  // A valid selection means NO placeholder option: just the two real projects.
+  assert.equal(sel.children.length, 2);
+  assert.equal(sel.children[0].value, 'alpha');
+  assert.equal(sel.children[1].value, 'beta');
   assert.equal(sel.value, 'alpha');
 });
