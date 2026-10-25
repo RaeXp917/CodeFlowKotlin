@@ -23,6 +23,7 @@ import {
   normalizeExclusions, isReasonableProjectRoot, rootKey,
 } from './project-registry.mjs';
 import { pickFolder } from './pick-folder.mjs';
+import { searchProjectRoot, SEARCH_LIMITS } from './project-search.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const UI_ROOT = path.resolve(HERE, '..');
@@ -446,6 +447,46 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
         if (!(await dirExists(currentRoot))) return json(res, 410, { error: 'Project folder is missing', code: 'project-missing' });
         const isExcluded = makeExcludeMatcher(currentExclusions);
         return json(res, 200, { files: await listWatchFiles(currentRoot, isExcluded), exclusions: currentExclusions });
+      }
+
+      if (pathname === '/__codeflow/search') {
+        // Read-only, same-origin-guarded (top-level isAllowedCliRequest) content
+        // search scoped to the ACTIVE project only. The root is never taken from
+        // the client — it is the authorized currentRoot — and the active project's
+        // exclusions are enforced, so excluded files never appear or are read.
+        if (req.method !== 'GET') return plain(res, 405, 'Method not allowed');
+        if (!currentProject || !currentRoot) return json(res, 409, { error: 'No project selected', code: 'no-project' });
+        if (!(await dirExists(currentRoot))) return json(res, 410, { error: 'Project folder is missing', code: 'project-missing' });
+        const wantPid = url.searchParams.get('pid');
+        if (wantPid && wantPid !== currentId) return json(res, 409, { error: 'Active project changed', code: 'project-changed', pid: currentId });
+        const query = url.searchParams.get('q') || '';
+        const options = {
+          query,
+          caseSensitive: url.searchParams.get('case') === '1',
+          wholeWord: url.searchParams.get('word') === '1',
+          regex: url.searchParams.get('regex') === '1',
+          include: url.searchParams.get('include') || '',
+          exclude: url.searchParams.get('exclude') || '',
+        };
+        let aborted = false;
+        req.on('close', () => { aborted = true; });
+        const outcome = await searchProjectRoot(currentRoot, Object.assign({}, options, {
+          isExcluded: makeExcludeMatcher(currentExclusions),
+          isAborted: () => aborted,
+          limits: SEARCH_LIMITS,
+        }));
+        if (outcome.error) return json(res, 400, { error: outcome.error, code: outcome.error });
+        return json(res, 200, {
+          pid: currentId,
+          query,
+          options: { caseSensitive: options.caseSensitive, wholeWord: options.wholeWord, regex: options.regex, include: options.include, exclude: options.exclude },
+          rev: url.searchParams.get('rev') || null,
+          results: outcome.results,
+          stats: outcome.stats,
+          truncated: outcome.truncated,
+          reasons: outcome.reasons,
+          limits: SEARCH_LIMITS,
+        });
       }
 
       if (pathname === '/__codeflow/file') {

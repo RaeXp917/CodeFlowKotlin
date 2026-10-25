@@ -28,6 +28,23 @@ const TEXT_EXT = new Set([
   'json', 'yml', 'yaml', 'toml', 'css', 'scss', 'sql'
 ]);
 
+// Project text/config files that are worth SEARCHING even when they are not part
+// of the source dependency graph (so they are not in TEXT_EXT above). Content
+// search uses this wider allowlist; analysis enumeration keeps using TEXT_EXT.
+const SEARCH_EXT = new Set([
+  ...TEXT_EXT,
+  'xml', 'gradle', 'properties', 'pro', 'cfg', 'ini', 'conf', 'env', 'lock',
+  'plist', 'entitlements', 'xcconfig', 'podspec', 'cmake', 'mk', 'gitignore',
+  'gitattributes', 'editorconfig', 'bat', 'cmd', 'txt', 'rst', 'adoc', 'tf',
+  'tfvars', 'jsonc', 'json5', 'proto', 'graphql', 'gql',
+]);
+// A few important files that have no extension.
+const SEARCH_NAMES = new Set([
+  'dockerfile', 'makefile', 'gemfile', 'rakefile', 'podfile', 'brewfile',
+  'procfile', 'cmakelists.txt', '.gitignore', '.gitattributes', '.editorconfig',
+  '.env', 'local.properties', 'gradle.properties', 'settings.gradle',
+]);
+
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 export function pathStaysInRoot(root, candidate) {
@@ -147,7 +164,20 @@ export function isWatchableFile(name) {
   return TEXT_EXT.has(ext);
 }
 
-export async function listWatchFiles(root, isExcluded) {
+// Wider allowlist for content search: every analyzable source type plus common
+// project text/config files (Gradle, XML layouts/manifests, YAML/JSON/TOML,
+// properties, Swift/Pod metadata, …) and a few extensionless files.
+export function isSearchableTextFile(name) {
+  const base = String(name || '');
+  const lower = base.toLowerCase();
+  if (SEARCH_NAMES.has(lower)) return true;
+  const ext = lower.includes('.') ? lower.split('.').pop() : '';
+  return SEARCH_EXT.has(ext);
+}
+
+// Shared directory walker: collects files for which `accept(name)` is true,
+// skipping junk trees (shouldSkipName) and anything the exclusion matcher hides.
+async function walkFiles(root, { isExcluded, accept }) {
   const excluded = typeof isExcluded === 'function' ? isExcluded : () => false;
   const files = [];
   async function walk(dir, rel) {
@@ -164,22 +194,25 @@ export async function listWatchFiles(root, isExcluded) {
       if (excluded(childRel)) continue;
       if (entry.isDirectory()) {
         await walk(childPath, childRel);
-      } else if (entry.isFile() && isWatchableFile(entry.name)) {
+      } else if (entry.isFile() && accept(entry.name)) {
         let size = 0;
         try {
           size = (await fs.stat(childPath)).size;
         } catch (e) {}
-        files.push({
-          path: childRel,
-          name: entry.name,
-          folder: rel || 'root',
-          size
-        });
+        files.push({ path: childRel, name: entry.name, folder: rel || 'root', size });
       }
     }
   }
   await walk(root, '');
   return files;
+}
+
+export async function listWatchFiles(root, isExcluded) {
+  return walkFiles(root, { isExcluded, accept: isWatchableFile });
+}
+
+export async function listSearchableFiles(root, isExcluded) {
+  return walkFiles(root, { isExcluded, accept: isSearchableTextFile });
 }
 
 export const CLI_FILE_MAX_BYTES = 2 * 1024 * 1024;

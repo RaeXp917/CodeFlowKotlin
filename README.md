@@ -265,6 +265,66 @@ persistence across restart, migration, exclusions across files/reads/status/dirs
 isolation), `tests/project-selector-actions.test.mjs` (overlay wiring) and the
 exclusion/guard cases in `tests/server-utils.test.mjs`.
 
+### Project-wide search (Find in Files)
+A local, VS Code-style **Find in Files** for the **currently selected project**.
+
+- **Where:** a search field sits next to the Project dropdown (desktop and mobile)
+  with placeholder `Search current project... (Ctrl+Shift+F)`, and a dedicated
+  **Search** tab in the left sidebar (**Overview | Files | Search | Recents**).
+- **Shortcut:** `Ctrl+Shift+F` opens the Search tab and focuses the field (a
+  visible **Search** button is the fallback when the browser reserves the
+  shortcut). Typing is debounced; **Enter** runs immediately; **Esc** clears the
+  query or blurs the field; the **×** control clears it.
+- **Scope:** search covers only the active project's files, resolved from the
+  server's authorized project root — never the whole `AndroidStudioProjects`
+  directory and never an arbitrary path from the client. Switching projects
+  invalidates and clears the previous project's results (requests are tagged with
+  the stable **project id**, so a Project-A response can never appear under
+  Project B).
+- **What matches:**
+  - **Content** — the actual matching line and column across the project's source
+    and text files, with accurate **one-based** line numbers (CRLF/LF/CR and
+    Unicode handled). Matches are grouped by file, with highlighted ranges.
+  - **Filename / path** — files whose name or project-relative path matches are
+    shown with a **name** badge and no invented line number.
+- **Options:** match **case**, **whole word**, and optional **regular
+  expression** mode (regex is bounded: it skips very long lines to avoid runaway
+  backtracking). **Include**/**Exclude** glob filters are *temporary* search-only
+  filters and never change a project's persistent exclusions.
+- **Glob syntax (include/exclude):** `*` matches any run of characters except
+  `/`; `**` matches across `/`; `?` matches one character except `/`. A pattern
+  **without** `/` matches the file's basename (so `*.kt` matches `a/b/C.kt`); a
+  pattern **with** `/` matches the whole relative path (e.g. `src/**`,
+  `**/test/**`). Patterns are comma- or newline-separated and case-insensitive.
+- **File types:** every analyzable source language (Kotlin/Java/Swift/Dart first,
+  but all supported languages), **plus** project text/config files that are not
+  in the dependency graph — Gradle/`.kts`, XML layouts & `AndroidManifest.xml`,
+  YAML/JSON/TOML, `pubspec.yaml`, Swift/Pod metadata, `.properties`, `.proto`,
+  Markdown, and a few extensionless files (`Dockerfile`, `.gitignore`, …).
+  Binaries, generated build output, caches and dependency directories are skipped,
+  and files over the per-file size limit are not read.
+- **Exclusions:** per-project Stage 5 exclusions fully apply — excluded folders
+  never appear in results, never contribute to counts, are never read by the
+  scanner, and are not reachable via result navigation. Changing exclusions
+  invalidates results.
+- **Limits (reported, never silent):** query length, files scanned, per-file size,
+  total bytes examined, total matches, matches per file, and an overall time
+  budget. When any limit trims output the Search tab shows a truncation notice
+  naming the reason; superseded searches are aborted.
+- **Navigation:** clicking a content match opens the real file at that line in the
+  existing line-aware **source preview** (scrolled and highlighted); the group's
+  **→** opens/focuses the file (a Code card when Code view is active) via
+  `goToFile`. Navigation reuses the existing viewers — no duplicate source viewer.
+- **Freshness:** when the active project's watched files change, the Search tab
+  marks results **potentially stale** and offers **Refresh Search** (a reliable
+  full rescan of the current project). Search is not a live incremental index;
+  refresh is explicit so stale snippets are never shown as current.
+- **Privacy/security:** all search runs on the local server; results are rendered
+  as React text (never injected as HTML), the endpoint is same-origin-guarded like
+  the other local read endpoints, payloads are bounded, and no content leaves your
+  machine. **Tests:** `tests/project-search.test.mjs` (matching/globs/limits) and
+  `tests/search-endpoint.test.mjs` (HTTP scope/isolation/exclusions/security).
+
 ### Local Files
 Click the "Open Folder" button to analyze code from your computer:
 - **Folder Analysis:** Select a folder to analyze all supported files recursively
@@ -390,8 +450,9 @@ falls back safely to Code.
 | Key | Action |
 |-----|--------|
 | `Enter` | Analyze repository |
+| `Ctrl+Shift+F` | Open project-wide Search and focus the field |
 | `+` / `-` | Zoom in/out |
-| `Escape` | Close modal |
+| `Escape` | Close modal / clear search |
 
 ---
 
