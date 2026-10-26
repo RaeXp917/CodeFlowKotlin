@@ -149,7 +149,7 @@ export async function resolveProject(projectsRoot, projectName) {
   return realFolder;
 }
 
-export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist = true, configPath = STATE_FILE, pickFolderFn = pickFolder } = {}) {
+export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist = true, configPath = STATE_FILE, pickFolderFn = pickFolder, searchProjectFn = searchProjectRoot } = {}) {
   const clients = new Set();
   const csrfToken = crypto.randomBytes(18).toString('hex');
   let config = { version: 2, roots: {} };
@@ -493,9 +493,14 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
         // exclusions are enforced, so excluded files never appear or are read.
         if (req.method !== 'GET') return plain(res, 405, 'Method not allowed');
         if (!currentProject || !currentRoot) return json(res, 409, { error: 'No project selected', code: 'no-project' });
-        if (!(await dirExists(currentRoot))) return json(res, 410, { error: 'Project folder is missing', code: 'project-missing' });
+        const root = currentRoot, pid = currentId, exclusions = currentExclusions, searchGeneration = generation;
+        const scopeChanged = () => root !== currentRoot || pid !== currentId || exclusions !== currentExclusions || searchGeneration !== generation;
+        if (!(await dirExists(root))) return json(res, scopeChanged() ? 409 : 410, scopeChanged()
+          ? { error: 'Active project changed', code: 'project-changed', pid: currentId }
+          : { error: 'Project folder is missing', code: 'project-missing' });
+        if (scopeChanged()) return json(res, 409, { error: 'Active project changed', code: 'project-changed', pid: currentId });
         const wantPid = url.searchParams.get('pid');
-        if (wantPid && wantPid !== currentId) return json(res, 409, { error: 'Active project changed', code: 'project-changed', pid: currentId });
+        if (wantPid && wantPid !== pid) return json(res, 409, { error: 'Active project changed', code: 'project-changed', pid: currentId });
         const query = url.searchParams.get('q') || '';
         const options = {
           query,
@@ -507,14 +512,17 @@ export function createProjectsServer({ projectsRoot, uiRoot = UI_ROOT, persist =
         };
         let aborted = false;
         req.on('close', () => { aborted = true; });
-        const outcome = await searchProjectRoot(currentRoot, Object.assign({}, options, {
-          isExcluded: makeExcludeMatcher(currentExclusions),
-          isAborted: () => aborted,
+        const outcome = await searchProjectFn(root, Object.assign({}, options, {
+          isExcluded: makeExcludeMatcher(exclusions),
+          isAborted: () => aborted || scopeChanged(),
           limits: SEARCH_LIMITS,
         }));
+        if (scopeChanged()) {
+          return json(res, 409, { error: 'Active project changed', code: 'project-changed', pid: currentId });
+        }
         if (outcome.error) return json(res, 400, { error: outcome.error, code: outcome.error });
         return json(res, 200, {
-          pid: currentId,
+          pid,
           query,
           options: { caseSensitive: options.caseSensitive, wholeWord: options.wholeWord, regex: options.regex, include: options.include, exclude: options.exclude },
           rev: url.searchParams.get('rev') || null,

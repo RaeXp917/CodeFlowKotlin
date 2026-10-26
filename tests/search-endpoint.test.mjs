@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createProjectsServer } from '../server/projects-server.mjs';
+import { searchProjectRoot } from '../server/project-search.mjs';
 
 function rawRequest(port, method, pathname, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -22,8 +23,8 @@ function rawRequest(port, method, pathname, headers = {}) {
   });
 }
 
-async function withServer(projectsRoot, fn) {
-  const app = createProjectsServer({ projectsRoot, persist: false });
+async function withServer(projectsRoot, fn, options = {}) {
+  const app = createProjectsServer({ projectsRoot, persist: false, ...options });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
   const port = app.server.address().port;
   const get = (p) => rawRequest(port, 'GET', p, { Host: '127.0.0.1:' + port });
@@ -78,9 +79,56 @@ test('a stale pid is rejected so Project A results never show for Project B', as
     const res = await get('/__codeflow/search?q=class&pid=' + encodeURIComponent(appPid));
     assert.equal(res.status, 409);
     assert.equal(res.json.code, 'project-changed');
-    assert.equal(res.json.pid, status.pid === res.json.pid ? res.json.pid : res.json.pid); // pid is the now-active one
+    assert.equal(res.json.pid, (await get('/__codeflow/status')).json.pid);
+    assert.notEqual(res.json.pid, appPid);
   });
   await fs.rm(root, { recursive: true, force: true });
+});
+
+test('an in-flight search cannot return old-project results after A → B → A', async () => {
+  const root = await makeRoot();
+  await fs.mkdir(path.join(root, 'other', 'src'), { recursive: true });
+  await fs.writeFile(path.join(root, 'other', 'src', 'Other.kt'), 'class Other');
+  let entered, release;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const gate = new Promise((resolve) => { release = resolve; });
+  try {
+    await withServer(root, async ({ app, get }) => {
+      await app.changeProject('app');
+      const pid = (await get('/__codeflow/status')).json.pid;
+      const pending = get('/__codeflow/search?q=ListViewModel&pid=' + encodeURIComponent(pid));
+      await started;
+      await app.changeProject('other');
+      await app.changeProject('app');
+      release();
+      const response = await pending;
+      assert.equal(response.status, 409);
+      assert.equal(response.json.code, 'project-changed');
+      const fresh = await get('/__codeflow/search?q=ListViewModel&pid=' + encodeURIComponent(pid));
+      assert.equal(fresh.status, 200);
+      assert.ok(fresh.json.results.some((r) => r.path === 'src/ListScreen.kt'));
+    }, { searchProjectFn: async (...args) => { entered(); await gate; return searchProjectRoot(...args); } });
+  } finally { release(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('an in-flight search cannot return results from before exclusion changes', async () => {
+  const root = await makeRoot();
+  let entered, release;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const gate = new Promise((resolve) => { release = resolve; });
+  try {
+    await withServer(root, async ({ app, get }) => {
+      await app.changeProject('app');
+      const pid = (await get('/__codeflow/status')).json.pid;
+      const pending = get('/__codeflow/search?q=ListViewModel&pid=' + encodeURIComponent(pid));
+      await started;
+      await app._registry.setExclusions(pid, ['generated']);
+      release();
+      const response = await pending;
+      assert.equal(response.status, 409);
+      assert.equal(response.json.code, 'project-changed');
+    }, { searchProjectFn: async (...args) => { entered(); await gate; return searchProjectRoot(...args); } });
+  } finally { release(); await fs.rm(root, { recursive: true, force: true }); }
 });
 
 test('excluded files are absent from search and never read', async () => {

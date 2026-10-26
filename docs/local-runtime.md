@@ -12,6 +12,8 @@ Browser requests use `/__codeflow/*` and checked-in assets on the same origin.
 Worker source comes from the local page. Lessons are bundled; documentation links
 open only on user interaction. Cached analysis belongs to a registered project and
 is usable only when that project is selected. Source reads require its active id.
+Search requests also retain the active project and exclusion generation; a switch
+or exclusion change during a scan returns a scope conflict instead of old results.
 
 Verification uses project/server/search tests, the full `npm test` suite and
 inline-script syntax checks. HTTP checks alone do not establish visual browser
@@ -56,17 +58,18 @@ The local endpoint is `/__codeflow/edit-source`:
 
 - GET requires `pid` and a project-relative `path`; returns UTF-8 text normalized
   to LF for the textarea, BOM/EOL metadata and an opaque SHA-256 version bound to
-  the current server/project generation.
+  the current server/project generation, path, file identity, timestamps and bytes.
 - POST requires exact HTTP same-origin, per-session CSRF, `projectId`, `path`,
   `version` and `content`. It validates payload and decoded/encoded byte limits,
   active canonical root, generation, source eligibility and exclusions. Absolute
   paths, traversal, Windows ADS syntax, links, hard links and inaccessible files
   are refused. UTF-8 text source across supported languages uses the same path;
   binary source containers, invalid Unicode and unsupported encodings are refused.
-- Existing bytes are compared to the opened version. Conflict (409) leaves disk
-  and the draft alone; there is no automatic force overwrite. Reload is explicit
-  and confirms before replacing a draft. Permission/read-only failures return 403,
-  unavailable files 404, oversized content 413 and unsupported text formats 422.
+- Existing bytes and file metadata are compared to the opened version. Conflict
+  (409) leaves disk and the draft alone; there is no automatic force overwrite.
+  Reload is explicit and confirms before replacing a draft. Permission/read-only
+  failures return 403, unavailable files 404, oversized content 413 and
+  unsupported text formats 422.
 - The source limit is 2 MiB, including BOM and re-encoded CRLF. The JSON transport
   limit is bounded at six times that limit plus 4 KiB for escaping/metadata; source
   content still cannot exceed 2 MiB. Oversized requests stop accumulating data and
