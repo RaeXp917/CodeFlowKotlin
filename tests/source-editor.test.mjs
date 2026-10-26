@@ -3,7 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 const {loadAnalyzer}=createRequire(import.meta.url)('./helpers/analyzer.cjs');
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, chmod, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, chmod, readdir, rename, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProjectsServer } from '../server/projects-server.mjs';
@@ -23,6 +23,7 @@ async function fixture(fn){
 }
 test('edit/save/re-read writes the actual Unicode/spaced source path and refreshes version',()=>fixture(async({root,load,save})=>{
  const opened=await (await load()).json(),text='class Screen {\n  val label = "Greek: α"\n}\n';const r=await save(opened,text);assert.equal(r.status,200);const saved=await r.json();assert.notEqual(saved.version,opened.version);assert.equal(saved.content,text);assert.equal(await readFile(join(root,'A/src/List Screen α.kt'),'utf8'),text);assert.equal(await readFile(join(root,'A/other/List Screen α.kt'),'utf8'),'class Other {}\n');assert.equal((await (await load()).json()).content,text);
+ const second=await save(saved,text+'// second save\n');assert.equal(second.status,200);assert.equal(await readFile(join(root,'A/src/List Screen α.kt'),'utf8'),text+'// second save\n');
 }));
 test('cancel is read-only and an external change produces conflict without overwriting',()=>fixture(async({root,load,save})=>{
  const f=join(root,'A/src/List Screen α.kt'),before=await readFile(f);const opened=await (await load()).json();assert.deepEqual(await readFile(f),before);
@@ -30,6 +31,25 @@ test('cancel is read-only and an external change produces conflict without overw
 }));
 test('same-named files and multiple editing sessions remain independent',()=>fixture(async({root,load,save})=>{
  const a=await (await load()).json(),b=await (await load('other/List Screen α.kt')).json();assert.equal((await save(b,'other edited\n')).status,200);assert.equal((await save(a,'screen edited\n')).status,200);assert.equal(await readFile(join(root,'A/other/List Screen α.kt'),'utf8'),'other edited\n');assert.equal(await readFile(join(root,'A/src/List Screen α.kt'),'utf8'),'screen edited\n');
+}));
+test('a revision belongs to one path and one file identity, even when bytes match',()=>fixture(async({root,load,save})=>{
+ const path='src/List Screen α.kt',other='other/List Screen α.kt',file=join(root,'A',path);
+ await writeFile(join(root,'A',other),'class Screen {}\n');
+ const opened=await (await load(path)).json();
+ assert.equal((await save({...opened,path:other},'wrong target\n')).status,409);
+ const replacement=join(root,'A/src/replacement.tmp');
+ await writeFile(replacement,'class Screen {}\n');
+ await rename(replacement,file);
+ const conflict=await save(opened,'draft after replacement\n');
+ assert.equal(conflict.status,409);
+ assert.equal((await conflict.json()).code,'conflict');
+ assert.equal(await readFile(file,'utf8'),'class Screen {}\n');
+}));
+test('an external metadata update with identical bytes invalidates the opened revision',()=>fixture(async({root,load,save})=>{
+ const file=join(root,'A/src/List Screen α.kt'),opened=await (await load()).json();
+ const changed=new Date(Date.now()-60_000);await utimes(file,changed,changed);
+ assert.equal((await save(opened,'draft\n')).status,409);
+ assert.equal(await readFile(file,'utf8'),'class Screen {}\n');
 }));
 test('project switching and reopening invalidate stale editor versions and cross-write IDs',()=>fixture(async({app,load,save,pid,base})=>{
  const opened=await (await load()).json();await app.changeProject('B');assert.equal((await save(opened,'wrong project')).status,409);assert.equal((await load('src/List Screen α.kt',pid)).status,409);
@@ -57,6 +77,18 @@ test('binary/invalid UTF-8, mixed endings and oversized source are unavailable',
  await writeFile(f,'x'.repeat(SOURCE_FILE_MAX_BYTES+1));assert.equal((await load()).status,413);
  assert.equal((await save({projectId:pid,path:'src/List Screen α.kt',version:'a'.repeat(64)},'x'.repeat(SOURCE_FILE_MAX_BYTES+1))).status,413);
 }));
+test('the exact 2 MiB source limit saves, while CRLF expansion beyond it is rejected',()=>fixture(async({root,load,save})=>{
+ const file=join(root,'A/src/List Screen α.kt');
+ await writeFile(file,'a'.repeat(SOURCE_FILE_MAX_BYTES));
+ const opened=await (await load()).json();
+ assert.equal(opened.content.length,SOURCE_FILE_MAX_BYTES);
+ assert.equal((await save(opened,'b'.repeat(SOURCE_FILE_MAX_BYTES))).status,200);
+ assert.equal((await readFile(file)).length,SOURCE_FILE_MAX_BYTES);
+ await writeFile(file,'x\r\n');
+ const crlf=await (await load()).json();
+ assert.equal((await save(crlf,'y\n'.repeat(SOURCE_FILE_MAX_BYTES/2))).status,413);
+ assert.equal(await readFile(file,'utf8'),'x\r\n');
+}));
 test('symlink/junction escape cannot be edited',()=>fixture(async({root,load})=>{
  const outside=join(root,'outside');await mkdir(outside);await writeFile(join(outside,'Escape.kt'),'outside');await symlink(outside,join(root,'A/escape'),process.platform==='win32'?'junction':'dir');assert.equal((await load('escape/Escape.kt')).status,404);
 }));
@@ -82,6 +114,17 @@ test('disk-write, fsync and replacement errors leave original bytes intact',asyn
 });
 test('external edit during temporary preparation is caught by the final comparison',async()=>{
  const root=await mkdtemp(join(tmpdir(),'cfk-editor-race-'));try{const file=join(root,'A.kt');await writeFile(file,'original');const scope={root,projectId:'A',generation:1,exclusions:[]},io=Object.create(fs),editor=createSourceEditor(()=>scope,{io}),opened=editor.read('A','A.kt');io.fsyncSync=fd=>{fs.fsyncSync(fd);fs.writeFileSync(file,'external change');};assert.throws(()=>editor.save({...opened,content:'draft'}),e=>e.status===409);assert.equal(await readFile(file,'utf8'),'external change');}finally{await rm(root,{recursive:true,force:true});}
+});
+test('same-byte file replacement during temporary preparation is a conflict',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'cfk-editor-identity-race-'));
+ try{
+  const file=join(root,'A.kt'),replacement=join(root,'replacement.tmp');await writeFile(file,'original');
+  const scope={root,projectId:'A',generation:1,exclusions:[]},io=Object.create(fs),editor=createSourceEditor(()=>scope,{io}),opened=editor.read('A','A.kt');
+  io.fsyncSync=fd=>{fs.fsyncSync(fd);fs.writeFileSync(replacement,'original');fs.renameSync(replacement,file);};
+  assert.throws(()=>editor.save({...opened,content:'draft'}),e=>e.status===409&&e.code==='conflict');
+  assert.equal(await readFile(file,'utf8'),'original');
+  assert.deepEqual(await readdir(root),['A.kt']);
+ }finally{await rm(root,{recursive:true,force:true});}
 });
 
 test('all supported UTF-8 source languages share the write path; removed targets never reappear',()=>fixture(async({root,pid,load,save})=>{
