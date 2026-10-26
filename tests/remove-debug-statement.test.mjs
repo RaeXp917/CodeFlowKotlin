@@ -83,6 +83,9 @@ async function applyPatch(files, patch) {
   const dir = await mkdtemp(join(tmpdir(), 'codeflow-patch-'));
   try {
     await execFileAsync('git', ['init'], { cwd: dir });
+    // Git for Windows may inherit core.autocrlf=true. Keep fixture bytes stable
+    // so these assertions test the patch rather than the user's Git settings.
+    await execFileAsync('git', ['config', 'core.autocrlf', 'false'], { cwd: dir });
     for (const file of files) {
       const full = join(dir, file.path);
       await mkdir(dirname(full), { recursive: true });
@@ -1376,6 +1379,7 @@ test('writes that replace console stay report-only', async () => {
 test('patch paths use git C quoting and still apply', async () => {
   const weird = 'src/a\nb\tc"d\u0001e\u0007f café.js';
   const spaced = 'src/my file.js';
+  const unicode = 'src/café file.js';
   const source = 'console.log(1);\nkeep();\n';
   const suggestions = Parser.collectRemoveDebugStatementSuggestions([
     { path: weird, content: source },
@@ -1396,15 +1400,19 @@ test('patch paths use git C quoting and still apply', async () => {
   assert.match(spacedPatch, /^--- a\/src\/my file\.js\n/m);
   assert.match(spacedPatch, /^\+\+\+ b\/src\/my file\.js\n/m);
 
-  const applied = await applyPatch(
-    [
-      { path: weird, content: source },
-      { path: spaced, content: source },
-    ],
-    suggestions.combinedPatch
-  );
-  assert.equal(applied[weird], 'keep();\n');
+  // Newline, tab, quote and control bytes cannot form a filename on Windows.
+  // Exercise the full git apply path with portable space and Unicode names.
+  const portable = Parser.collectRemoveDebugStatementSuggestions([
+    { path: spaced, content: source },
+    { path: unicode, content: source },
+  ]);
+  assert.match(portable.filePatches[unicode], /caf\\303\\251 file\.js/);
+  const applied = await applyPatch([
+    { path: spaced, content: source },
+    { path: unicode, content: source },
+  ], portable.combinedPatch);
   assert.equal(applied[spaced], 'keep();\n');
+  assert.equal(applied[unicode], 'keep();\n');
 });
 
 test('a few thousand debug statements stay linear to analyze', () => {

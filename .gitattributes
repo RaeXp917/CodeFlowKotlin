@@ -1,3 +1,5 @@
 vendor/** linguist-vendored whitespace=-trailing-space,-space-before-tab
+# Preserve pinned upstream JavaScript bundles byte-for-byte on Windows.
+vendor/**/*.js -text
 vendor/**/*.wasm binary
 vendor/**/*.woff2 binary
